@@ -25,7 +25,9 @@ from torchtitan.tools.utils import has_cuda_capability
 # FlexAttention mask type. For each mask type, we initialize it at most once per
 # batch. To record what it is initialized, FLEX_ATTN_MASK_T is used as the key to
 # track the initialized mask.
-FLEX_ATTN_MASK_T = tuple[str, int | None, int | None]  # (mask_type, fixed_block_size, sliding_window)
+FLEX_ATTN_MASK_T = tuple[
+    str, int | None, int | None
+]  # (mask_type, fixed_block_size, sliding_window)
 
 
 class FlexAttention(torch.nn.Module):
@@ -64,7 +66,10 @@ class FlexAttention(torch.nn.Module):
     attn_mask_type: str
 
     def __init__(
-        self, attn_mask_type: str, fixed_block_size: int | None = None, sliding_window: int | None = None
+        self,
+        attn_mask_type: str,
+        fixed_block_size: int | None = None,
+        sliding_window: int | None = None,
     ) -> None:
         super().__init__()
         if attn_mask_type not in ["causal", "block_causal", "sliding_window"]:
@@ -73,7 +78,6 @@ class FlexAttention(torch.nn.Module):
         self.fixed_block_size = fixed_block_size
         self.sliding_window = sliding_window
 
-        self.mask_cache = {}
         FlexAttention.used_attn_mask_types.add(self.mask_key)
 
     @property
@@ -87,57 +91,44 @@ class FlexAttention(torch.nn.Module):
         v: torch.Tensor,
         scale: float | None = None,
         sink_weights: torch.Tensor | None = None,
-        # sliding_window: int = 0,
-        enable_gqa: bool = False,
     ) -> torch.Tensor:
-        
+
         # Use sink logic when sliding_window is used and sink_weights is provided
         if self.attn_mask_type == "sliding_window" and sink_weights is not None:
-            return self._forward_with_sink(q, k, v, scale, sink_weights, enable_gqa)
-        
-        # Regular path without sink - use pre-compiled block masks
+            return self._forward_with_sink(q, k, v, scale, sink_weights)
+
+        # Regular path without sink
         block_mask = FlexAttention.block_masks[self.mask_key]
         return FlexAttention.flex_attn(q, k, v, block_mask=block_mask, scale=scale)
-    
+
     def _forward_with_sink(
         self,
         q: torch.Tensor,
-        k: torch.Tensor, 
+        k: torch.Tensor,
         v: torch.Tensor,
         scale: float | None = None,
         sink_weights: torch.Tensor | None = None,
-        enable_gqa: bool = False,
     ) -> torch.Tensor:
         """Forward pass with attention sink for sliding window attention."""
-        B, H_q, S_q, D = q.shape
-        _, H_kv, S_kv, _ = k.shape
-
-        if self.sliding_window is None or self.sliding_window <= 0:
-            raise RuntimeError("sliding_window must be configured for sliding_window attention type")
-        mask_key = ("sliding_window_sink", self.sliding_window, S_q, S_kv)
-        if mask_key not in self.mask_cache:
-            mask_mod = FlexAttention._get_sliding_window_mask_mod(self.sliding_window)
-            block_mask = create_block_mask(
-                mask_mod, B, H_q, S_q, S_kv,
-                _compile=True, device=q.device
-            )
-            self.mask_cache[mask_key] = block_mask
-        block_mask = self.mask_cache[mask_key]
+        # Use the pre-compiled static block mask
+        block_mask = FlexAttention.block_masks[self.mask_key]
 
         # Run flex_attn and return LSE for sink computation
         out, lse = FlexAttention.flex_attn(
-            q, k, v,
+            q,
+            k,
+            v,
             block_mask=block_mask,
-            enable_gqa=enable_gqa,
             return_lse=True,
-            scale=scale
+            scale=scale,
         )
 
         # Apply attention sink rescaling: rescale by σ(lse - w[h])
         # This is mathematically equivalent to concatenating learnable sink weights
         if sink_weights is not None:
-            w = sink_weights  # [H]
-            sink_scale = torch.sigmoid(lse - w.view(1, -1, 1)).unsqueeze(-1)  # [B,H,S,1]
+            sink_scale = torch.sigmoid(lse - sink_weights.view(1, -1, 1)).unsqueeze(
+                -1
+            )  # [B,H,S,1]
             out = out * sink_scale
 
         return out.to(q.dtype)
@@ -149,10 +140,12 @@ class FlexAttention(torch.nn.Module):
         - only allows kv_idx ≤ q_idx (causal)
         - and only if (q_idx - kv_idx) ≤ window
         """
+
         def sliding_mod(b, h, q_idx, kv_idx):
             # causal within window
             keep = (kv_idx <= q_idx) & (q_idx - kv_idx <= window)
             return keep
+
         return sliding_mod
 
     @staticmethod
@@ -248,7 +241,9 @@ class FlexAttention(torch.nn.Module):
                     # We don't care about batch dimension --
                     # all samples have the same sliding window mask.
                     batch_dimension = 1
-                    mask_mod = FlexAttention._get_sliding_window_mask_mod(sliding_window)
+                    mask_mod = FlexAttention._get_sliding_window_mask_mod(
+                        sliding_window
+                    )
                 case _:
                     raise RuntimeError(f"Shouldn't reach here. {attn_mask_type}")
 
@@ -303,7 +298,10 @@ class ScaledDotProductAttention(torch.nn.Module):
 
 
 def build_attention(
-    use_flex_attn: bool, attn_mask_type: str, fixed_block_size: int | None = None, sliding_window: int | None = None
+    use_flex_attn: bool,
+    attn_mask_type: str,
+    fixed_block_size: int | None = None,
+    sliding_window: int | None = None,
 ):
     if use_flex_attn:
         return FlexAttention(attn_mask_type, fixed_block_size, sliding_window)
