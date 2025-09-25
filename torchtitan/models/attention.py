@@ -69,20 +69,20 @@ class FlexAttention(torch.nn.Module):
         self,
         attn_mask_type: str,
         fixed_block_size: int | None = None,
-        sliding_window: int | None = None,
+        sliding_window_size: int | None = None,
     ) -> None:
         super().__init__()
         if attn_mask_type not in ["causal", "block_causal", "sliding_window"]:
             raise ValueError(f"Unrecognized attn_mask_type {attn_mask_type}.")
         self.attn_mask_type = attn_mask_type
         self.fixed_block_size = fixed_block_size
-        self.sliding_window = sliding_window
+        self.sliding_window_size = sliding_window_size
 
         FlexAttention.used_attn_mask_types.add(self.mask_key)
 
     @property
     def mask_key(self) -> FLEX_ATTN_MASK_T:
-        return (self.attn_mask_type, self.fixed_block_size, self.sliding_window)
+        return (self.attn_mask_type, self.fixed_block_size, self.sliding_window_size)
 
     def forward(
         self,
@@ -90,48 +90,13 @@ class FlexAttention(torch.nn.Module):
         k: torch.Tensor,
         v: torch.Tensor,
         scale: float | None = None,
-        sink_weights: torch.Tensor | None = None,
-    ) -> torch.Tensor:
-
-        # Use sink logic when sliding_window is used and sink_weights is provided
-        if self.attn_mask_type == "sliding_window" and sink_weights is not None:
-            return self._forward_with_sink(q, k, v, scale, sink_weights)
+        return_lse: bool = False,
+    ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
 
         # Regular path without sink
         block_mask = FlexAttention.block_masks[self.mask_key]
-        return FlexAttention.flex_attn(q, k, v, block_mask=block_mask, scale=scale)
+        return FlexAttention.flex_attn(q, k, v, block_mask=block_mask, return_lse=return_lse, scale=scale)
 
-    def _forward_with_sink(
-        self,
-        q: torch.Tensor,
-        k: torch.Tensor,
-        v: torch.Tensor,
-        scale: float | None = None,
-        sink_weights: torch.Tensor | None = None,
-    ) -> torch.Tensor:
-        """Forward pass with attention sink for sliding window attention."""
-        # Use the pre-compiled static block mask
-        block_mask = FlexAttention.block_masks[self.mask_key]
-
-        # Run flex_attn and return LSE for sink computation
-        out, lse = FlexAttention.flex_attn(
-            q,
-            k,
-            v,
-            block_mask=block_mask,
-            return_lse=True,
-            scale=scale,
-        )
-
-        # Apply attention sink rescaling: rescale by σ(lse - w[h])
-        # This is mathematically equivalent to concatenating learnable sink weights
-        if sink_weights is not None:
-            sink_scale = torch.sigmoid(lse - sink_weights.view(1, -1, 1)).unsqueeze(
-                -1
-            )  # [B,H,S,1]
-            out = out * sink_scale
-
-        return out.to(q.dtype)
 
     @staticmethod
     def _get_sliding_window_mask_mod(window: int):
