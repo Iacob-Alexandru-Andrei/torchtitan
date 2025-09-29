@@ -26,7 +26,10 @@ def build_cross_entropy_loss(job_config: JobConfig):
     loss_fn = cross_entropy_loss
     if job_config.compile.enable and "loss" in job_config.compile.components:
         logger.info("Compiling the loss function with torch.compile")
-        loss_fn = torch.compile(loss_fn)
+        if job_config.compile.backend is None:
+            loss_fn = torch.compile(loss_fn)
+        else:
+            loss_fn = torch.compile(loss_fn, backend=job_config.compile.backend)
     return loss_fn
 
 

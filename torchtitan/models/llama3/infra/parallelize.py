@@ -105,7 +105,7 @@ def parallelize_llama(
 
     # turn on per-TransformerBlock compile after AC wrapping and before FSDP
     if model_compile_enabled:
-        apply_compile(model)
+        apply_compile(model, job_config)
 
     if parallel_dims.fsdp_enabled:
         # apply FSDP or HSDP, potentially with Context Parallel
@@ -234,13 +234,18 @@ def apply_tp(
     )
 
 
-def apply_compile(model: nn.Module):
+def apply_compile(model: nn.Module, job_config: JobConfig):
     """
     Apply torch.compile to each TransformerBlock, which makes compilation efficient due to
     repeated structure. Alternatively one can compile the whole model (after applying DP).
     """
     for layer_id, transformer_block in model.layers.named_children():
-        transformer_block = torch.compile(transformer_block, fullgraph=True)
+        if job_config.compile.backend is None:
+            transformer_block = torch.compile(transformer_block, fullgraph=True)
+        else:
+            transformer_block = torch.compile(
+                transformer_block, backend=job_config.compile.backend, fullgraph=True
+            )
         model.layers.register_module(layer_id, transformer_block)
 
     logger.info("Compiling each TransformerBlock with torch.compile")

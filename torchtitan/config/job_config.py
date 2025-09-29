@@ -5,7 +5,7 @@
 # LICENSE file in the root directory of this source tree.
 
 from dataclasses import asdict, dataclass, field
-from typing import Any, Literal
+from typing import Any, Literal, Optional
 
 
 @dataclass
@@ -566,6 +566,7 @@ class Compile:
         default_factory=lambda: ["model", "loss"]
     )
     """Which components to compile"""
+    backend: Optional[str] = None
 
 
 @dataclass

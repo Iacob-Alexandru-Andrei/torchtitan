@@ -515,7 +515,14 @@ def apply_compile(model: nn.Module):
         fullgraph = True
         if transformer_block.moe_enabled:
             fullgraph = False
-        transformer_block = torch.compile(transformer_block, fullgraph=fullgraph)
+        if job_config.compile.backend is None:
+            transformer_block = torch.compile(transformer_block, fullgraph=fullgraph)
+        else:
+            transformer_block = torch.compile(
+                transformer_block,
+                backend=job_config.compile.backend,
+                fullgraph=fullgraph,
+            )
         model.layers.register_module(layer_id, transformer_block)
 
     logger.info("Compiling each TransformerBlock with torch.compile")
