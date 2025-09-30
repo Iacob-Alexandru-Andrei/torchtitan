@@ -21,6 +21,11 @@ from torch.optim import Optimizer
 from torchtitan.components.ft import FTManager, has_torchft
 from torchtitan.config import Optimizer as OptimizerConfig
 from torchtitan.distributed import ParallelDims
+from torchtitan.integrations.mosaic import (
+    HasGetParamGroups,
+    build_optimizer as build_mosaic_optimizer,
+)
+from torchtitan.tools.logging import logger
 
 __all__ = [
     "OptimizersContainer",
@@ -241,6 +246,32 @@ class FTOptimizersContainer(OptimizersContainer):
             super().zero_grad(*args, **kwargs)
 
 
+class LLMFoundryOptimizersContainer(OptimizersContainer):
+    def __init__(
+        self,
+        model_parts: list[nn.Module],
+        optimizer_name: str,
+        optimizer_kwargs: dict[str, Any],
+    ) -> None:
+        self.model_parts = model_parts
+        self.optimizers = []
+        all_params: list[nn.Parameter] = []
+
+        for model in self.model_parts:
+            optimizer = build_mosaic_optimizer(
+                model,
+                optimizer_name,
+                optimizer_kwargs.copy(),
+            )
+            self.optimizers.append(optimizer)
+            for param in model.parameters():
+                if param.requires_grad:
+                    all_params.append(param)
+
+        self._validate_length(len(self.model_parts))
+        self._post_init(all_params, optimizer_kwargs)
+
+
 def build_optimizers(
     model_parts: list[nn.Module],
     optimizer_config: OptimizerConfig,
@@ -301,6 +332,34 @@ def build_optimizers(
         "fused": fused,
         "foreach": foreach,
     }
+
+    use_llmfoundry = all(
+        isinstance(model, HasGetParamGroups) for model in model_parts
+    )
+    if optim_in_bwd or (ft_manager and ft_manager.enabled):
+        use_llmfoundry = False
+    if optimizer_config.implementation != "for-loop":
+        use_llmfoundry = False
+
+    if use_llmfoundry:
+        llmfoundry_kwargs = {
+            "lr": lr,
+            "betas": (beta1, beta2),
+            "eps": eps,
+            "weight_decay": weight_decay,
+        }
+        try:
+            logger.info("Using llm-foundry optimizer parameter groups")
+            return LLMFoundryOptimizersContainer(
+                model_parts=model_parts,
+                optimizer_name=name,
+                optimizer_kwargs=llmfoundry_kwargs,
+            )
+        except RuntimeError as exc:
+            logger.warning(
+                "Falling back to PyTorch optimizers because llm-foundry integration failed: %s",
+                exc,
+            )
 
     optimizer_classes = {
         "Adam": torch.optim.Adam,

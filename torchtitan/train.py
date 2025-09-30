@@ -24,6 +24,8 @@ from torchtitan.components.metrics import (
 )
 from torchtitan.config import ConfigManager, JobConfig, TORCH_DTYPE_MAP
 from torchtitan.distributed import ParallelDims, utils as dist_utils
+from torchtitan.integrations.mosaic import build_mosaic_dataloader
+from torchtitan.integrations.optimizer_monitor import OptimizerMonitor
 from torchtitan.models.attention import init_attention_mask
 from torchtitan.protocols.model_converter import build_model_converters
 from torchtitan.tools import utils
@@ -132,18 +134,28 @@ class Trainer(torch.distributed.checkpoint.stateful.Stateful):
         self.train_spec = train_spec_module.get_train_spec(job_config.model.name)
 
         # build tokenizer and dataloader
+        mosaic_cfg = getattr(job_config, "mosaic", None)
+
         self.tokenizer = (
             self.train_spec.build_tokenizer_fn(job_config)
             if self.train_spec.build_tokenizer_fn is not None
             else None
         )
 
-        self.dataloader = self.train_spec.build_dataloader_fn(
-            dp_world_size=dp_degree,
-            dp_rank=dp_rank,
-            tokenizer=self.tokenizer,
-            job_config=job_config,
-        )
+        if mosaic_cfg is not None and mosaic_cfg.enable:
+            self.dataloader = build_mosaic_dataloader(
+                dp_world_size=dp_degree,
+                dp_rank=dp_rank,
+                tokenizer=self.tokenizer,
+                job_config=job_config,
+            )
+        else:
+            self.dataloader = self.train_spec.build_dataloader_fn(
+                dp_world_size=dp_degree,
+                dp_rank=dp_rank,
+                tokenizer=self.tokenizer,
+                job_config=job_config,
+            )
 
         # build model (using meta init)
         model_args = self.train_spec.model_args[job_config.model.flavor]
@@ -174,6 +186,19 @@ class Trainer(torch.distributed.checkpoint.stateful.Stateful):
             job_config, parallel_dims, model_args
         )
         color = self.metrics_processor.color
+
+        self.optimizer_monitor: OptimizerMonitor | None = None
+        self._last_optimizer_metrics: dict[str, float] = {}
+        if (
+            mosaic_cfg is not None
+            and mosaic_cfg.optimizer_monitor_interval > 0
+        ):
+            self.optimizer_monitor = OptimizerMonitor(
+                interval=mosaic_cfg.optimizer_monitor_interval,
+                only_global=mosaic_cfg.optimizer_monitor_only_global,
+                log_optimizer_metrics=mosaic_cfg.optimizer_monitor_log_optimizer_metrics,
+                report_curvature=mosaic_cfg.optimizer_monitor_report_curvature,
+            )
 
         # calculate model size and flops per token
         (
@@ -509,6 +534,11 @@ class Trainer(torch.distributed.checkpoint.stateful.Stateful):
         self.optimizers.step()
         self.lr_schedulers.step()
 
+        if self.optimizer_monitor is not None:
+            self._last_optimizer_metrics = self.optimizer_monitor.after_step(
+                self.step, self.model_parts, self.optimizers
+            )
+
         # Reduce the data collected over gradient accumulation steps.
         loss = torch.sum(torch.stack(accumulated_losses))
 
@@ -538,6 +568,9 @@ class Trainer(torch.distributed.checkpoint.stateful.Stateful):
             "n_tokens_seen": global_ntokens_seen,
             "lr": lr,
         }
+        if self._last_optimizer_metrics:
+            extra_metrics.update(self._last_optimizer_metrics)
+            self._last_optimizer_metrics = {}
         self.metrics_processor.log(
             self.step,
             global_avg_loss,

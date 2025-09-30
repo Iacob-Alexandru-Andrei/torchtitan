@@ -241,6 +241,39 @@ class Training:
 
 
 @dataclass
+class Mosaic:
+    enable: bool = False
+    """Enable Mosaic streaming dataloaders."""
+
+    dataloader_config_path: str | None = None
+    """Optional path to a TOML file containing Mosaic dataloader settings."""
+
+    dataloader: dict[str, Any] = field(default_factory=dict)
+    """Inline Mosaic dataloader configuration overrides."""
+
+    tokenizer_name: str | None = None
+    """Optional HuggingFace tokenizer identifier to load via transformers."""
+
+    tokenizer_kwargs: dict[str, Any] = field(default_factory=dict)
+    """Additional keyword arguments passed to the tokenizer loader."""
+
+    device_batch_size: int | None = None
+    """Override the per-device batch size supplied to Mosaic dataloaders."""
+
+    optimizer_monitor_interval: int = 0
+    """Number of steps between optimizer metric logging; 0 disables monitoring."""
+
+    optimizer_monitor_only_global: bool = False
+    """Whether to emit only aggregated optimizer metrics."""
+
+    optimizer_monitor_log_optimizer_metrics: bool = True
+    """Whether to compute gradient and moment norms for each parameter."""
+
+    optimizer_monitor_report_curvature: bool = False
+    """Whether to collect curvature statistics alongside optimizer metrics."""
+
+
+@dataclass
 class Parallelism:
     data_parallel_replicate_degree: int = 1
     """
@@ -807,6 +840,7 @@ class JobConfig:
     optimizer: Optimizer = field(default_factory=Optimizer)
     lr_scheduler: LRScheduler = field(default_factory=LRScheduler)
     training: Training = field(default_factory=Training)
+    mosaic: Mosaic = field(default_factory=Mosaic)
     parallelism: Parallelism = field(default_factory=Parallelism)
     checkpoint: Checkpoint = field(default_factory=Checkpoint)
     activation_checkpoint: ActivationCheckpoint = field(

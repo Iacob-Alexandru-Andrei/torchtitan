@@ -1,0 +1,26 @@
+[job]
+description = "MPT muP debug training with Mosaic streaming"
+
+[model]
+name = "mpt_mup_mosaic"
+flavor = "debug"
+hf_assets_path = "tests/assets/tokenizer"
+
+[optimizer]
+lr = 5e-4
+beta1 = 0.9
+beta2 = 0.95
+weight_decay = 0.1
+implementation = "fused"
+
+[training]
+steps = 10
+local_batch_size = 2
+seq_len = 128
+seed = 17
+
+[metrics]
+log_freq = 1
+
+[checkpoint]
+enable = false
