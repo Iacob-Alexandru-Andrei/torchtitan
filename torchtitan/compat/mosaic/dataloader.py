@@ -8,10 +8,8 @@
 
 from __future__ import annotations
 
-from dataclasses import asdict
+from copy import deepcopy
 from typing import Any, Iterator
-
-from omegaconf import OmegaConf
 
 from torchtitan.components.dataloader import BaseDataLoader
 from torchtitan.components.tokenizer import BaseTokenizer
@@ -27,7 +25,13 @@ class DataSpecDataLoader(BaseDataLoader):
 
     @property
     def data_spec(self) -> Any:
-        """Return the wrapped :class:`DataSpec` instance."""
+        """
+        Returns:
+            Any: The wrapped Composer :class:`DataSpec` instance, which contains the underlying dataloader and related configuration.
+
+        Purpose:
+            Provides direct access to the underlying :class:`DataSpec` object for advanced usage or integration with Composer/MosaicML APIs.
+        """
         return self._data_spec
 
     def __iter__(self) -> Iterator[Any]:
@@ -55,14 +59,34 @@ class DataSpecDataLoader(BaseDataLoader):
 
 
 def _maybe_extract_hf_tokenizer(tokenizer: BaseTokenizer | Any | None) -> Any:
-    """Return a HuggingFace tokenizer if ``tokenizer`` wraps one."""
+    """
+    Attempt to extract a HuggingFace tokenizer from the provided tokenizer object.
+
+    Parameters
+    ----------
+    tokenizer : BaseTokenizer or Any or None
+        The tokenizer to inspect. May be a HuggingFace tokenizer, a wrapper around one,
+        or None.
+
+    Returns
+    -------
+    PreTrainedTokenizerBase or None
+        Returns the HuggingFace tokenizer instance if found, otherwise None.
+        If the input is None or does not wrap a HuggingFace tokenizer, returns None.
+
+    Notes
+    -----
+    This function attempts to lazily import HuggingFace's `PreTrainedTokenizerBase`
+    to avoid a hard dependency on `transformers`. If `transformers` is not installed,
+    always returns None.
+    """
     if tokenizer is None:
         return None
 
     try:  # Import lazily so TorchTitan does not hard depend on transformers.
-        from transformers import PreTrainedTokenizerBase
+        from transformers import PreTrainedTokenizerBase  # type: ignore
     except Exception:  # pragma: no cover - transformers may be absent
-        PreTrainedTokenizerBase = ()
+        PreTrainedTokenizerBase = ()  # type: ignore[assignment]
 
     if isinstance(tokenizer, PreTrainedTokenizerBase):
         return tokenizer
@@ -82,15 +106,17 @@ def build_mosaic_dataloader(
     job_config: JobConfig,
 ) -> DataSpecDataLoader:
     """Build a dataloader using MosaicML's ``build_dataloader`` helper."""
-    dataset_cfg = getattr(job_config, "dataset", None)
-    if dataset_cfg is None or not hasattr(dataset_cfg, "train"):
+
+    mosaic_cfg = getattr(job_config.training, "mosaic_dataloader", None)
+    if mosaic_cfg is None:
         raise ValueError(
-            "job_config.dataset.train must be set before constructing "
-            "the Trainer. Use a yaml config to provide the dataset configuration."
+            "job_config.training.mosaic_dataloader must be set before constructing "
+            "the Trainer. Use the Mosaic example CLI to attach the configuration "
+            "prior to instantiating TorchTitan's Trainer."
         )
 
     try:
-        from llmfoundry.data.dataloader import (
+        from llmfoundry.data.dataloader import (  # type: ignore[import]
             build_dataloader as mosaic_build_dataloader,
         )
     except ImportError as exc:  # pragma: no cover - optional dependency
@@ -99,17 +125,9 @@ def build_mosaic_dataloader(
             "llm-foundry and composer to enable this integration."
         ) from exc
 
-    # Convert OmegaConf to a standard python dict if it's a DictConfig
-    if hasattr(dataset_cfg.train, "_content"):
-        cfg = OmegaConf.to_container(dataset_cfg.train, resolve=True)
-    else:
-        cfg = asdict(dataset_cfg.train)
-
+    cfg = deepcopy(mosaic_cfg)
     cfg.setdefault("dp_world_size", dp_world_size)
     cfg.setdefault("dp_rank", dp_rank)
-
-    # Add the name for the mosaic streaming dataloader
-    cfg["name"] = "streaming"
 
     hf_tokenizer = _maybe_extract_hf_tokenizer(tokenizer)
     if hf_tokenizer is None and tokenizer is not None:
