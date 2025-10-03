@@ -1,0 +1,13 @@
+# This file defines the custom pre-commit hook for use in a repository.
+# It tells the pre-commit framework how to run the script.
+-   id: split-long-lines
+    name: Split lines over 4000 bytes
+    description: "This hook finds lines over 4000 bytes and splits them to be compatible with shell read commands."
+    entry: python precommit-hooks/split_long_lines.py
+    language: python
+    # Specify the file types this hook should apply to.
+    # For example, you might target large log files, data files, or specific text files.
+    # Adjust the 'types' list to match your project's needs.
+    types: [text, log]
+    # You can also use 'files' to match specific file names or patterns.
+    # files: \.log$

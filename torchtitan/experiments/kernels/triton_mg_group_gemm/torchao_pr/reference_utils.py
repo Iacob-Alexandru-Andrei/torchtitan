@@ -112,10 +112,10 @@ def analyze_tensor_differences(actual, expected, name):
         zeros_actual = (actual == 0).sum().item()
         zeros_expected = (expected == 0).sum().item()
         logging.info(
-            f"Zeros in {name} (actual): {zeros_actual}/{actual.numel()} ({zeros_actual/actual.numel()*100:.2f}%)"
+            f"Zeros in {name} (actual): {zeros_actual}/{actual.numel()} ({zeros_actual / actual.numel() * 100:.2f}%)"
         )
         logging.info(
-            f"Zeros in {name} (expected): {zeros_expected}/{expected.numel()} ({zeros_expected/expected.numel()*100:.2f}%)"
+            f"Zeros in {name} (expected): {zeros_expected}/{expected.numel()} ({zeros_expected / expected.numel() * 100:.2f}%)"
         )
 
         # Check for NaNs
