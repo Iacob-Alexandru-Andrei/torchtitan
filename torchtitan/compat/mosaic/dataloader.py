@@ -25,8 +25,13 @@ class DataSpecDataLoader(BaseDataLoader):
 
     @property
     def data_spec(self) -> Any:
-        """Return the wrapped :class:`DataSpec` instance."""
+        """
+        Returns:
+            Any: The wrapped Composer :class:`DataSpec` instance, which contains the underlying dataloader and related configuration.
 
+        Purpose:
+            Provides direct access to the underlying :class:`DataSpec` object for advanced usage or integration with Composer/MosaicML APIs.
+        """
         return self._data_spec
 
     def __iter__(self) -> Iterator[Any]:
