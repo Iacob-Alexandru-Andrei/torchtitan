@@ -94,7 +94,7 @@ def main(argv: Sequence[str] | None = None) -> None:
     try:
         trainer = Trainer(job_config)
         if job_config.checkpoint.create_seed_checkpoint:
-            if int(torch.distributed.get_world_size()) != 1:
+            if torch.distributed.get_world_size() != 1:
                 raise RuntimeError(
                     "Seed checkpoint creation must run with a single rank."
                 )
