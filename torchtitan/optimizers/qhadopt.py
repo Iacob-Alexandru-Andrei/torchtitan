@@ -99,7 +99,7 @@ class QHADOPT(Optimizer):
         if fused:
             if differentiable:
                 msg = "`fused` does not support `differentiable`"
-                raise RuntimeError
+                raise RuntimeError(msg)
             self._step_supports_amp_scaling = True
             if foreach:
                 msg = "`fused` and `foreach` cannot be `True` together."
