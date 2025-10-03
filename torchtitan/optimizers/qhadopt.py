@@ -312,7 +312,7 @@ def _single_tensor_qhadopt(
             continue
 
         if weight_decay != 0 and decouple:
-            decay_factor = (lr / initial_lr) if initial_lr else 1.0
+            decay_factor = (lr / initial_lr) if initial_lr != 0 else 1.0
             param.mul_(1 - decay_factor * weight_decay)
 
         denom = torch.clamp(exp_avg_sq.sqrt(), eps)
