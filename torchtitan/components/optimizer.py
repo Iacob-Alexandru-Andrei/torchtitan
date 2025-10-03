@@ -21,6 +21,9 @@ from torch.optim import Optimizer
 from torchtitan.components.ft import FTManager, has_torchft
 from torchtitan.config import Optimizer as OptimizerConfig
 from torchtitan.distributed import ParallelDims
+from torchtitan.optimizers.adopt import ADOPT
+from torchtitan.optimizers.qhadopt import QHADOPT
+from torchtitan.optimizers.qhadamw import QHAdamW
 
 __all__ = [
     "OptimizersContainer",
@@ -318,10 +321,18 @@ def build_optimizers(
     optimizer_classes = {
         "Adam": torch.optim.Adam,
         "AdamW": torch.optim.AdamW,
+        "ADOPT": ADOPT,
+        "QHADOPT": QHADOPT,
+        "QHAdamW": QHAdamW,
     }
     if name not in optimizer_classes:
         raise NotImplementedError(f"Optimizer {name} not added.")
     optimizer_cls = optimizer_classes[name]
+
+    if name in ["QHADOPT", "QHAdamW"]:
+        optimizer_kwargs["v1"] = optimizer_config.v1
+    if name in ["ADOPT", "QHADOPT"]:
+        optimizer_kwargs["clip_lambda"] = None
 
     if optim_in_bwd:
         return OptimizersInBackwardContainer(

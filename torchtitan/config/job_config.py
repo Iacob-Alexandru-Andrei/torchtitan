@@ -119,6 +119,9 @@ class Optimizer:
     weight_decay: float = 0.1
     """Weight decay to use"""
 
+    v1: float = 0.0
+    """v1 hyperparameter for quasi-hyperbolic optimizers"""
+
     implementation: Literal["for-loop", "foreach", "fused"] = "fused"
     """
     Specify which optimizer implementation to use:
