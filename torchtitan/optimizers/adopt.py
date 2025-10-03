@@ -143,7 +143,7 @@ class ADOPT(Optimizer):
             params_with_grad.append(p)
             if p.grad.is_sparse:
                 msg = "ADOPT does not support sparse gradients"
-                raise RuntimeError(msg)
+                raise RuntimeError
             grads.append(p.grad)
 
             state = self.state[p]
