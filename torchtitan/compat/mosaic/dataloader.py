@@ -59,8 +59,27 @@ class DataSpecDataLoader(BaseDataLoader):
 
 
 def _maybe_extract_hf_tokenizer(tokenizer: BaseTokenizer | Any | None) -> Any:
-    """Return a HuggingFace tokenizer if ``tokenizer`` wraps one."""
+    """
+    Attempt to extract a HuggingFace tokenizer from the provided tokenizer object.
 
+    Parameters
+    ----------
+    tokenizer : BaseTokenizer or Any or None
+        The tokenizer to inspect. May be a HuggingFace tokenizer, a wrapper around one,
+        or None.
+
+    Returns
+    -------
+    PreTrainedTokenizerBase or None
+        Returns the HuggingFace tokenizer instance if found, otherwise None.
+        If the input is None or does not wrap a HuggingFace tokenizer, returns None.
+
+    Notes
+    -----
+    This function attempts to lazily import HuggingFace's `PreTrainedTokenizerBase`
+    to avoid a hard dependency on `transformers`. If `transformers` is not installed,
+    always returns None.
+    """
     if tokenizer is None:
         return None
 
