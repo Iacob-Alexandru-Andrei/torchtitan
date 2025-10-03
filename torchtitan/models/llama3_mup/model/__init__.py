@@ -4,4 +4,7 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 
-_supported_models = frozenset(["llama3", "llama3_ft", "deepseek_v3", "llama3_mup"])
+from .mup_model import Transformer
+from .mup_args import TransformerModelArgs
+
+__all__ = ["Transformer", "TransformerModelArgs"]

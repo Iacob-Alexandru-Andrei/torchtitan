@@ -70,14 +70,23 @@ class OptimizersContainer(Optimizer, Stateful, Generic[T]):
         model_parts: list[nn.Module],
         optimizer_cls: type[T],
         optimizer_kwargs: dict[str, Any],
+        param_groups: list[dict[str, Any]] | None = None,
     ) -> None:
         all_params = []
         self.optimizers = []
         self.model_parts = model_parts
-        for model in self.model_parts:
-            params = [p for p in model.parameters() if p.requires_grad]
-            self.optimizers.append(optimizer_cls(params, **optimizer_kwargs))
-            all_params.extend(params)
+        if param_groups:
+            assert (
+                len(model_parts) == 1
+            ), "Custom param groups are only supported for a single model part."
+            self.optimizers.append(optimizer_cls(param_groups, **optimizer_kwargs))
+            for group in param_groups:
+                all_params.extend(group["params"])
+        else:
+            for model in self.model_parts:
+                params = [p for p in model.parameters() if p.requires_grad]
+                self.optimizers.append(optimizer_cls(params, **optimizer_kwargs))
+                all_params.extend(params)
         self._validate_length(len(self.model_parts))
         self._post_init(all_params, optimizer_kwargs)
 
@@ -184,8 +193,11 @@ class FTOptimizersContainer(OptimizersContainer):
         optimizer_kwargs: dict[str, Any],
         ft_manager: "ft.Manager",
         use_ft_optimizer: bool = True,
+        param_groups: list[dict[str, Any]] | None = None,
     ) -> None:
-        super().__init__(model_parts, optimizer_cls, optimizer_kwargs)
+        super().__init__(
+            model_parts, optimizer_cls, optimizer_kwargs, param_groups=param_groups
+        )
 
         # Force to initialize the optimizer state so that `optim.step()`
         # won't be called by state_dict() and load_state_dict().
@@ -246,6 +258,7 @@ def build_optimizers(
     optimizer_config: OptimizerConfig,
     parallel_dims: ParallelDims,
     ft_manager: FTManager | None = None,
+    param_groups: list[dict[str, Any]] | None = None,
 ) -> OptimizersContainer:
     """Create a OptimizersContainer for the given model parts and job config.
 
@@ -322,9 +335,12 @@ def build_optimizers(
             optimizer_kwargs,
             ft_manager.manager,
             use_ft_optimizer=ft_manager.use_async_quorum,
+            param_groups=param_groups,
         )
 
-    return OptimizersContainer(model_parts, optimizer_cls, optimizer_kwargs)
+    return OptimizersContainer(
+        model_parts, optimizer_cls, optimizer_kwargs, param_groups=param_groups
+    )
 
 
 def build_optimizers_with_moe_load_balancing(
