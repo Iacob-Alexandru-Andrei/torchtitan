@@ -55,7 +55,7 @@ def _maybe_extract_hf_tokenizer(tokenizer: BaseTokenizer | Any | None) -> Any:
 
     try:  # Import lazily so TorchTitan does not hard depend on transformers.
         from transformers import PreTrainedTokenizerBase  # type: ignore
-    except Exception:  # pragma: no cover - transformers may be absent
+    except ImportError:  # pragma: no cover - transformers may be absent
         PreTrainedTokenizerBase = ()  # type: ignore[assignment]
 
     if isinstance(tokenizer, PreTrainedTokenizerBase):
