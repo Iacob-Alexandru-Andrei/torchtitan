@@ -1,0 +1,66 @@
+job:
+  description: "Llama 3 debug training with Mosaic streaming"
+
+  model:
+    name: "llama3_mosaic"
+    flavor: "debugmodel"
+    hf_assets_path: "tests/assets/tokenizer"
+
+  optimizer:
+    lr: 8e-4
+    beta1: 0.9
+    beta2: 0.95
+    weight_decay: 0.1
+    implementation: "fused"
+
+  training:
+    steps: 10
+    local_batch_size: 2
+    seq_len: 128
+    seed: 17
+    mosaic_dataloader:
+      name: streaming
+      remote: "s3://smollm-corpus/shared"
+      local: "smollm-corpus/shared"
+      split: "train"
+      shuffle: true
+      max_seq_len: 128 # should match training.seq_len
+      streams:
+        stream_0:
+          local: fineweb_edu_dedup/client_0
+          proportion: 70
+          remote: fineweb_edu_dedup/client_0
+        stream_1:
+          local: fineweb_edu_dedup/client_1
+          proportion: 70
+          remote: fineweb_edu_dedup/client_1
+        stream_2:
+          local: fineweb_edu_dedup/client_2
+          proportion: 70
+          remote: fineweb_edu_dedup/client_2
+        stream_3:
+          local: fineweb_edu_dedup/client_3
+          proportion: 70
+          remote: fineweb_edu_dedup/client_3
+        stream_4:
+          local: fineweb_edu_dedup/client_4
+          proportion: 70
+          remote: fineweb_edu_dedup/client_4
+        stream_5:
+          local: fineweb_edu_dedup/client_5
+          proportion: 70
+          remote: fineweb_edu_dedup/client_5
+        stream_6:
+          local: fineweb_edu_dedup/client_6
+          proportion: 70
+          remote: fineweb_edu_dedup/client_6
+        stream_7:
+          local: fineweb_edu_dedup/client_7
+          proportion: 70
+          remote: fineweb_edu_dedup/client_7
+
+  metrics:
+    log_freq: 1
+
+  checkpoint:
+    enable: false
