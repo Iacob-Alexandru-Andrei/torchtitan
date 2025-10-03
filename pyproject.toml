@@ -17,7 +17,6 @@ dependencies = [
     # Tokenization
     "tokenizers>=0.15.0",
     # Miscellaneous
-    "tomli>=1.1.0",
     "fsspec",
     "tyro",
     "tensorboard",

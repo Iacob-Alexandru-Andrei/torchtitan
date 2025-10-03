@@ -13,7 +13,7 @@ TrainSpec and use a YAML file to configure the training job.
 from __future__ import annotations
 
 import argparse
-from typing import Any, Dict, List, Sequence
+from typing import Any, Sequence
 
 import torch
 import yaml

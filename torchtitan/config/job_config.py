@@ -242,6 +242,10 @@ class Training:
     mosaic_dataloader: dict[str, Any] = field(default_factory=dict)
     """Mosaic dataloader configuration, including streams."""
 
+    mosaic_dataloader: dict[str, Any] = field(default_factory=dict)
+    """Mosaic dataloader configuration."""
+
+
 @dataclass
 class Parallelism:
     data_parallel_replicate_degree: int = 1
