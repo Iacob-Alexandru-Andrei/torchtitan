@@ -147,7 +147,7 @@ class QHADOPT(Optimizer):
             params_with_grad.append(p)
             if p.grad.is_sparse:
                 msg = "QHADOPT does not support sparse gradients"
-                raise RuntimeError
+                raise RuntimeError(msg)
             grads.append(p.grad)
 
             state = self.state[p]
