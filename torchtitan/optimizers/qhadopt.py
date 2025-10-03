@@ -103,7 +103,7 @@ class QHADOPT(Optimizer):
             self._step_supports_amp_scaling = True
             if foreach:
                 msg = "`fused` and `foreach` cannot be `True` together."
-                raise RuntimeError
+                raise RuntimeError(msg)
             msg = "`fused` is not currently supported"
             raise RuntimeError(msg)
 
