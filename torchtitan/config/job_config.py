@@ -169,6 +169,15 @@ class LRScheduler:
 
 
 @dataclass
+class Mosaic:
+    mosaic_dataloader: dict[str, Any] = field(default_factory=dict)
+    """Mosaic dataloader configuration, including streams."""
+
+    mosaic_tokenizer: dict[str, Any] = field(default_factory=dict)
+    """Mosaic tokenizer configuration, including model name and tokenizer options."""
+
+
+@dataclass
 class Training:
     dataset: str = "c4_test"
     """Dataset to use"""
@@ -239,11 +248,8 @@ class Training:
     deterministic: bool = False
     """Use deterministic algorithms wherever possible, may be slower"""
 
-    mosaic_dataloader: dict[str, Any] = field(default_factory=dict)
-    """Mosaic dataloader configuration, including streams."""
-
-    mosaic_dataloader: dict[str, Any] = field(default_factory=dict)
-    """Mosaic dataloader configuration."""
+    mosaic: Mosaic = field(default_factory=Mosaic)
+    """Mosaic specific configuration"""
 
 
 @dataclass

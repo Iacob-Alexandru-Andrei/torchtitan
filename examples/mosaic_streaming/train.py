@@ -25,8 +25,8 @@ from torchtitan.train import Trainer
 
 
 def _flatten_yaml_cfg(
-    d: Dict[str, Any], parent_key: str = "", sep: str = "."
-) -> List[str]:
+    d: dict[str, Any], parent_key: str = "", sep: str = "."
+) -> list[str]:
     """Flattens a nested dictionary into a list of command-line arguments."""
     items = []
     for k, v in d.items():
