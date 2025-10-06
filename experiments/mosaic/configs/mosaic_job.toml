@@ -1,6 +1,6 @@
 [job]
 dump_folder = "./outputs"
-description = "Llama 3 debug training"
+description = "Llama 3 debug training with Mosaic streaming"
 print_args = false
 
 [profiling]
@@ -18,11 +18,11 @@ save_tb_folder = "tb"
 enable_wandb = false
 
 [model]
-name = "llama3_mosaic_streaming"
+# Use the base model's TrainSpec. The Mosaic dataloader will be applied dynamically.
+name = "llama3"
 flavor = "debugmodel"
 # test folder with tokenizer.json, for debug purpose only
 hf_assets_path = "./tests/assets/tokenizer"
-# converters = ["float8"]
 
 [optimizer]
 name = "AdamW"
@@ -30,23 +30,24 @@ lr = 8e-4
 eps = 1e-8
 
 [lr_scheduler]
-warmup_steps = 2  # lr scheduler warm up, normally 20% of the train steps
-decay_ratio = 0.8  # lr scheduler decay ratio, 80% of the train steps
+warmup_steps = 2
+decay_ratio = 0.8
 decay_type = "linear"
 min_lr_factor = 0.0
 
 [training]
 local_batch_size = 8
 seq_len = 2048
-max_norm = 1.0  # grad norm clipping
+max_norm = 1.0
 steps = 10
-dataset = "c4_test"  # supported datasets: c4_test (2K), c4 (177M)
+dataset = "c4_test"
 
-[training.mosaic.mosaic_dataloader]
+# Mosaic-specific configurations are now at the root level
+[mosaic_dataloader]
 name = "text"
 drop_last = true
 
-[training.mosaic.mosaic_dataloader.dataset]
+[mosaic_dataloader.dataset]
 max_seq_len = 128
 download_retry = 2
 download_timeout = 60
@@ -59,22 +60,22 @@ sampling_method = "balanced"
 sampling_granularity = 1
 batching_method = "random"
 
-[training.mosaic.mosaic_dataloader.dataset.streams]
-  [training.mosaic.mosaic_dataloader.dataset.streams.stream_0]
+[mosaic_dataloader.dataset.streams]
+  [mosaic_dataloader.dataset.streams.stream_0]
   local = "/nfs-share/datasets/photon/dataset_cache/smollm-corpus-shared-val/fineweb_edu_dedup/client_0/train"
   proportion = 70
   remote = "s3://smollm-corpus/shared/fineweb_edu_dedup/client_0/train"
 
-[training.mosaic.mosaic_tokenizer]
+[mosaic_tokenizer]
 name = "HuggingFaceTB/SmolLM-1.7B"
 
-[training.mosaic.mosaic_tokenizer.kwargs]
+[mosaic_tokenizer.kwargs]
 model_max_length = 2048
 
 [parallelism]
 data_parallel_replicate_degree = 1
 data_parallel_shard_degree = -1
-fsdp_reshard_after_forward = "default" # default / never / always
+fsdp_reshard_after_forward = "default"
 tensor_parallel_degree = 1
 enable_async_tensor_parallel = false
 pipeline_parallel_degree = 1
@@ -86,14 +87,14 @@ folder = "checkpoint"
 interval = 10
 last_save_model_only = false
 export_dtype = "float32"
-async_mode = "disabled"  # ["disabled", "async", "async_with_pinned_mem"]
+async_mode = "disabled"
 
 [activation_checkpoint]
-mode = "selective"  # ["none", "selective", "full"]
-selective_ac_option = '2'  # 'int' = ac every positive int layer or 'op', ac based on ops policy
+mode = "selective"
+selective_ac_option = "2"
 
 [compile]
-enable=false
+enable = false
 components = ["model", "loss"]
 
 [quantize.dense.float8]
