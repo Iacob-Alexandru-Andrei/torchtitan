@@ -291,7 +291,7 @@ def _single_tensor_adopt(
         step = step_t if capturable or differentiable else _get_value(step_t)
 
         if weight_decay != 0 and not decouple:
-            decay_factor = (lr / initial_lr) if initial_lr else 1.0
+            decay_factor = (lr / initial_lr) if initial_lr != 0 else 1.0
             grad = grad.add(param, alpha=weight_decay)
 
         if torch.is_complex(param):
