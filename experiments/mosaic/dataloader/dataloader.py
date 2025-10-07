@@ -249,7 +249,7 @@ def build_mosaic_dataloader(
     text_dataset = StatefulStreamingTextDataset(
         tokenizer=hf_tokenizer,
         streams=streams,
-        batch__size=job_config.training.local_batch_size,
+        batch_size=job_config.training.local_batch_size,
         **dataset_config_filtered,
     )
 
