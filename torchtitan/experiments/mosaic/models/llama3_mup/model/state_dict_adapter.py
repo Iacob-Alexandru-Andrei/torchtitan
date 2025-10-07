@@ -4,63 +4,68 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 
-import re
-from typing import Any
 
-from torchtitan.config import JobConfig
+from torchtitan.models.llama3.model.state_dict_adapter import Llama3StateDictAdapter
 from .mup_args import TransformerModelArgs
-from torchtitan.protocols import StateDictAdapter
-
-# to be used with the checkpoint converter
-pattern_mapping = {
-    r"tok_embeddings.weight": "tok_embeddings.weight",
-    r"tok_embeddings.norm.weight": "tok_embeddings.norm.weight",
-    r"layers\.(\d+)\.attention\.wq\.weight": "layers.{}.attention.wq.weight",
-    r"layers\.(\d+)\.attention\.wk\.weight": "layers.{}.attention.wk.weight",
-    r"layers\.(\d+)\.attention\.wv\.weight": "layers.{}.attention.wv.weight",
-    r"layers\.(\d+)\.attention\.wo\.weight": "layers.{}.attention.wo.weight",
-    r"layers\.(\d+)\.feed_forward\.w1\.weight": "layers.{}.feed_forward.w1.weight",
-    r"layers\.(\d+)\.feed_forward\.w2\.weight": "layers.{}.feed_forward.w2.weight",
-    r"layers\.(\d+)\.feed_forward\.w3\.weight": "layers.{}.feed_forward.w3.weight",
-    r"layers\.(\d+)\.attention_norm\.weight": "layers.{}.attention_norm.weight",
-    r"layers\.(\d+)\.ffn_norm\.weight": "layers.{}.ffn_norm.weight",
-    r"layers\.(\d+)\.post_attn_norm\.weight": "layers.{}.post_attn_norm.weight",
-    r"layers\.(\d+)\.post_ffn_norm\.weight": "layers.{}.post_ffn_norm.weight",
-    r"norm\.weight": "norm.weight",
-    r"output\.weight": "output.weight",
-}
 
 
-class Llama3MuPStateDictAdapter(StateDictAdapter):
+class Llama3MuPStateDictAdapter(Llama3StateDictAdapter):
+    """
+    State dict adapter for Llama3 MuP model.
+
+    Inherits from the standard Llama3StateDictAdapter and extends the mapping
+    to handle MuP-specific features:
+
+    1. embedding_norm: Optional RMSNorm layer applied to embeddings
+    2. post_attn_norm/post_ffn_norm: Peri-normalization layers (standard in μP)
+    3. output.weight: Optional - not present when tie_word_embeddings=True
+
+    Weight Tying Compatibility:
+    ---------------------------
+    When tie_word_embeddings=True:
+        - TorchTitan state_dict contains: tok_embeddings.weight (no output.weight)
+        - HuggingFace format uses: model.embed_tokens.weight (no lm_head.weight)
+        - The base adapter already handles this correctly via from_hf_map
+
+    When tie_word_embeddings=False:
+        - TorchTitan state_dict contains: tok_embeddings.weight AND output.weight
+        - HuggingFace format has: model.embed_tokens.weight AND lm_head.weight
+        - Both weights are converted using the standard mapping
+
+    Why This Works:
+    ---------------
+    The base Llama3StateDictAdapter iterates through keys in the state_dict
+    and converts them. If output.weight doesn't exist (weight tying case),
+    it simply won't be in the state_dict and won't be converted. This is
+    correct behavior - no special handling needed.
+
+    MuP Extensions:
+    ---------------
+    We extend from_hf_map to add mappings for:
+    - embedding_norm.weight (applied to embeddings after lookup)
+    - post_attn_norm.weight (peri-normalization after attention)
+    - post_ffn_norm.weight (peri-normalization after FFN)
+
+    These are ignored during HF->TorchTitan conversion (mapped to None)
+    since they don't exist in standard HuggingFace Llama3 checkpoints.
+    """
+
     def __init__(
         self,
         model_args: TransformerModelArgs,
-        job_config: JobConfig,
+        hf_assets_path: str | None,
     ):
-        super().__init__(model_args, job_config)
+        # Initialize base adapter with standard Llama3 mappings
+        super().__init__(model_args, hf_assets_path)
 
-    def to_hf(self, state_dict: dict[str, Any]) -> dict[str, Any]:
-        hf_state_dict = {}
-        for titan_fqn, tensor in state_dict.items():
-            for hf_pattern, hf_fqn_template in pattern_mapping.items():
-                m = re.fullmatch(hf_pattern, titan_fqn)
-                if m:
-                    if m.re.groups > 0:
-                        hf_state_dict[hf_fqn_template.format(m.group(1))] = tensor
-                    else:
-                        hf_state_dict[hf_fqn_template] = tensor
-                    break
-        return hf_state_dict
-
-    def from_hf(self, hf_state_dict: dict[str, Any]) -> dict[str, Any]:
-        titan_state_dict = {}
-        for hf_fqn, tensor in hf_state_dict.items():
-            for titan_pattern, titan_fqn_template in pattern_mapping.items():
-                m = re.fullmatch(titan_pattern, hf_fqn)
-                if m:
-                    if m.re.groups > 0:
-                        titan_state_dict[titan_fqn_template.format(m.group(1))] = tensor
-                    else:
-                        titan_state_dict[titan_fqn_template] = tensor
-                    break
-        return titan_state_dict
+        # Extend the mapping with MuP-specific layers
+        # These are TorchTitan-only features, so we map them to None for HF conversion
+        self.from_hf_map.update(
+            {
+                # MuP extension: optional embedding normalization
+                "embedding_norm.weight": None,  # Not in HF format
+                # MuP extension: peri-normalization (per-layer)
+                "model.layers.{}.post_attn_norm.weight": None,  # Not in HF format
+                "model.layers.{}.post_ffn_norm.weight": None,  # Not in HF format
+            }
+        )

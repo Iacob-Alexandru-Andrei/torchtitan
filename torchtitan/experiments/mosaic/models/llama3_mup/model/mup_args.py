@@ -41,6 +41,7 @@ class TransformerModelArgs(BaseTransformerModelArgs):
     # muP / CompleteP
     use_embedding_norm: bool = False
     use_peri_norm: bool = False
+    tie_word_embeddings: bool = False
     mup_config: dict[str, Any] = field(default_factory=dict)
     init_config: dict[str, Any] = field(default_factory=dict)
 

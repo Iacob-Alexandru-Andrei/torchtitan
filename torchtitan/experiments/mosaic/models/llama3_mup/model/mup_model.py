@@ -7,7 +7,10 @@
 # Copyright (c) Meta Platforms, Inc. All Rights Reserved.
 
 
+from typing import cast
+
 import torch
+import torch.nn.functional as F
 from torch import nn
 
 # Import reusable components from the base llama3 model
@@ -20,30 +23,6 @@ from torchtitan.models.llama3.model.model import (
 from torchtitan.protocols.train_spec import ModelProtocol
 
 from .mup_args import TransformerModelArgs
-
-
-class MuPSharedEmbedding(nn.Embedding):
-    """SharedEmbedding that scales its forward output for muP."""
-
-    def __init__(
-        self,
-        vocab_size: int,
-        d_model: int,
-        scale: float = 1.0,
-        use_embedding_norm: bool = False,
-        norm_eps: float = 1e-5,
-        **kwargs,
-    ):
-        super().__init__(vocab_size, d_model, **kwargs)
-        self.scale = scale
-        self.norm = nn.RMSNorm(d_model, eps=norm_eps) if use_embedding_norm else None
-
-    def forward(self, input: torch.Tensor) -> torch.Tensor:
-        out = super().forward(input)
-        if self.norm:
-            out = self.norm(out)
-        out = out * self.scale
-        return out
 
 
 class Attention(BaseAttention):
@@ -143,22 +122,29 @@ class Transformer(nn.Module, ModelProtocol):
         self.mup_config = model_args.mup_config_obj
         self.init_config = model_args.init_config_obj
 
-        if self.mup_config.mup_enabled:
-            self.tok_embeddings = MuPSharedEmbedding(
-                model_args.vocab_size,
-                model_args.dim,
-                scale=self.mup_config.mup_input_alpha,
-                use_embedding_norm=model_args.use_embedding_norm,
-                norm_eps=model_args.norm_eps,
-            )
-        else:
-            self.tok_embeddings = nn.Embedding(model_args.vocab_size, model_args.dim)
+        self.tok_embeddings = nn.Embedding(model_args.vocab_size, model_args.dim)
+
+        # Embedding normalization and scaling
+        self.embedding_norm = (
+            nn.RMSNorm(model_args.dim, eps=model_args.norm_eps)
+            if model_args.use_embedding_norm
+            else None
+        )
+        self.embedding_scale = (
+            self.mup_config.mup_input_alpha if self.mup_config.mup_enabled else 1.0
+        )
 
         self.layers = torch.nn.ModuleDict()
         for layer_id in range(model_args.n_layers):
             self.layers[str(layer_id)] = TransformerBlock(layer_id, model_args)
         self.norm = nn.RMSNorm(model_args.dim, eps=model_args.norm_eps)
-        self.output = nn.Linear(model_args.dim, model_args.vocab_size, bias=False)
+
+        # Only create output layer if not tying weights
+        # When tying, we'll use F.linear with tok_embeddings.weight directly
+        if not model_args.tie_word_embeddings:
+            self.output = nn.Linear(model_args.dim, model_args.vocab_size, bias=False)
+        else:
+            self.output = None
 
         self.register_buffer(
             "freqs_cis", self._precompute_freqs_cis(), persistent=False
@@ -172,21 +158,24 @@ class Transformer(nn.Module, ModelProtocol):
         init_std = self.init_config.init_std
         emb_init_std = self.init_config.emb_init_std or init_std
 
-        if self.mup_config.mup_enabled:
-            nn.init.normal_(self.tok_embeddings.weight, mean=0.0, std=emb_init_std)
-        else:
-            nn.init.normal_(self.tok_embeddings.weight)
+        nn.init.normal_(self.tok_embeddings.weight, mean=0.0, std=emb_init_std)
 
-        for layer in self.layers.values():
-            if layer is not None:
+        if self.embedding_norm is not None:
+            self.embedding_norm.reset_parameters()
+
+        for layer_module in self.layers.values():
+            if layer_module is not None:
+                layer = cast(TransformerBlock, layer_module)
                 layer.init_weights()
 
         self.norm.reset_parameters()
 
-        final_out_std = (self.model_args.dim**-0.5) * (
-            self.init_config.output_mult or 1.0
-        )
-        nn.init.normal_(self.output.weight, mean=0.0, std=final_out_std)
+        # Initialize output layer weights (only if not tying)
+        if self.output is not None:
+            final_out_std = (self.model_args.dim**-0.5) * (
+                self.init_config.output_mult or 1.0
+            )
+            nn.init.normal_(self.output.weight, mean=0.0, std=final_out_std)
 
     def _precompute_freqs_cis(self) -> torch.Tensor:
         return precompute_freqs_cis(
@@ -211,26 +200,39 @@ class Transformer(nn.Module, ModelProtocol):
         hidden_bias_params = []
         no_decay_params = []
 
+        # Add embedding weight
         emb_params.append(self.tok_embeddings.weight)
-        if self.tok_embeddings.norm is not None:
-            no_decay_params.extend(p for p in self.tok_embeddings.norm.parameters())
+
+        # Add output weight if it exists (not tied)
+        if self.output is not None:
+            emb_params.append(self.output.weight)
+
+        if self.embedding_norm is not None:
+            no_decay_params.extend(p for p in self.embedding_norm.parameters())
 
         no_decay_params.extend(p for p in self.norm.parameters())
 
-        for block in self.layers.values():
+        for block_module in self.layers.values():
+            # Cast to TransformerBlock to help type checker
+            block = cast(TransformerBlock, block_module)
+
             hidden_ln_params.extend(p for p in block.attention_norm.parameters())
             hidden_ln_params.extend(p for p in block.ffn_norm.parameters())
             if block.use_peri_norm:
                 hidden_ln_params.extend(p for p in block.post_attn_norm.parameters())
                 hidden_ln_params.extend(p for p in block.post_ffn_norm.parameters())
 
-            decay_lr_depth_width_scaling.append(block.attention.wq.weight)
-            decay_lr_depth_width_scaling.append(block.attention.wk.weight)
-            decay_lr_depth_width_scaling.append(block.attention.wv.weight)
-            decay_lr_depth_width_scaling.append(block.attention.wo.weight)
-            decay_lr_depth_width_scaling.append(block.feed_forward.w1.weight)
-            decay_lr_depth_width_scaling.append(block.feed_forward.w2.weight)
-            decay_lr_depth_width_scaling.append(block.feed_forward.w3.weight)
+            # Cast attention and feed_forward to their correct types
+            attention = cast(Attention, block.attention)
+            feed_forward = cast(FeedForward, block.feed_forward)
+
+            decay_lr_depth_width_scaling.append(attention.wq.weight)
+            decay_lr_depth_width_scaling.append(attention.wk.weight)
+            decay_lr_depth_width_scaling.append(attention.wv.weight)
+            decay_lr_depth_width_scaling.append(attention.wo.weight)
+            decay_lr_depth_width_scaling.append(feed_forward.w1.weight)
+            decay_lr_depth_width_scaling.append(feed_forward.w2.weight)
+            decay_lr_depth_width_scaling.append(feed_forward.w3.weight)
 
         base_lr = optimizer_config["lr"]
         weight_decay = optimizer_config.get("weight_decay", 0.0)
@@ -281,11 +283,21 @@ class Transformer(nn.Module, ModelProtocol):
     ):
         h = self.tok_embeddings(tokens)
 
+        # Apply embedding normalization and scaling
+        if self.embedding_norm is not None:
+            h = self.embedding_norm(h)
+        h = h * self.embedding_scale
+
         for layer in self.layers.values():
             h = layer(h, self.freqs_cis)
 
         h = self.norm(h)
-        output = self.output(h)
+
+        # Use output layer or F.linear with embedding weights if tied
+        if self.output is None:
+            output = F.linear(h, self.tok_embeddings.weight)
+        else:
+            output = self.output(h)
 
         if self.mup_config.mup_enabled:
             output = output * (
