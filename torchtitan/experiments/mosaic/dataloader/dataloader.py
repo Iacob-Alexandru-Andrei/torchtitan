@@ -31,9 +31,9 @@ except ImportError as exc:  # pragma: no cover - optional dependency
         "Please install llm-foundry, mosaicml-streaming, and composer to enable this integration."
     ) from exc
 
-from experiments.mosaic.configs.config import MosaicJobConfig
 from torchtitan.components.dataloader import BaseDataLoader
 from torchtitan.components.tokenizer import BaseTokenizer
+from torchtitan.experiments.mosaic.configs.config import MosaicJobConfig
 from torchtitan.tools.logging import logger
 
 
@@ -257,7 +257,7 @@ def build_mosaic_dataloader(
     text_dataset = StatefulStreamingTextDataset(
         tokenizer=hf_tokenizer,
         streams=streams,
-        batch__size=job_config.training.local_batch_size,
+        batch_size=job_config.training.local_batch_size,
         **dataset_config_filtered,
     )
 

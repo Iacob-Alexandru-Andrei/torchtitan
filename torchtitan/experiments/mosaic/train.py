@@ -22,11 +22,13 @@ To run this script, you can use a command like:
 
 from __future__ import annotations
 
+import os
+
 import torch
 
-from experiments.mosaic.configs.config import MosaicJobConfig
-from experiments.mosaic.models.model_utils import get_mosaic_train_spec
 from torchtitan.config import ConfigManager
+from torchtitan.experiments.mosaic.configs.config import MosaicJobConfig
+from torchtitan.experiments.mosaic.models.model_utils import get_mosaic_train_spec
 from torchtitan.protocols.train_spec import get_train_spec, register_train_spec
 from torchtitan.tools.logging import init_logger, logger
 from torchtitan.train import Trainer
@@ -60,24 +62,26 @@ def main() -> None:
     trainer: Trainer | None = None
     try:
         trainer = Trainer(job_config)
+
         if job_config.checkpoint.create_seed_checkpoint:
-            if int(torch.distributed.get_world_size()) != 1:
-                raise RuntimeError(
-                    "Seed checkpoint creation must run with a single rank."
-                )
-            if not job_config.checkpoint.enable:
-                raise RuntimeError(
-                    "Checkpointing must be enabled when creating a seed checkpoint."
-                )
+            assert (
+                int(os.environ["WORLD_SIZE"]) == 1
+            ), "Must create seed checkpoint using a single device, to disable sharding."
+            assert (
+                job_config.checkpoint.enable
+            ), "Must enable checkpointing when creating a seed checkpoint."
             trainer.checkpointer.save(curr_step=0, last_step=True)
             logger.info("Created seed checkpoint")
         else:
             trainer.train()
-    finally:
-        if trainer is not None:
+    except Exception:
+        if trainer:
             trainer.close()
-        if torch.distributed.is_initialized():
-            torch.distributed.destroy_process_group()
+        raise
+    else:
+        trainer.close()
+        torch.distributed.destroy_process_group()
+        logger.info("Process group destroyed")
 
 
 if __name__ == "__main__":

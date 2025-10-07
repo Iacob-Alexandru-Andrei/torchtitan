@@ -11,7 +11,7 @@ from __future__ import annotations
 import os
 from typing import Any
 
-from experiments.mosaic.configs.config import MosaicJobConfig
+from torchtitan.experiments.mosaic.configs.config import MosaicJobConfig
 
 try:
     from llmfoundry import registry

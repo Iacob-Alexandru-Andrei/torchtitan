@@ -11,8 +11,8 @@ from __future__ import annotations
 from dataclasses import replace
 from typing import cast
 
-from experiments.mosaic.dataloader.dataloader import build_mosaic_dataloader
-from experiments.mosaic.dataloader.tokenizer import build_mosaic_tokenizer
+from torchtitan.experiments.mosaic.dataloader.dataloader import build_mosaic_dataloader
+from torchtitan.experiments.mosaic.dataloader.tokenizer import build_mosaic_tokenizer
 from torchtitan.protocols.train_spec import TokenizerBuilder, TrainSpec
 
 
