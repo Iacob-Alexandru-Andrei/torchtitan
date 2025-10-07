@@ -90,11 +90,7 @@ def main() -> None:
             logger.info("Created seed checkpoint")
         else:
             trainer.train()
-    except Exception:
-        if trainer:
-            trainer.close()
-        raise
-    else:
+    finally:
         if trainer:
             trainer.close()
         # In some cases, the process group is not destroyed automatically,
