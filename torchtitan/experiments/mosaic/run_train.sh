@@ -16,6 +16,7 @@
 
 set -e
 
+export S3_ENDPOINT_URL='http://taranaki.cl.cam.ac.uk:9000'
 # Default to 2 GPUs if not specified
 NPROC_PER_NODE=${NPROC_PER_NODE:-2}
 

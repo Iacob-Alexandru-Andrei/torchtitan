@@ -5,23 +5,20 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 
-
-
 set -ex
 
-export S3_ENDPOINT_URL='http://taranaki.cl.cam.ac.uk:9000'
 # use envs as local overwrites for convenience
 # e.g.
 # LOG_RANK=0,1 NGPU=4 ./run_train.sh
-NGPU=${NGPU:-"1"}
+NGPU=${NGPU:-"8"}
 export LOG_RANK=${LOG_RANK:-0}
-CONFIG_FILE=${CONFIG_FILE:-"./examples/mosaic_streaming/configs/mosaic_job.toml"}
+CONFIG_FILE=${CONFIG_FILE:-"./torchtitan/models/llama3/train_configs/debug_model.toml"}
 TRAIN_FILE=${TRAIN_FILE:-"torchtitan.train"}
 
 TORCHFT_LIGHTHOUSE=${TORCHFT_LIGHTHOUSE:-"http://localhost:29510"}
 
 PYTORCH_ALLOC_CONF="expandable_segments:True" \
 TORCHFT_LIGHTHOUSE=${TORCHFT_LIGHTHOUSE} \
-uv run --no-sync torchrun --nproc_per_node=${NGPU} --rdzv_backend c10d --rdzv_endpoint="localhost:0" \
+torchrun --nproc_per_node=${NGPU} --rdzv_backend c10d --rdzv_endpoint="localhost:0" \
 --local-ranks-filter ${LOG_RANK} --role rank --tee 3 \
 -m ${TRAIN_FILE} --job.config_file ${CONFIG_FILE} "$@"
