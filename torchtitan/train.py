@@ -390,6 +390,7 @@ class Trainer(torch.distributed.checkpoint.stateful.Stateful):
                 # If data runs out during gradient accumulation, that
                 # entire step will not be executed.
                 raise DataloaderExhaustedError() from ex
+
             input_dict, labels = batch
             ntokens_batch = labels.numel()
             self.ntokens_seen += ntokens_batch

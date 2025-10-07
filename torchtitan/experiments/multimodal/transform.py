@@ -9,6 +9,8 @@ from typing import Any, List, Mapping, Optional, Tuple
 import torch
 
 import torchvision
+
+from torchtitan.tools.logging import logger
 from torchvision.transforms.v2 import functional as F
 
 from utils import (
@@ -17,8 +19,6 @@ from utils import (
     resize_with_pad,
     tile_crop,
 )
-
-from torchtitan.tools.logging import logger
 
 
 class CLIPTransform:
