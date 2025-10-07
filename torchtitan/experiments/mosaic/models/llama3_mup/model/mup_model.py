@@ -8,16 +8,16 @@
 
 
 import torch
-import torch.nn.functional as F
 from torch import nn
 
-from torchtitan.protocols.train_spec import ModelProtocol
 # Import reusable components from the base llama3 model
 from torchtitan.models.llama3.model.model import (
     Attention as BaseAttention,
     FeedForward as BaseFeedForward,
     precompute_freqs_cis,
 )
+
+from torchtitan.protocols.train_spec import ModelProtocol
 
 from .mup_args import TransformerModelArgs
 
@@ -36,9 +36,7 @@ class MuPSharedEmbedding(nn.Embedding):
     ):
         super().__init__(vocab_size, d_model, **kwargs)
         self.scale = scale
-        self.norm = (
-            nn.RMSNorm(d_model, eps=norm_eps) if use_embedding_norm else None
-        )
+        self.norm = nn.RMSNorm(d_model, eps=norm_eps) if use_embedding_norm else None
 
     def forward(self, input: torch.Tensor) -> torch.Tensor:
         out = super().forward(input)
@@ -49,15 +47,15 @@ class MuPSharedEmbedding(nn.Embedding):
 
 
 class Attention(BaseAttention):
-    def init_weights(self, std: float):
+    def init_weights(self, init_std: float):
         for linear in (self.wq, self.wk, self.wv, self.wo):
-            nn.init.normal_(linear.weight, mean=0.0, std=std)
+            nn.init.normal_(linear.weight, mean=0.0, std=init_std)
 
 
 class FeedForward(BaseFeedForward):
-    def init_weights(self, std: float):
+    def init_weights(self, init_std: float):
         for linear in (self.w1, self.w2, self.w3):
-            nn.init.normal_(linear.weight, mean=0.0, std=std)
+            nn.init.normal_(linear.weight, mean=0.0, std=init_std)
 
 
 class TransformerBlock(nn.Module):
@@ -86,7 +84,10 @@ class TransformerBlock(nn.Module):
         if self.mup_config.mup_enabled:
             self.residual_scaling = (
                 1.0
-                / (self.mup_config.completep_depth_multiplier ** self.mup_config.completep_depth_alpha_exp)
+                / (
+                    self.mup_config.completep_depth_multiplier
+                    ** self.mup_config.completep_depth_alpha_exp
+                )
                 if self.mup_config.completep_depth_alpha_enabled
                 else 1.0
             )
@@ -100,13 +101,17 @@ class TransformerBlock(nn.Module):
         if self.use_peri_norm:
             attn_out = self.post_attn_norm(attn_out)
 
-        h = x + attn_out * (self.residual_scaling if self.mup_config.mup_enabled else 1.0)
+        h = x + attn_out * (
+            self.residual_scaling if self.mup_config.mup_enabled else 1.0
+        )
 
         ffn_out = self.feed_forward(self.ffn_norm(h))
         if self.use_peri_norm:
             ffn_out = self.post_ffn_norm(ffn_out)
 
-        out = h + ffn_out * (self.residual_scaling if self.mup_config.mup_enabled else 1.0)
+        out = h + ffn_out * (
+            self.residual_scaling if self.mup_config.mup_enabled else 1.0
+        )
         return out
 
     def init_weights(self):
@@ -178,7 +183,9 @@ class Transformer(nn.Module, ModelProtocol):
 
         self.norm.reset_parameters()
 
-        final_out_std = (self.model_args.dim**-0.5) * (self.init_config.output_mult or 1.0)
+        final_out_std = (self.model_args.dim**-0.5) * (
+            self.init_config.output_mult or 1.0
+        )
         nn.init.normal_(self.output.weight, mean=0.0, std=final_out_std)
 
     def _precompute_freqs_cis(self) -> torch.Tensor:
@@ -240,9 +247,7 @@ class Transformer(nn.Module, ModelProtocol):
                 -1.0 * self.mup_config.completep_depth_alpha_exp
             )
             optimizer_config["eps"] = (
-                optimizer_config.get("eps", 1e-8)
-                * width_lr_scaling
-                * depth_eps_scaling
+                optimizer_config.get("eps", 1e-8) * width_lr_scaling * depth_eps_scaling
             )
 
         param_groups = [
