@@ -21,7 +21,7 @@ class MosaicJobConfig(JobConfig):
     It inherits from the base `JobConfig` and adds Mosaic-specific sections.
     """
 
-    # pyton-explicit-any
+    # python-explicit-any
     mosaic_dataloader: dict[str, Any] = field(
         default_factory=dict,
         metadata={
@@ -29,7 +29,7 @@ class MosaicJobConfig(JobConfig):
             "Refer to llm-foundry for documentation on available options."
         },
     )
-    # pyton-explicit-any
+    # python-explicit-any
     mosaic_tokenizer: dict[str, Any] = field(
         default_factory=dict,
         metadata={
