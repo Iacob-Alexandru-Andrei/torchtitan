@@ -45,6 +45,5 @@ class TransformerModelArgs(BaseTransformerModelArgs):
     init_config: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self):
-        super().__post_init__()
         self.mup_config_obj = MuPConfig(**self.mup_config)
         self.init_config_obj = ModelInitConfig(**self.init_config)

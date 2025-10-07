@@ -30,16 +30,26 @@ def build_mup_optimizers(
     """
     model = model_parts[0]
 
-    # MuP requires custom parameter groups for different learning rates
-    # The model returns the parameter groups and any updated optimizer kwargs
-    param_groups, updated_optimizer_kwargs = model.get_optimizer_param_groups(
-        optimizer_config.optimizer_kwargs
+    # Construct the initial kwargs dict from the config object.
+    # This will be passed to the model to be potentially modified (e.g. for eps scaling).
+    initial_optimizer_kwargs = {
+        "lr": optimizer_config.lr,
+        "betas": (optimizer_config.beta1, optimizer_config.beta2),
+        "eps": optimizer_config.eps,
+        "weight_decay": optimizer_config.weight_decay,
+    }
+
+    # MuP requires custom parameter groups for different learning rates.
+    # The model returns the parameter groups and potentially updated optimizer kwargs.
+    param_groups, final_optimizer_kwargs = model.get_optimizer_param_groups(
+        initial_optimizer_kwargs
     )
 
-    # Update the config with any changes made by the model
-    optimizer_config.optimizer_kwargs = updated_optimizer_kwargs
+    # The model might have updated some optimizer kwargs (e.g., eps for MuP scaling).
+    # We update the original config object so that the core builder uses the correct values.
+    optimizer_config.eps = final_optimizer_kwargs.get("eps", optimizer_config.eps)
 
-    # Use the core optimizer builder with the custom param groups
+    # Use the core optimizer builder with the custom param groups.
     return build_optimizers(
         model_parts,
         optimizer_config,
