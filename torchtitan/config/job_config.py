@@ -239,8 +239,6 @@ class Training:
     deterministic: bool = False
     """Use deterministic algorithms wherever possible, may be slower"""
 
-    mosaic_dataloader: dict[str, Any] = field(default_factory=dict)
-    """Mosaic dataloader configuration, including streams."""
 
 @dataclass
 class Parallelism:
