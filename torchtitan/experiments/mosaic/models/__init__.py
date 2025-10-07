@@ -12,6 +12,7 @@ from torchtitan.protocols.train_spec import register_train_spec, TokenizerBuilde
 
 from ..dataloader.dataloader import build_mosaic_dataloader
 from ..dataloader.tokenizer import build_mosaic_tokenizer
+from ..optimizer_builder import build_mosaic_optimizers
 from .llama3_mup.train_configs import get_train_spec as get_llama3_mup_train_spec
 
 
@@ -40,6 +41,7 @@ def _get_mosaic_llama3_spec():
         model_args=model_args,
         build_dataloader_fn=build_mosaic_dataloader,
         build_tokenizer_fn=cast(TokenizerBuilder, build_mosaic_tokenizer),
+        build_optimizers_fn=build_mosaic_optimizers,
     )
 
 
@@ -48,7 +50,11 @@ register_train_spec(_get_mosaic_llama3_spec())
 
 def _get_llama3_mup_spec():
     spec = get_llama3_mup_train_spec()
-    return replace(spec, name="llama3_mup")
+    return replace(
+        spec,
+        name="llama3_mup",
+        build_optimizers_fn=build_mosaic_optimizers,
+    )
 
 
 register_train_spec(_get_llama3_mup_spec())
