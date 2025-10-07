@@ -292,7 +292,7 @@ def _single_tensor_adopt(
 
         if weight_decay != 0 and not decouple:
             decay_factor = (lr / initial_lr) if initial_lr else 1.0
-            grad = grad.add(param, alpha=weight_decay)
+            grad = grad.add(param, alpha=decay_factor * weight_decay)
 
         if torch.is_complex(param):
             grad = torch.view_as_real(grad)
