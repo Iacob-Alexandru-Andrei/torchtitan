@@ -7,3 +7,5 @@
 # Import the models module to trigger the registration of any custom
 # Mosaic train specs.
 from . import models
+
+__all__ = ["models"]

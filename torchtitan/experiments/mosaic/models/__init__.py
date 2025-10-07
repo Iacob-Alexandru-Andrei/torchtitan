@@ -25,8 +25,8 @@ def _get_mosaic_llama3_spec():
 
     # Add a new model configuration
     new_configs = {
-        "8B_50368": replace(
-            base_spec.model_args["8B"],
+        "debugmodel_smoll": replace(
+            base_spec.model_args["debugmodel"],
             vocab_size=50368,
         )
     }

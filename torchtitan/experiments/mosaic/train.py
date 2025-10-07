@@ -63,15 +63,24 @@ def main() -> None:
         # Dynamically get the base TrainSpec for the specified model
         # and modify it to use the Mosaic dataloader and tokenizer.
         base_spec = get_train_spec(job_config.model.name)
-        mosaic_spec = replace(
-            base_spec,
-            build_dataloader_fn=build_mosaic_dataloader,
-            build_tokenizer_fn=cast(TokenizerBuilder, build_mosaic_tokenizer),
-        )
-        # We need to update the name of the spec to avoid conflicts
-        mosaic_spec.name = f"mosaic_{base_spec.name}"
-        register_train_spec(mosaic_spec)
-        # Update the job config to use the new spec
+        mosaic_spec_name = f"mosaic_{base_spec.name}"
+
+        # Check if the mosaic spec is already registered (e.g., from a previous run)
+        try:
+            mosaic_spec = get_train_spec(mosaic_spec_name)
+            logger.info(f"TrainSpec {mosaic_spec_name} already registered, reusing it")
+        except ValueError:
+            # Not registered yet, create and register it
+            mosaic_spec = replace(
+                base_spec,
+                build_dataloader_fn=build_mosaic_dataloader,
+                build_tokenizer_fn=cast(TokenizerBuilder, build_mosaic_tokenizer),
+            )
+            mosaic_spec.name = mosaic_spec_name
+            register_train_spec(mosaic_spec)
+            logger.info(f"Registered new TrainSpec: {mosaic_spec_name}")
+
+        # Update the job config to use the mosaic spec
         job_config.model.name = mosaic_spec.name
 
     # Launch the trainer

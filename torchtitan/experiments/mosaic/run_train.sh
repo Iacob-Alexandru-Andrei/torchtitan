@@ -1,30 +1,38 @@
-#!/usr/bin/bash
+#!/bin/bash
+
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 
-set -ex
+# A simple script to launch the Mosaic streaming training job.
 
-# use envs as local overrides for convenience
-# e.g.
-# LOG_RANK=0,1 NGPU=4 ./torchtitan/experiments/mosaic/run_train.sh
+# Example usage:
+# ./experiments/mosaic/run_train.sh
+
+# For multi-node training, you can use torchrun directly, e.g.:
+# torchrun --nproc_per_node=2 experiments/mosaic/train.py --config-path experiments/mosaic/configs/mosaic_job.toml
+
+set -e
+
+export S3_ENDPOINT_URL='http://taranaki.cl.cam.ac.uk:9000'
+# Default to 2 GPUs if not specified
+NPROC_PER_NODE=${NPROC_PER_NODE:-2}
+
+# Launch the training job
+torchrun --nproc_per_node=${NPROC_PER_NODE} experiments/mosaic/train.py --config-path experiments/mosaic/configs/mosaic_job.toml
+
+
 NGPU=${NGPU:-"1"}
-
 export LOG_RANK=${LOG_RANK:-0}
-export S3_ENDPOINT_URL=${S3_ENDPOINT_URL:-'http://taranaki.cl.cam.ac.uk:9000'}
 CONFIG_FILE=${CONFIG_FILE:-"./torchtitan/experiments/mosaic/configs/mosaic_job.toml"}
-
-overrides=""
-if [ $# -ne 0 ]; then
-    overrides="$*"
-fi
+TRAIN_FILE=${TRAIN_FILE:-"torchtitan.experiments.mosaic.train"}
 
 TORCHFT_LIGHTHOUSE=${TORCHFT_LIGHTHOUSE:-"http://localhost:29510"}
 
 PYTORCH_ALLOC_CONF="expandable_segments:True" \
 TORCHFT_LIGHTHOUSE=${TORCHFT_LIGHTHOUSE} \
-torchrun --nproc_per_node=${NGPU} --rdzv_backend c10d --rdzv_endpoint="localhost:0" \
+uv run --no-sync torchrun --nproc_per_node=${NGPU} --rdzv_backend c10d --rdzv_endpoint="localhost:0" \
 --local-ranks-filter ${LOG_RANK} --role rank --tee 3 \
-torchtitan/experiments/mosaic/train.py --job.config_file ${CONFIG_FILE} $overrides
+-m ${TRAIN_FILE} --job.config_file ${CONFIG_FILE} "$@"

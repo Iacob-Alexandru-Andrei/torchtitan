@@ -19,8 +19,8 @@ enable_wandb = false
 
 [model]
 # Use the base model's TrainSpec. The Mosaic dataloader will be applied dynamically.
-name = "llama3"
-flavor = "debugmodel"
+name = "mosaic_llama3"
+flavor = "debugmodel_smoll"
 # test folder with tokenizer.json, for debug purpose only
 hf_assets_path = "./tests/assets/tokenizer"
 
