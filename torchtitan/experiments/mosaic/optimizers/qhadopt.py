@@ -406,7 +406,7 @@ def _multi_tensor_qhadopt(
             device_grads = torch._foreach_neg(device_grads)
 
         if weight_decay != 0 and not decouple:
-            decay_factor = (lr / initial_lr) if initial_lr else 1.0
+            decay_factor = (lr / initial_lr) if initial_lr != 0 else 1.0
             weight_decay_unscaled = decay_factor * weight_decay
             if maximize:
                 torch._foreach_add_(
@@ -435,7 +435,7 @@ def _multi_tensor_qhadopt(
             continue
 
         if weight_decay != 0 and decouple:
-            decay_factor = (lr / initial_lr) if initial_lr else 1.0
+            decay_factor = (lr / initial_lr) if initial_lr != 0 else 1.0
             weight_decay_unscaled = decay_factor * weight_decay
             torch._foreach_add_(
                 device_params,
