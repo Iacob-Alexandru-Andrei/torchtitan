@@ -21,10 +21,20 @@ export S3_ENDPOINT_URL='http://taranaki.cl.cam.ac.uk:9000'
 NPROC_PER_NODE=${NPROC_PER_NODE:-2}
 
 
-NGPU=${NGPU:-"1"}
-export LOG_RANK=${LOG_RANK:-0}
+NGPU=${NGPU:-"2"}
+export LOG_RANK=${LOG_RANK:-0,1}
 CONFIG_FILE=${CONFIG_FILE:-"./torchtitan/experiments/fl/configs/mosaic_mup_16M.toml"}
 TRAIN_FILE=${TRAIN_FILE:-"torchtitan.experiments.fl.train"}
+
+export WANDB_PROJECT="torchtitan"
+
+# Optional: Set team/entity
+export WANDB_TEAM="camlsys"
+
+# Optional: Set custom run name with datetime
+TIMESTAMP=$(date +"%Y%m%d-%H%M%S")
+export WANDB_RUN_NAME="16M-baseline-${TIMESTAMP}"
+
 
 TORCHFT_LIGHTHOUSE=${TORCHFT_LIGHTHOUSE:-"http://localhost:29510"}
 

@@ -15,12 +15,13 @@ log_freq = 1
 disable_color_printing = false
 enable_tensorboard = false
 save_tb_folder = "tb"
-enable_wandb = false
+enable_wandb = true
+save_for_all_ranks = true
 
 [model]
 # Use the base model's TrainSpec. The Mosaic dataloader will be applied dynamically.
-name = "mosaic_llama3_mup"
-flavor = "16M"
+name = "mosaic_llama3"
+flavor = "debugmodel"
 # test folder with tokenizer.json, for debug purpose only
 hf_assets_path = "./tests/assets/tokenizer"
 

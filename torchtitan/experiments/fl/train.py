@@ -88,6 +88,26 @@ def main() -> None:
     try:
         trainer = Trainer(job_config)
 
+        # Override WandB run name to include rank if save_for_all_ranks is enabled
+        if job_config.metrics.save_for_all_ranks and job_config.metrics.enable_wandb:
+            try:
+                import wandb
+
+                if wandb.run is not None and torch.distributed.is_initialized():
+                    rank = torch.distributed.get_rank()
+                    original_name = wandb.run.name
+                    new_name = f"{original_name}-rank{rank}"
+                    wandb.run.name = new_name
+                    wandb.run.save()
+                    logger.info(
+                        f"Updated WandB run name from '{original_name}' to '{new_name}' "
+                        f"for rank {rank}"
+                    )
+            except ImportError:
+                logger.warning("wandb not available, skipping run name update")
+            except Exception as e:
+                logger.warning(f"Failed to update WandB run name: {e}")
+
         if job_config.checkpoint.create_seed_checkpoint:
             assert (
                 int(os.environ["WORLD_SIZE"]) == 1
