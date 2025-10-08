@@ -23,7 +23,7 @@ repos:
     rev: 6306a48f7dae5861702d573c9c247e4e9498e867
     hooks:
     -   id: trailing-whitespace
-        exclude: '^(AGENTS\.md)$'
+        exclude: '(^|/)AGENTS\.md$'
     -   id: check-ast
     -   id: check-merge-conflict
     -   id: no-commit-to-branch
@@ -31,7 +31,7 @@ repos:
     -   id: check-added-large-files
         args: ['--maxkb=500']
     -   id: end-of-file-fixer
-        exclude: '^(.*\.svg)|(AGENTS\.md)$'
+        exclude: '(^|/)(.*\.svg|AGENTS\.md)$'
 
 -   repo: https://github.com/Lucas-C/pre-commit-hooks
     rev: v1.5.4
@@ -51,6 +51,17 @@ repos:
           - pep8-naming == 0.12.1
           - torchfix
         args: ['--config=.flake8']
+
+# Advanced linting/type checking for torchtitan/experiments/fl/ only
+# NOTE: Ruff runs BEFORE ufmt so that ufmt gets the final say on formatting
+-   repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.14.0
+    hooks:
+      # Run the Ruff linter
+      - id: ruff
+        name: ruff (fl experiments only)
+        args: [--config=ruff.toml, --fix]
+        files: ^torchtitan/experiments/fl/
 
 -   repo: https://github.com/omnilib/ufmt
     rev: v2.3.0
@@ -78,5 +89,7 @@ repos:
         # The script doesn't need the list of changed files passed as arguments.
         pass_filenames: false
         stages: [pre-commit]
-        exclude: '^AGENTS\.MD$'
+        exclude: '(^|/)AGENTS\.md$'
+
+    
 

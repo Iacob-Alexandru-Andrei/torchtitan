@@ -7,13 +7,15 @@
 from dataclasses import replace
 from typing import cast
 
+from torchtitan.experiments.fl.dataloader.dataloader import build_mosaic_dataloader
+from torchtitan.experiments.fl.dataloader.tokenizer import build_mosaic_tokenizer
+from torchtitan.experiments.fl.models.llama3_mup.train_configs import (
+    get_train_spec as get_llama3_mup_train_spec,
+)
+from torchtitan.experiments.fl.optimizer_builder import build_mosaic_optimizers
+
 from torchtitan.models.llama3 import get_train_spec as get_base_llama3_spec
 from torchtitan.protocols.train_spec import register_train_spec, TokenizerBuilder
-
-from ..dataloader.dataloader import build_mosaic_dataloader
-from ..dataloader.tokenizer import build_mosaic_tokenizer
-from ..optimizer_builder import build_mosaic_optimizers
-from .llama3_mup.train_configs import get_train_spec as get_llama3_mup_train_spec
 
 
 def _get_mosaic_llama3_spec():
