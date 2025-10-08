@@ -11,15 +11,15 @@ from __future__ import annotations
 import os
 from typing import Any
 
-from torchtitan.experiments.mosaic.configs.config import MosaicJobConfig
+from torchtitan.experiments.fl.configs.config import MosaicJobConfig
 
 try:
     from llmfoundry import registry
     from llmfoundry.utils.registry_utils import construct_from_registry
     from transformers import (
-        AutoTokenizer,
-        PreTrainedTokenizerBase,
-        PreTrainedTokenizerFast,
+        AutoTokenizer,  # pyright: ignore[reportPrivateImportUsage]
+        PreTrainedTokenizerBase,  # pyright: ignore[reportPrivateImportUsage]
+        PreTrainedTokenizerFast,  # pyright: ignore[reportPrivateImportUsage]
     )
 except ImportError as exc:
     raise RuntimeError(

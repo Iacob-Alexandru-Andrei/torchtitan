@@ -33,7 +33,7 @@ except ImportError as exc:  # pragma: no cover - optional dependency
 
 from torchtitan.components.dataloader import BaseDataLoader
 from torchtitan.components.tokenizer import BaseTokenizer
-from torchtitan.experiments.mosaic.configs.config import MosaicJobConfig
+from torchtitan.experiments.fl.configs.config import MosaicJobConfig
 from torchtitan.tools.logging import logger
 
 

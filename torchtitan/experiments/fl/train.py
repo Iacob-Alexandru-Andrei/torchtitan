@@ -29,9 +29,9 @@ from typing import cast
 import torch
 
 from torchtitan.config import ConfigManager
-from torchtitan.experiments.mosaic.configs.config import MosaicJobConfig
-from torchtitan.experiments.mosaic.dataloader.dataloader import build_mosaic_dataloader
-from torchtitan.experiments.mosaic.dataloader.tokenizer import build_mosaic_tokenizer
+from torchtitan.experiments.fl.configs.config import MosaicJobConfig
+from torchtitan.experiments.fl.dataloader.dataloader import build_mosaic_dataloader
+from torchtitan.experiments.fl.dataloader.tokenizer import build_mosaic_tokenizer
 from torchtitan.protocols.train_spec import (
     get_train_spec,
     register_train_spec,

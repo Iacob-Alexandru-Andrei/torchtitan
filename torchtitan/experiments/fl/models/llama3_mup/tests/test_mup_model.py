@@ -5,9 +5,12 @@
 # LICENSE file in the root directory of this source tree.
 
 import unittest
+
 import torch
-from torchtitan.experiments.mosaic.models.llama3_mup.model.mup_args import TransformerModelArgs
-from torchtitan.experiments.mosaic.models.llama3_mup.model.mup_model import Transformer, TransformerBlock
+from torchtitan.experiments.fl.models.llama3_mup.model.mup_args import (
+    TransformerModelArgs,
+)
+from torchtitan.experiments.fl.models.llama3_mup.model.mup_model import Transformer
 
 
 class TestMuPLlamaModel(unittest.TestCase):
@@ -47,9 +50,7 @@ class TestMuPLlamaModel(unittest.TestCase):
     def test_forward_pass(self):
         input_ids = torch.randint(0, self.model_args.vocab_size, (2, 128))
         output = self.model.forward(input_ids)
-        self.assertEqual(
-            output.shape, (2, 128, self.model_args.vocab_size)
-        )
+        self.assertEqual(output.shape, (2, 128, self.model_args.vocab_size))
 
     def test_weight_initialization(self):
         # A simple check to ensure no errors during init
