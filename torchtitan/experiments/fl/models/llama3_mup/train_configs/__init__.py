@@ -3,44 +3,61 @@
 #
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
+"""Training configuration for Llama-3 MuP models."""
+
+from typing import Any, cast
+
+from torch import nn
 
 from torchtitan.components.ft import FTManager
 from torchtitan.components.loss import build_cross_entropy_loss
 from torchtitan.components.lr_scheduler import build_lr_schedulers
-from torchtitan.components.optimizer import build_optimizers
+from torchtitan.components.optimizer import build_optimizers, OptimizersContainer
 from torchtitan.components.tokenizer import build_hf_tokenizer
 from torchtitan.components.validate import build_validator
 from torchtitan.config import Optimizer as OptimizerConfig
 from torchtitan.datasets.hf_datasets import build_hf_dataloader
 from torchtitan.distributed import ParallelDims
+from torchtitan.experiments.fl.models.llama3_mup.infra.parallelize import (
+    parallelize_llama_mup,
+)
 from torchtitan.experiments.fl.models.llama3_mup.model.mup_args import (
     TransformerModelArgs,
 )
-
 from torchtitan.experiments.fl.models.llama3_mup.model.mup_model import Transformer
 from torchtitan.experiments.fl.models.llama3_mup.model.state_dict_adapter import (
     Llama3MuPStateDictAdapter,
 )
-from torchtitan.models.llama3.infra.parallelize import parallelize_llama
 from torchtitan.models.llama3.infra.pipeline import pipeline_llama
 from torchtitan.protocols.train_spec import TrainSpec
 
 
 def build_mup_optimizers(
-    model_parts,
+    model_parts: list[nn.Module],
     optimizer_config: OptimizerConfig,
     parallel_dims: ParallelDims,
     ft_manager: FTManager | None = None,
-):
+) -> OptimizersContainer:
+    """Builder function for MuP that extracts parameter groups from the model.
+
+    This function extracts parameter groups from the model and passes them to
+    the core optimizer builder.
+
+    Args:
+        model_parts: List of model parts to optimize.
+        optimizer_config: Optimizer configuration.
+        parallel_dims: Parallel dimensions for distributed training.
+        ft_manager: Optional fault tolerance manager.
+
+    Returns:
+        OptimizersContainer: Container with optimizers for each model part.
     """
-    Builder function for MuP that extracts parameter groups from the model
-    and passes them to the core optimizer builder.
-    """
-    model = model_parts[0]
+    # Cast to Transformer to access MuP-specific methods
+    model = cast("Transformer", model_parts[0])
 
     # Construct the initial kwargs dict from the config object.
     # This will be passed to the model to be potentially modified (e.g. for eps scaling).
-    initial_optimizer_kwargs = {
+    initial_optimizer_kwargs: dict[str, Any] = {
         "lr": optimizer_config.lr,
         "betas": (optimizer_config.beta1, optimizer_config.beta2),
         "eps": optimizer_config.eps,
@@ -49,8 +66,14 @@ def build_mup_optimizers(
 
     # MuP requires custom parameter groups for different learning rates.
     # The model returns the parameter groups and potentially updated optimizer kwargs.
-    param_groups, final_optimizer_kwargs = model.get_optimizer_param_groups(
+    param_groups_or_iter, final_optimizer_kwargs = model.get_optimizer_param_groups(
         initial_optimizer_kwargs
+    )
+
+    # Convert Iterator to None for build_optimizers (it will use model.parameters())
+    # Only pass param_groups if we got a list (MuP enabled case)
+    param_groups_list = (
+        param_groups_or_iter if isinstance(param_groups_or_iter, list) else None
     )
 
     # The model might have updated some optimizer kwargs (e.g., eps for MuP scaling).
@@ -63,7 +86,7 @@ def build_mup_optimizers(
         optimizer_config,
         parallel_dims,
         ft_manager,
-        param_groups=param_groups,
+        param_groups=param_groups_list,
     )
 
 
@@ -212,14 +235,12 @@ llama3_mup_configs = {
 
 
 def get_train_spec() -> TrainSpec:
-    """
-    Get the training specification for the Llama-3 MuP model.
-    """
+    """Get the training specification for the Llama-3 MuP model."""
     return TrainSpec(
         name="llama3_mup",
         model_cls=Transformer,
         model_args=llama3_mup_configs,
-        parallelize_fn=parallelize_llama,
+        parallelize_fn=parallelize_llama_mup,
         pipelining_fn=pipeline_llama,
         build_optimizers_fn=build_mup_optimizers,
         build_lr_schedulers_fn=build_lr_schedulers,

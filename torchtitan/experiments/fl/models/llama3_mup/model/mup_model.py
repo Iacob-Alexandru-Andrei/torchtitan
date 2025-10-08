@@ -5,13 +5,14 @@
 # LICENSE file in the root directory of this source tree.
 #
 # Copyright (c) Meta Platforms, Inc. All Rights Reserved.
+"""Model components for Llama-3 MuP."""
 
-
-from typing import cast
+from collections.abc import Iterator
+from typing import Any, cast
 
 import torch
-import torch.nn.functional as F
 from torch import nn
+from torch.nn.parameter import Parameter
 
 # Import reusable components from the base llama3 model
 from torchtitan.models.llama3.model.model import (
@@ -19,26 +20,49 @@ from torchtitan.models.llama3.model.model import (
     FeedForward as BaseFeedForward,
     precompute_freqs_cis,
 )
-
 from torchtitan.protocols.train_spec import ModelProtocol
 
 from .mup_args import TransformerModelArgs
 
 
 class Attention(BaseAttention):
-    def init_weights(self, init_std: float):
+    """Multi-head attention layer with MuP-specific weight initialization."""
+
+    def init_weights(self, init_std: float) -> None:
+        """Initialize weights with MuP-specific scaling.
+
+        Args:
+            init_std (float): Standard deviation for weight initialization.
+        """
         for linear in (self.wq, self.wk, self.wv, self.wo):
             nn.init.normal_(linear.weight, mean=0.0, std=init_std)
 
 
 class FeedForward(BaseFeedForward):
-    def init_weights(self, init_std: float):
+    """Feed-forward network with MuP-specific weight initialization."""
+
+    def init_weights(self, init_std: float) -> None:
+        """Initialize weights with MuP-specific scaling.
+
+        Args:
+            init_std (float): Standard deviation for weight initialization.
+
+        """
         for linear in (self.w1, self.w2, self.w3):
             nn.init.normal_(linear.weight, mean=0.0, std=init_std)
 
 
 class TransformerBlock(nn.Module):
-    def __init__(self, layer_id: int, model_args: TransformerModelArgs):
+    """Transformer block with attention and feed-forward layers with MuP configurations.
+
+    Args:
+        layer_id: Identifier for the layer (reserved for future use).
+        model_args: Model configuration arguments.
+    """
+
+    def __init__(
+        self, layer_id: int, model_args: TransformerModelArgs  # noqa: ARG002
+    ) -> None:
         super().__init__()
         self.model_args = model_args
         self.dim = model_args.dim
@@ -75,7 +99,16 @@ class TransformerBlock(nn.Module):
         self,
         x: torch.Tensor,
         freqs_cis: torch.Tensor,
-    ):
+    ) -> torch.Tensor:
+        """Forward pass through the Transformer block.
+
+        Args:
+            x: Input tensor.
+            freqs_cis: Precomputed frequency tensor for rotary embeddings.
+
+        Returns:
+            torch.Tensor: Output tensor after attention and feed-forward layers.
+        """
         attn_out = self.attention(self.attention_norm(x), freqs_cis)
         if self.use_peri_norm:
             attn_out = self.post_attn_norm(attn_out)
@@ -88,20 +121,17 @@ class TransformerBlock(nn.Module):
         if self.use_peri_norm:
             ffn_out = self.post_ffn_norm(ffn_out)
 
-        out = h + ffn_out * (
+        return h + ffn_out * (
             self.residual_scaling if self.mup_config.mup_enabled else 1.0
         )
-        return out
 
-    def init_weights(self):
+    def init_weights(self) -> None:
+        """Initialize weights for the Transformer block."""
         mup_enabled = self.mup_config.mup_enabled
         width_mult = self.mup_config.mup_width_multiplier
         init_std = self.model_args.init_config_obj.init_std
 
-        if mup_enabled:
-            std_to_use = init_std / (width_mult**0.5)
-        else:
-            std_to_use = init_std
+        std_to_use = init_std / (width_mult**0.5) if mup_enabled else init_std
 
         self.attention.init_weights(std_to_use)
         self.feed_forward.init_weights(std_to_use)
@@ -114,7 +144,16 @@ class TransformerBlock(nn.Module):
 
 
 class Transformer(nn.Module, ModelProtocol):
-    def __init__(self, model_args: TransformerModelArgs):
+    """Transformer model with Maximal Update Parametrization (MuP) support.
+
+    This model implements the Transformer architecture with optional MuP scaling
+    for improved training dynamics across different model widths.
+
+    Args:
+        model_args: Model configuration arguments.
+    """
+
+    def __init__(self, model_args: TransformerModelArgs) -> None:
         super().__init__()
         self.model_args = model_args
         self.vocab_size = model_args.vocab_size
@@ -139,18 +178,19 @@ class Transformer(nn.Module, ModelProtocol):
             self.layers[str(layer_id)] = TransformerBlock(layer_id, model_args)
         self.norm = nn.RMSNorm(model_args.dim, eps=model_args.norm_eps)
 
-        # Only create output layer if not tying weights
-        # When tying, we'll use F.linear with tok_embeddings.weight directly
-        if not model_args.tie_word_embeddings:
-            self.output = nn.Linear(model_args.dim, model_args.vocab_size, bias=False)
-        else:
-            self.output = None
+        # Always create output layer (weight tying happens after parallelization)
+        self.output = nn.Linear(model_args.dim, model_args.vocab_size, bias=False)
 
         self.register_buffer(
             "freqs_cis", self._precompute_freqs_cis(), persistent=False
         )
 
-    def init_weights(self, buffer_device: torch.device | None = None):
+    def init_weights(self, buffer_device: torch.device | None = None) -> None:
+        """Initialize model weights.
+
+        Args:
+            buffer_device: Device to place buffers on. Defaults to freqs_cis device.
+        """
         buffer_device = buffer_device or self.freqs_cis.device
         with torch.device(buffer_device):
             self.freqs_cis = self._precompute_freqs_cis()
@@ -165,13 +205,15 @@ class Transformer(nn.Module, ModelProtocol):
 
         for layer_module in self.layers.values():
             if layer_module is not None:
-                layer = cast(TransformerBlock, layer_module)
+                layer = cast("TransformerBlock", layer_module)
                 layer.init_weights()
 
         self.norm.reset_parameters()
 
         # Initialize output layer weights (only if not tying)
-        if self.output is not None:
+        # When tying, output.weight is same object as tok_embeddings.weight,
+        # so we don't re-initialize it
+        if not self.model_args.tie_word_embeddings:
             final_out_std = (self.model_args.dim**-0.5) * (
                 self.init_config.output_mult or 1.0
             )
@@ -184,7 +226,19 @@ class Transformer(nn.Module, ModelProtocol):
             self.model_args.rope_theta,
         )
 
-    def get_optimizer_param_groups(self, optimizer_config: dict):
+    def get_optimizer_param_groups(
+        self, optimizer_config: dict[str, Any]
+    ) -> tuple[Iterator[Parameter] | list[dict[str, Any]], dict[str, Any]]:
+        """Get optimizer parameter groups with MuP-specific learning rates.
+
+        Args:
+            optimizer_config: Base optimizer configuration dictionary.
+
+        Returns:
+            Tuple containing either an iterator of parameters (when MuP is disabled)
+            or a list of parameter groups with custom learning rates (when MuP is enabled),
+            along with the updated optimizer config.
+        """
         if not (
             self.mup_config.mup_enabled
             and not self.mup_config.mup_disable_hidden_lr_scaling
@@ -203,8 +257,9 @@ class Transformer(nn.Module, ModelProtocol):
         # Add embedding weight
         emb_params.append(self.tok_embeddings.weight)
 
-        # Add output weight if it exists (not tied)
-        if self.output is not None:
+        # Add output weight only if not tied
+        # When tied, tok_embeddings.weight and output.weight are the same object
+        if not self.model_args.tie_word_embeddings:
             emb_params.append(self.output.weight)
 
         if self.embedding_norm is not None:
@@ -214,7 +269,7 @@ class Transformer(nn.Module, ModelProtocol):
 
         for block_module in self.layers.values():
             # Cast to TransformerBlock to help type checker
-            block = cast(TransformerBlock, block_module)
+            block = cast("TransformerBlock", block_module)
 
             hidden_ln_params.extend(p for p in block.attention_norm.parameters())
             hidden_ln_params.extend(p for p in block.ffn_norm.parameters())
@@ -223,8 +278,8 @@ class Transformer(nn.Module, ModelProtocol):
                 hidden_ln_params.extend(p for p in block.post_ffn_norm.parameters())
 
             # Cast attention and feed_forward to their correct types
-            attention = cast(Attention, block.attention)
-            feed_forward = cast(FeedForward, block.feed_forward)
+            attention = cast("Attention", block.attention)
+            feed_forward = cast("FeedForward", block.feed_forward)
 
             decay_lr_depth_width_scaling.append(attention.wq.weight)
             decay_lr_depth_width_scaling.append(attention.wk.weight)
@@ -279,8 +334,17 @@ class Transformer(nn.Module, ModelProtocol):
     def forward(
         self,
         tokens: torch.Tensor,
-        input_batch: torch.Tensor | None = None,
-    ):
+        input_batch: torch.Tensor | None = None,  # noqa: ARG002
+    ) -> torch.Tensor:
+        """Forward pass through the Transformer model.
+
+        Args:
+            tokens: Input token indices.
+            input_batch: Optional input batch for document masking (unused in this implementation).
+
+        Returns:
+            torch.Tensor: Output logits.
+        """
         h = self.tok_embeddings(tokens)
 
         # Apply embedding normalization and scaling
@@ -293,11 +357,9 @@ class Transformer(nn.Module, ModelProtocol):
 
         h = self.norm(h)
 
-        # Use output layer or F.linear with embedding weights if tied
-        if self.output is None:
-            output = F.linear(h, self.tok_embeddings.weight)
-        else:
-            output = self.output(h)
+        # Always use self.output (nn.Linear) for DTensor compatibility
+        # When weight tying is enabled, output.weight is the same object as tok_embeddings.weight
+        output = self.output(h)
 
         if self.mup_config.mup_enabled:
             output = output * (
