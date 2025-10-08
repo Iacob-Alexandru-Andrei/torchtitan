@@ -12,16 +12,8 @@ This folder includes an experimental frontend implementation for [SimpleFSDP: Si
 
 ### Run SimpleFSDP Training on Llama 3
 
-#### Training Llama3 models
-
 ```bash
-CONFIG_FILE="./torchtitan/models/llama3/train_configs/llama3_8b.toml" ./run_train.sh --model.name simple_fsdp.llama3 --compile.enable
-```
-
-#### Training DeepSeek_v3 models
-
-```bash
-CONFIG_FILE="./torchtitan/models/deepseek_v3/train_configs/debug_model.toml" ./run_train.sh --model.name simple_fsdp.deepseek_v3 --compile.enable
+CONFIG_FILE="./torchtitan/models/llama3/train_configs/llama3_8b.toml" ./run_train.sh --model.name simple_fsdp --compile.enable
 ```
 
 ### Composability Support
@@ -38,9 +30,7 @@ Some of the features require the updates from PyTorch, with which we are working
 |Pipeline Parallelism| ✅ |
 |Distributed Checkpointing| ✅ |
 |Float8 Training| 🚧 |
-|Expert Parallelism | ✅ |
-|Expert Parallelism + Activation Checkpointing| 🚧 |
-|Expert Parallelism + Pipeline Parallelism| 🚧 |
+
 
 ### Citation
 

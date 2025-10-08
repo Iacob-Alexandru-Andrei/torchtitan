@@ -8,13 +8,11 @@ import os
 from typing import Generator
 
 import torch
-from torch.distributed.elastic.multiprocessing.errors import record
 
 import torchtitan.protocols.train_spec as train_spec_module
+from torch.distributed.elastic.multiprocessing.errors import record
 from torchtitan.components.checkpoint import CheckpointManager
 from torchtitan.components.loss import rescale_accumulated_loss
-from torchtitan.config import TORCH_DTYPE_MAP
-
 from torchtitan.distributed import ParallelDims, utils as dist_utils
 from torchtitan.protocols import BaseModelArgs
 from torchtitan.tools import utils
@@ -116,10 +114,7 @@ class ForgeEngine(torch.distributed.checkpoint.stateful.Stateful):
         # set the model args from training job configs
         model_args.update_from_config(job_config)
 
-        with (
-            torch.device("meta"),
-            utils.set_default_dtype(TORCH_DTYPE_MAP[job_config.training.dtype]),
-        ):
+        with torch.device("meta"):
             model = self.train_spec.model_cls(model_args)
 
         # calculate model size and flops per token
