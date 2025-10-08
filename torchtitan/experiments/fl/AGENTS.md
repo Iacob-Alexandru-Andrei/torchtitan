@@ -77,8 +77,8 @@ __init__.py→[] config.py→[] dataloader.py→[__init__((self,*args: Any,**kwa
 ## DEPENDENCY_PATTERNS
 
 ### EDGE_PATTERNS
-Call: 3 edges
 Contains: 22 edges
+Call: 3 edges
 
 ### CROSS_CLUSTER_FLOW
 UTILITY_LAYER→DATA_MODELS: 2

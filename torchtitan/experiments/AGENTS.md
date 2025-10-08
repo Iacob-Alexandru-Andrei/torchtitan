@@ -143,8 +143,8 @@ image.py→[_smart_resize((height: int,width: int,factor: int,# should be equal 
 ## DEPENDENCY_PATTERNS
 
 ### EDGE_PATTERNS
-Contains: 373 edges
 Call: 371 edges
+Contains: 373 edges
 
 ### CROSS_CLUSTER_FLOW
 DATA_MODELS→UTILITY_LAYER: 3
