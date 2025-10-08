@@ -17,7 +17,7 @@ It demonstrates how to:
     the training job.
 
 To run this script, you can use a command like:
-`torchrun --nproc_per_node=2 experiments/mosaic/train.py --config-path experiments/mosaic/configs/mosaic_job.toml`
+`torchrun --nproc_per_node=2 experiments/fl/train.py --config-path experiments/fl/configs/fl_job.toml`
 """
 
 from __future__ import annotations

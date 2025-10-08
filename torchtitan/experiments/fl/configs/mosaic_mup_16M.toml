@@ -19,8 +19,8 @@ enable_wandb = false
 
 [model]
 # Use the base model's TrainSpec. The Mosaic dataloader will be applied dynamically.
-name = "mosaic_llama3"
-flavor = "debugmodel_smoll"
+name = "mosaic_llama3_mup"
+flavor = "16M"
 # test folder with tokenizer.json, for debug purpose only
 hf_assets_path = "./tests/assets/tokenizer"
 
@@ -48,7 +48,7 @@ name = "text"
 drop_last = true
 
 [mosaic_dataloader.dataset]
-max_seq_len = 128
+max_seq_len = 2048
 download_retry = 2
 download_timeout = 60
 keep_zip = false

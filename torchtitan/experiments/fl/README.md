@@ -19,7 +19,7 @@ To run a training job with Mosaic streaming, you can use the provided `train.py`
 Here's an example command to launch a training job:
 
 ```bash
-torchrun --nproc_per_node=2 experiments/mosaic/train.py --config-path experiments/mosaic/configs/mosaic_job.toml
+torchrun --nproc_per_node=2 experiments/fl/train.py --config-path experiments/fl/configs/fl_job.toml
 ```
 
 ## Configuration

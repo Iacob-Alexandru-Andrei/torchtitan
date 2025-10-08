@@ -20,14 +20,11 @@ export S3_ENDPOINT_URL='http://taranaki.cl.cam.ac.uk:9000'
 # Default to 2 GPUs if not specified
 NPROC_PER_NODE=${NPROC_PER_NODE:-2}
 
-# Launch the training job
-torchrun --nproc_per_node=${NPROC_PER_NODE} experiments/mosaic/train.py --config-path experiments/mosaic/configs/mosaic_job.toml
-
 
 NGPU=${NGPU:-"1"}
 export LOG_RANK=${LOG_RANK:-0}
-CONFIG_FILE=${CONFIG_FILE:-"./torchtitan/experiments/mosaic/configs/mosaic_job.toml"}
-TRAIN_FILE=${TRAIN_FILE:-"torchtitan.experiments.mosaic.train"}
+CONFIG_FILE=${CONFIG_FILE:-"./torchtitan/experiments/fl/configs/mosaic_mup_16M.toml"}
+TRAIN_FILE=${TRAIN_FILE:-"torchtitan.experiments.fl.train"}
 
 TORCHFT_LIGHTHOUSE=${TORCHFT_LIGHTHOUSE:-"http://localhost:29510"}
 
