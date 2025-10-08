@@ -47,10 +47,10 @@ def parallelize_llama_mup(
     # At this point, both tok_embeddings.weight and output.weight are DTensors
     # with consistent sharding, so tying them is safe
     if (
-        model.model_args.tie_word_embeddings
-    ):  # pyright: ignore[reportAttributeAccessIssue]
-        model.output.weight = (
-            model.tok_embeddings.weight
-        )  # pyright: ignore[reportAttributeAccessIssue]
+        model.model_args.tie_word_embeddings  # pyright: ignore[reportAttributeAccessIssue]
+    ):
+        model.output.weight = (  # pyright: ignore[reportAttributeAccessIssue]
+            model.tok_embeddings.weight  # pyright: ignore[reportAttributeAccessIssue]
+        )
 
     return model
