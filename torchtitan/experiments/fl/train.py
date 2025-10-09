@@ -29,6 +29,7 @@ from typing import cast
 import torch
 
 from torchtitan.config import ConfigManager
+from torchtitan.experiments.fl.components import build_metrics_processor
 from torchtitan.experiments.fl.configs.config import MosaicJobConfig
 from torchtitan.experiments.fl.dataloader.dataloader import build_mosaic_dataloader
 from torchtitan.experiments.fl.dataloader.tokenizer import build_mosaic_tokenizer
@@ -75,6 +76,7 @@ def main() -> None:
                 base_spec,
                 build_dataloader_fn=build_mosaic_dataloader,
                 build_tokenizer_fn=cast(TokenizerBuilder, build_mosaic_tokenizer),
+                build_metrics_processor_fn=build_metrics_processor,
             )
             mosaic_spec.name = mosaic_spec_name
             register_train_spec(mosaic_spec)

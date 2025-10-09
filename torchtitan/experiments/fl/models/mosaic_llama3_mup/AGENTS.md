@@ -48,7 +48,7 @@ You are analyzing a codebase dependency graph optimized for AI understanding. Th
 ---
 
 # CODE_GRAPH
-NODES:7 EDGES:0
+NODES:15 EDGES:0
 
 ## DIRECTORY_TREE
 ROOT: torchtitan/experiments/fl/models/mosaic_llama3_mup/
@@ -56,9 +56,9 @@ ROOT: torchtitan/experiments/fl/models/mosaic_llama3_mup/
 ## ARCHITECTURAL_CLUSTERS
 
 ### DATA_MODELS
-NODES:7 CALL_DEPTH:1
+NODES:15 CALL_DEPTH:1
 
-__init__.py→[get_train_spec(void)] 
+__init__.py→[build_mosaic_mup_optimizers((model_parts: list[nn.Module],optimizer_config: OptimizerConfig,parallel_dims: ParallelDims,ft_manager: FTManager | None = None,))[HOT],get_train_spec(void)] 
 
 ## DEPENDENCY_PATTERNS
 

@@ -68,8 +68,8 @@ combine.py→[__init__((self,group_name: str,align: int,in_len,out_len,token_sha
 ## DEPENDENCY_PATTERNS
 
 ### EDGE_PATTERNS
-Call: 16 edges
 Contains: 11 edges
+Call: 16 edges
 
 ### CROSS_CLUSTER_FLOW
 TESTS→UTILITY_LAYER: 12

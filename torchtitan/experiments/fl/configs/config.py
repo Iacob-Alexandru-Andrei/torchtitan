@@ -16,8 +16,8 @@ from torchtitan.config import JobConfig
 
 @dataclass
 class MosaicJobConfig(JobConfig):
-    """
-    A dataclass for holding all configuration settings for a MosaicML training job.
+    """A dataclass for holding all configuration settings for a MosaicML training job.
+
     It inherits from the base `JobConfig` and adds Mosaic-specific sections.
     """
 
@@ -35,5 +35,28 @@ class MosaicJobConfig(JobConfig):
         metadata={
             "help": "Configuration for the MosaicML tokenizer. This should "
             "include the tokenizer name and any specific kwargs."
+        },
+    )
+
+    optimizer_monitor_interval: int = field(
+        default=10,
+        metadata={
+            "help": "Interval (in steps) for the optimizer monitor to log metrics. "
+            "Set to 0 to disable optimizer monitoring."
+        },
+    )
+
+    optimizer_monitor_only_global: bool = field(
+        default=True,
+        metadata={
+            "help": "If True, only log global aggregated metrics. If False, log per-parameter metrics as well."
+        },
+    )
+
+    optimizer_monitor_log_metrics: bool = field(
+        default=True,
+        metadata={
+            "help": "If True, log detailed optimizer metrics (moments, updates, etc.). "
+            "If False, only log gradient norms."
         },
     )

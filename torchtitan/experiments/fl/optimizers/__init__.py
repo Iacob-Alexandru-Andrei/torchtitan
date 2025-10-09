@@ -4,8 +4,11 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 
+"""New optimizers for FL experiments."""
+
 from .adopt import ADOPT
+from .decoupled_adamw import DecoupledAdamW
 from .qhadamw import QHAdamW
 from .qhadopt import QHADOPT
 
-__all__ = ["ADOPT", "QHADOPT", "QHAdamW"]
+__all__ = ["ADOPT", "QHADOPT", "DecoupledAdamW", "QHAdamW"]
