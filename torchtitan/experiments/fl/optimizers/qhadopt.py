@@ -3,11 +3,15 @@
 #
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
+"""Quasi-Hyperbolic ADOPT optimizer implementation."""
 
-from collections.abc import Callable
-from typing import Any, cast
+from __future__ import annotations
+
+import logging
+from typing import Any, cast, ClassVar, TYPE_CHECKING
 
 import torch
+import torch.distributed.distributed_c10d as c10d
 from torch import Tensor
 from torch.optim.optimizer import (
     _default_to_fused_or_foreach,
@@ -23,6 +27,11 @@ from torch.optim.optimizer import (
 )
 from torch.types import Number
 
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+log = logging.getLogger(__name__)
 
 __all__ = ["QHADOPT", "qhadopt"]
 
@@ -40,12 +49,78 @@ def _default_clip_lambda(step: Number | Tensor) -> float:
 
 
 class QHADOPT(Optimizer):
-    def __init__(
+    """Quasi-Hyperbolic ADOPT optimizer.
+
+    Args:
+        params (iterable): Iterable of parameters to optimize or dicts defining
+            parameter groups.
+        lr (float or Tensor, optional): Learning rate (default: 1e-3).
+        betas (Tuple[float, float], optional): Coefficients used for computing
+            running averages of gradient and its square (default: (0.999, 0.9999)).
+        vs (Tuple[float, ...], optional): Coefficients used for quasi-hyperbolic
+            moment estimates (default: (0.9,)). Only the first value is used.
+        eps (float, optional): Term added to the denominator to improve
+            numerical stability (default: 1e-6).
+        clip_lambda (callable, optional): A function that maps the step number to
+            the gradient clipping value (default: step^0.25).
+        weight_decay (float, optional): Weight decay (L2 penalty) (default: 0.0).
+        decouple (bool, optional): Whether to decouple the weight decay from
+            the gradient-based update (default: False).
+        foreach (bool, optional): Whether to use the foreach implementation
+            (default: None, which means the value of fused is used).
+        maximize (bool, optional): Maximize the params based on the objective,
+            instead of minimizing (default: False).
+        capturable (bool, optional): Whether the optimizer should be capturable
+            (default: False). See https://pytorch.org/docs/stable/notes/cuda.html#cuda-graphs
+        differentiable (bool, optional): Whether to make the optimizer
+            differentiable (default: False). This allows to compute higher order
+            derivatives via autograd, but it incurs a performance penalty.
+        fused (bool, optional): Whether to use the fused implementation
+            (default: None, which means to use fused if available).
+    """
+
+    metric_functions: ClassVar = {
+        "l2_norm/moment": (
+            lambda _param, optim_state, _step_tensor: torch.linalg.vector_norm(
+                optim_state["exp_avg"],
+            )
+        ),
+        "l2_norm/moment2": (
+            lambda _param, optim_state, _step_tensor: torch.linalg.vector_norm(
+                optim_state["exp_avg_sq"],
+            )
+        ),
+        "min/moment2": lambda _param, optim_state, _step_tensor: torch.min(
+            optim_state["exp_avg_sq"],
+        ),
+        "max/moment2": lambda _param, optim_state, _step_tensor: torch.max(
+            optim_state["exp_avg_sq"],
+        ),
+        "l2_norm/param": (
+            lambda param, _optim_state, _step_tensor: torch.linalg.vector_norm(
+                param.data,
+            )
+        ),
+        "l2_norm/update": (
+            lambda _param, _optim_state, step_tensor: torch.linalg.vector_norm(
+                step_tensor,
+            )
+        ),
+        "l2_norm/grad": (
+            lambda param, _optim_state, _step_tensor: torch.linalg.vector_norm(
+                param.grad,
+            )
+            if param.grad is not None
+            else torch.tensor(0.0)
+        ),
+    }
+
+    def __init__(  # noqa: C901, PLR0913, PLR0912
         self,
         params: ParamsT,
         lr: float | Tensor = 1e-3,
         betas: tuple[float, float] = (0.999, 0.9999),
-        v1: float = 0.9,
+        vs: tuple[float, ...] = (0.9,),
         eps: float = 1e-6,
         clip_lambda: (
             Callable[[Number | Tensor | Any], float] | None
@@ -81,13 +156,23 @@ class QHADOPT(Optimizer):
         if not weight_decay >= 0.0:
             msg = f"Invalid weight_decay value: {weight_decay}"
             raise ValueError(msg)
+        # Validate vs parameters
+        if not vs or len(vs) < 1:
+            msg = "vs must be a non-empty tuple with at least one element"
+            raise ValueError(msg)
+        for i, v in enumerate(vs):
+            if not 0.0 <= v <= 1.0:
+                msg = (
+                    f"Invalid vs parameter at index {i}: {v}. Must be between 0 and 1."
+                )
+                raise ValueError(msg)
 
         self.clip_lambda = clip_lambda
 
         defaults = {
             "lr": lr,
             "betas": betas,
-            "vs": (v1,),
+            "vs": vs,
             "eps": eps,
             "weight_decay": weight_decay,
             "decouple": decouple,
@@ -113,6 +198,16 @@ class QHADOPT(Optimizer):
             raise RuntimeError(msg)
 
     def __setstate__(self, state: dict) -> None:
+        """Set the optimizer state.
+
+        This method is called when loading a checkpoint.
+
+        Args:
+        state (dict): The state dictionary containing the optimizer state.
+            This typically includes the state of each parameter and other
+            hyperparameters.
+
+        """
         super().__setstate__(state)
         for group in self.param_groups:
             group.setdefault("maximize", False)
@@ -135,7 +230,7 @@ class QHADOPT(Optimizer):
                         else torch.tensor(step_val, dtype=_get_scalar_dtype())
                     )
 
-    def _init_group(
+    def _init_group(  # noqa: PLR0913
         self,
         group: dict,
         params_with_grad: list[Tensor],
@@ -144,6 +239,19 @@ class QHADOPT(Optimizer):
         exp_avg_sqs: list[Tensor],
         state_steps: list[Tensor],
     ) -> bool:
+        """Initialize the state for a parameter group.
+
+        Args:
+            group (dict): The parameter group to initialize.
+            params_with_grad (list): List to store parameters with gradients.
+            grads (list): List to store gradients.
+            exp_avgs (list): List to store exponential moving averages of gradients.
+            exp_avg_sqs (list): List to store exponential moving averages of squared gradients.
+            state_steps (list): List to store step counts for each parameter.
+
+        Returns:
+            bool: True if any parameter is of complex type, False otherwise.
+        """
         has_complex = False
         for p in group["params"]:
             if p.grad is None:
@@ -201,10 +309,11 @@ class QHADOPT(Optimizer):
         return has_complex
 
     @_use_grad_for_differentiable
-    def step(
+    def step(  # type: ignore[override]
         self,
         closure: Callable[[], torch.Tensor] | None = None,
     ) -> Tensor | None:
+        """Perform a single optimization step."""
         self._cuda_graph_capture_health_check()
 
         loss = None
@@ -257,8 +366,149 @@ class QHADOPT(Optimizer):
 
         return loss
 
+    @staticmethod
+    def dist_reduce_metrics(  # noqa: PLR0912, C901
+        optimizer_metrics: dict[str, torch.Tensor],
+    ) -> dict[str, torch.Tensor]:
+        """Compute the optimizer metrics across all workers.
 
-def _single_tensor_qhadopt(
+        Args:
+            optimizer_metrics: The optimizer metrics per workers.
+
+        Returns:
+            The optimizer metrics reduced across all workers.
+        """
+        local_keys = list(optimizer_metrics.keys())
+        all_gathered_keys = [None for _ in range(c10d.get_world_size())]
+        c10d.all_gather_object(all_gathered_keys, local_keys)
+        all_keys = set()
+        for keys in all_gathered_keys:
+            if keys is not None:
+                all_keys.update(set(keys))
+
+        # Sort keys to ensure every rank has the same keys order
+        # Only L2 norm metric keys are present, can apply regular sort
+        list_all_keys = sorted(all_keys)
+
+        # Determine device from existing metrics, fallback to default device
+        device = None
+        for value in optimizer_metrics.values():
+            if isinstance(value, torch.Tensor):
+                device = value.device
+                break
+        if device is None:
+            # Use default device (respects torch.set_default_device if set)
+            device = torch.tensor(0.0).device
+
+        for metric in list_all_keys:
+            reduced = optimizer_metrics.get(
+                metric,
+                torch.tensor(0.0, device=device),
+            )
+            if c10d.get_world_size() > 1:
+                if metric.startswith("l2_norm"):
+                    c10d.all_reduce(reduced, op=c10d.ReduceOp.SUM)
+                    optimizer_metrics[metric] = torch.sqrt(reduced)
+                elif metric.startswith("min"):
+                    c10d.all_reduce(reduced, op=c10d.ReduceOp.MIN)
+                    optimizer_metrics[metric] = reduced
+                elif metric.startswith("max"):
+                    c10d.all_reduce(reduced, op=c10d.ReduceOp.MAX)
+                    optimizer_metrics[metric] = reduced
+                else:
+                    c10d.all_reduce(reduced, op=c10d.ReduceOp.SUM)
+                    optimizer_metrics[metric] = reduced / c10d.get_world_size()
+            elif metric.startswith("l2_norm"):
+                optimizer_metrics[metric] = torch.sqrt(reduced)
+            else:
+                optimizer_metrics[metric] = reduced
+
+        return optimizer_metrics
+
+    @staticmethod
+    def pre_reduce_metrics(
+        optimizer_metrics: dict[str, torch.Tensor]
+    ) -> dict[str, torch.Tensor]:
+        """Preprocess metrics to reduce across ranks correctly.
+
+        Args:
+            optimizer_metrics: The optimizer metrics containing only the L2 norm metrics.
+
+        Returns:
+            The optimizer metrics containing the squared L2 norms.
+        """
+        # Only L2 norm metric keys are present, can skip sorting at this stage
+        for metric in optimizer_metrics:
+            # L2 norms need to be squared, before they are reduced via summation
+            optimizer_metrics[metric] **= 2
+
+        return optimizer_metrics
+
+    def report_per_parameter_metrics(
+        self,
+        param: torch.Tensor,
+        name: str,
+        optimizer_metrics: dict[str, torch.Tensor],
+    ) -> dict[str, torch.Tensor]:
+        """Report the per-parameter metrics.
+
+        Args:
+            param: The parameter for which to compute metrics.
+            name: The name of the parameter to be reported.
+            optimizer_metrics: The optimizer metrics.
+
+        Returns:
+            The optimizer metrics containing the per-parameter metrics.
+        """
+        lr = self.param_groups[0]["lr"]
+        eps = self.param_groups[0]["eps"]
+        weight_decay = self.param_groups[0]["weight_decay"]
+        initial_lr = self.param_groups[0]["initial_lr"]
+        decouple = self.param_groups[0]["decouple"]
+        v1, *_ = cast("tuple[float,...]", self.param_groups[0]["vs"])
+        clip_lambda = self.clip_lambda
+
+        if param in self.state:
+            param_optim_state = self.state[param]
+            step = param_optim_state["step"].item()
+
+            # Compute ADOPT-style update (normed gradient with clipping)
+            denom = torch.clamp(param_optim_state["exp_avg_sq"].sqrt(), eps)
+            if param.grad is not None:
+                normed_grad = param.grad.div(denom)
+                if clip_lambda is not None:
+                    clip_value = clip_lambda(step)
+                    normed_grad = normed_grad.clamp(-clip_value, clip_value)
+            else:
+                normed_grad = torch.zeros_like(param)
+
+            # Compute quasi-hyperbolic update: interpolate between normed_grad and exp_avg
+            qh_update = normed_grad.mul(1 - v1).add(
+                param_optim_state["exp_avg"], alpha=v1
+            )
+            step_tensor = qh_update * lr
+
+            # Apply weight decay adjustment if decoupled
+            if weight_decay != 0 and decouple:
+                decay_factor = (lr / initial_lr) if initial_lr else 1.0  # type: ignore[operator]
+                scaling_factor = (decay_factor * weight_decay) / (
+                    1 - decay_factor * weight_decay
+                )
+                step_tensor = (
+                    step_tensor * (1 + scaling_factor) + param * scaling_factor
+                )
+
+            for metric in self.metric_functions:
+                optimizer_metrics[f"{metric}/{name}"] = self.metric_functions[metric](
+                    param,
+                    param_optim_state,
+                    step_tensor,
+                )
+
+        return optimizer_metrics
+
+
+def _single_tensor_qhadopt(  # noqa: PLR0913
     params: list[Tensor],
     grads: list[Tensor],
     exp_avgs: list[Tensor],
@@ -279,12 +529,12 @@ def _single_tensor_qhadopt(
     maximize: bool,
     capturable: bool,
     differentiable: bool,
-    has_complex: bool,
+    has_complex: bool,  # noqa: ARG001
 ) -> None:
     assert grad_scale is None
     assert found_inf is None
 
-    if torch.jit.is_scripting():
+    if torch.jit.is_scripting():  # type: ignore[attr-defined]
         assert isinstance(lr, float)
 
     for i, param in enumerate(params):
@@ -293,7 +543,7 @@ def _single_tensor_qhadopt(
         exp_avg_sq = exp_avg_sqs[i]
         step_t = state_steps[i]
 
-        if not torch._utils.is_compiling() and capturable:
+        if not torch._utils.is_compiling() and capturable:  # type: ignore[attr-defined]
             device = _get_capturable_supported_devices()
             assert param.device.type == step_t.device.type
             assert (
@@ -309,7 +559,7 @@ def _single_tensor_qhadopt(
             grad = torch.view_as_real(grad)
             exp_avg = torch.view_as_real(exp_avg)
             exp_avg_sq = torch.view_as_real(exp_avg_sq)
-            param = torch.view_as_real(param)
+            param = torch.view_as_real(param)  # noqa: PLW2901
 
         if step == 0:
             exp_avg_sq.addcmul_(grad, grad)
@@ -317,7 +567,7 @@ def _single_tensor_qhadopt(
             continue
 
         if weight_decay != 0 and decouple:
-            decay_factor = (lr / initial_lr) if initial_lr != 0 else 1.0
+            decay_factor = (lr / initial_lr) if initial_lr != 0 else 1.0  # type: ignore[operator]
             param.mul_(1 - decay_factor * weight_decay)
 
         denom = torch.clamp(exp_avg_sq.sqrt(), eps)
@@ -337,7 +587,7 @@ def _single_tensor_qhadopt(
         step_t += 1
 
 
-def _multi_tensor_qhadopt(
+def _multi_tensor_qhadopt(  # noqa: C901, PLR0912, PLR0913, PLR0915
     params: list[Tensor],
     grads: list[Tensor],
     exp_avgs: list[Tensor],
@@ -369,7 +619,7 @@ def _multi_tensor_qhadopt(
             msg,
         )
 
-    if not torch._utils.is_compiling() and capturable:
+    if not torch._utils.is_compiling() and capturable:  # type: ignore[attr-defined]
         device = _get_capturable_supported_devices(
             supports_xla=False,
         )
@@ -383,8 +633,11 @@ def _multi_tensor_qhadopt(
     assert grad_scale is None
     assert found_inf is None
 
-    grouped_tensors = Optimizer._group_tensors_by_device_and_dtype(
-        [params, grads, exp_avgs, exp_avg_sqs, state_steps],
+    grouped_tensors = Optimizer._group_tensors_by_device_and_dtype(  # type: ignore[arg-type]
+        cast(
+            "list[list[Tensor | None]]",
+            [params, grads, exp_avgs, exp_avg_sqs, state_steps],
+        ),
     )
     for (
         device_params_,
@@ -411,7 +664,7 @@ def _multi_tensor_qhadopt(
             device_grads = torch._foreach_neg(device_grads)
 
         if weight_decay != 0 and not decouple:
-            decay_factor = (lr / initial_lr) if initial_lr != 0 else 1.0
+            decay_factor = (lr / initial_lr) if initial_lr != 0 else 1.0  # type: ignore[operator]
             weight_decay_unscaled = decay_factor * weight_decay
             if maximize:
                 torch._foreach_add_(
@@ -429,7 +682,7 @@ def _multi_tensor_qhadopt(
         if device_state_steps[0] == 0:
             torch._foreach_addcmul_(device_exp_avg_sqs, device_grads, device_grads)
 
-            if not torch._utils.is_compiling() and device_state_steps[0].is_cpu:
+            if not torch._utils.is_compiling() and device_state_steps[0].is_cpu:  # type: ignore[attr-defined]
                 torch._foreach_add_(
                     device_state_steps,
                     torch.tensor(1.0, device="cpu"),
@@ -440,7 +693,7 @@ def _multi_tensor_qhadopt(
             continue
 
         if weight_decay != 0 and decouple:
-            decay_factor = (lr / initial_lr) if initial_lr != 0 else 1.0
+            decay_factor = (lr / initial_lr) if initial_lr != 0 else 1.0  # type: ignore[operator]
             weight_decay_unscaled = decay_factor * weight_decay
             torch._foreach_add_(
                 device_params,
@@ -472,7 +725,7 @@ def _multi_tensor_qhadopt(
             value=1 - beta2,
         )
 
-        if not torch._utils.is_compiling() and device_state_steps[0].is_cpu:
+        if not torch._utils.is_compiling() and device_state_steps[0].is_cpu:  # type: ignore[attr-defined]
             torch._foreach_add_(
                 device_state_steps,
                 torch.tensor(1.0, device="cpu"),
@@ -482,7 +735,7 @@ def _multi_tensor_qhadopt(
             torch._foreach_add_(device_state_steps, 1)
 
 
-def _fused_qhadopt(
+def _fused_qhadopt(  # noqa: PLR0913
     params: list[Tensor],
     grads: list[Tensor],
     exp_avgs: list[Tensor],
@@ -505,11 +758,12 @@ def _fused_qhadopt(
     capturable: bool,
     differentiable: bool,
 ) -> None:
+    """Fused QHADOPT implementation (not yet implemented)."""
     raise NotImplementedError
 
 
 @_disable_dynamo_if_unsupported(single_tensor_fn=_single_tensor_qhadopt)
-def qhadopt(
+def qhadopt(  # noqa: PLR0913
     params: list[Tensor],
     grads: list[Tensor],
     exp_avgs: list[Tensor],
@@ -534,6 +788,33 @@ def qhadopt(
     eps: float,
     maximize: bool,
 ) -> None:
+    """Functional API for QHADOPT optimizer.
+
+    Args:
+        params: List of parameters to optimize
+        grads: List of gradients
+        exp_avgs: List of exponential moving averages
+        exp_avg_sqs: List of exponential moving averages of squared gradients
+        state_steps: List of step counts
+        initial_lr: Initial learning rate
+        foreach: Whether to use foreach implementation
+        capturable: Whether to make optimizer capturable for CUDA graphs
+        differentiable: Whether to make optimizer differentiable
+        fused: Whether to use fused implementation
+        grad_scale: Gradient scaler for mixed precision training
+        found_inf: Whether inf/nan was found in gradients
+        has_complex: Whether parameters are complex
+        beta1: First moment decay rate
+        beta2: Second moment decay rate
+        v1: Quasi-hyperbolic interpolation parameter
+        lr: Learning rate
+        clip_lambda: Gradient clipping function
+        weight_decay: Weight decay coefficient
+        decouple: Whether to decouple weight decay
+        eps: Term for numerical stability
+        maximize: Whether to maximize objective instead of minimize
+
+    """
     if fused is None and foreach is None:
         _, foreach = _default_to_fused_or_foreach(
             params,
@@ -547,16 +828,16 @@ def qhadopt(
     if foreach is None:
         foreach = False
 
-    if foreach and torch.jit.is_scripting():
+    if foreach and torch.jit.is_scripting():  # type: ignore[attr-defined]
         msg = "torch.jit.script not supported with foreach optimizers"
         raise RuntimeError(msg)
-    if fused and torch.jit.is_scripting():
+    if fused and torch.jit.is_scripting():  # type: ignore[attr-defined]
         msg = "torch.jit.script not supported with fused optimizers"
         raise RuntimeError(msg)
 
-    if fused and not torch.jit.is_scripting():
+    if fused and not torch.jit.is_scripting():  # type: ignore[attr-defined]
         func = _fused_qhadopt
-    elif foreach and not torch.jit.is_scripting():
+    elif foreach and not torch.jit.is_scripting():  # type: ignore[attr-defined]
         func = _multi_tensor_qhadopt
     else:
         func = _single_tensor_qhadopt

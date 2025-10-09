@@ -44,6 +44,9 @@ ignore = [
     "D206",    # Docstring should be indented with spaces (handled by ufmt)
     "D300",    # Use triple double quotes (handled by ufmt)
     "I001",    # Import block is un-sorted or un-formatted (handled by ufmt/usort)
+    "S101",   # Use of assert detected (allowed in tests)
+    "ANN401", # Any dissallowed for kwargs
+    "SLF001", # Private member accessed (allowed for torch internals)
 ]
 
 # Allow autofix for all enabled rules except formatting-related ones

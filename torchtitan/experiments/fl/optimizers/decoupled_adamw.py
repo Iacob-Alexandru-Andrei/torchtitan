@@ -1,3 +1,9 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+# All rights reserved.
+#
+# This source code is licensed under the BSD-style license found in the
+# LICENSE file in the root directory of this source tree.
+
 """Optimizers with weight decay decoupled from the learning rate.
 
 These optimizers are based off of `Decoupled Weight Decay Regularization
@@ -9,10 +15,10 @@ from __future__ import annotations
 
 import logging
 import math
-from typing import TYPE_CHECKING, ClassVar
+from typing import ClassVar, TYPE_CHECKING
 
 import torch
-import torch.distributed as dist
+import torch.distributed.distributed_c10d as c10d
 from torch.optim import AdamW
 
 if TYPE_CHECKING:
@@ -27,29 +33,43 @@ __all__ = ["DecoupledAdamW"]
 class DecoupledAdamW(AdamW):
     """Adam optimizer with the weight decay term decoupled from the learning rate.
 
-    Notes
-    -----
-    Since `weight_decay` is no longer scaled by `lr`, you will likely want to use
-    much smaller values for `weight_decay` than you would if using `torch.optim.Adam`
-    or `torch.optim.AdamW`. In this optimizer, the value `weight_decay` translates
-    exactly to: 'On every optimizer update, every weight element will be multiplied by
-    `(1.0 - weight_decay_t)`'. The term `weight_decay_t` will follow the same schedule
-    as `lr_t` but crucially will not be scaled by `lr`.
+    Args:
+        params: Iterable of parameters to optimize or dicts defining parameter groups.
+        lr: Learning rate, by default 1e-3.
+        betas: Coefficients used for computing running averages of gradient and
+            its square, by default (0.9, 0.95).
+        eps: Term added to the denominator to improve numerical
+            stability, by default 1e-8.
+        weight_decay: Decoupled weight decay factor, by default 1e-5.
+        amsgrad: Enables the amsgrad variant of Adam, by default False.
+        decouple: Whether to decouple the learning rate from the weight decay, by default True.
+        foreach: Whether to use the foreach implementation, by default None.
+        maximize: Maximize the objective with respect to the params, by default False.
+        capturable: Whether this instance is safe to capture in a CUDA graph, by default False.
+        differentiable: Whether autograd should occur through the optimizer step, by default False.
+        fused: Whether to use the fused implementation, by default None.
 
-    Argument defaults are similar to :class:`torch.optim.AdamW` but we make two changes:
-    * The default for ``weight_decay`` is changed from ``1e-2`` -> ``1e-5`` because in
-    `DecoupledAdamW`, the weight decay is decoupled and no longer scaled by the
-    `lr=1e-3`.
-    * The default for ``betas`` is changed from ``(0.9, 0.999)`` to ``(0.9, 0.95)``
-    to reflect community best-practices for the beta2 hyperparameter.
+    Notes:
+        Since `weight_decay` is no longer scaled by `lr`, you will likely want to use
+        much smaller values for `weight_decay` than you would if using `torch.optim.Adam`
+        or `torch.optim.AdamW`. In this optimizer, the value `weight_decay` translates
+        exactly to: 'On every optimizer update, every weight element will be multiplied by
+        `(1.0 - weight_decay_t)`'. The term `weight_decay_t` will follow the same schedule
+        as `lr_t` but crucially will not be scaled by `lr`.
 
-    Why use this optimizer? The standard
-    `AdamW <https://pytorch.org/docs/stable/generated/torch.optim.AdamW.html#torch.optim.AdamW>`_
-    optimizer explicitly couples the weight decay term with the learning rate.
-    This ties the optimal value of :attr:`weight_decay` to :attr:`lr` and can also hurt
-    generalization in practice. For more details on why decoupling might be desirable,
-    see `Decoupled Weight Decay Regularization <https://arxiv.org/abs/1711.05101>`_.
+        Argument defaults are similar to :class:`torch.optim.AdamW` but we make two changes:
+        * The default for ``weight_decay`` is changed from ``1e-2`` -> ``1e-5`` because in
+        `DecoupledAdamW`, the weight decay is decoupled and no longer scaled by the
+        `lr=1e-3`.
+        * The default for ``betas`` is changed from ``(0.9, 0.999)`` to ``(0.9, 0.95)``
+        to reflect community best-practices for the beta2 hyperparameter.
 
+        Why use this optimizer? The standard
+        `AdamW <https://pytorch.org/docs/stable/generated/torch.optim.AdamW.html#torch.optim.AdamW>`_
+        optimizer explicitly couples the weight decay term with the learning rate.
+        This ties the optimal value of :attr:`weight_decay` to :attr:`lr` and can also hurt
+        generalization in practice. For more details on why decoupling might be desirable,
+        see `Decoupled Weight Decay Regularization <https://arxiv.org/abs/1711.05101>`_.
     """
 
     metric_functions: ClassVar = {
@@ -95,34 +115,13 @@ class DecoupledAdamW(AdamW):
         weight_decay: float = 1e-5,
         *,
         amsgrad: bool = False,
-        decouple: bool = True,
-        report_curvature: bool = False,
+        decouple: bool = False,
+        foreach: bool | None = None,
+        maximize: bool = False,
+        capturable: bool = False,
+        differentiable: bool = False,
+        fused: bool | None = None,
     ) -> None:
-        """Instantiate AdamW.
-
-        Parameters
-        ----------
-        params : Union[Iterable[torch.Tensor], Iterable[dict]]
-            Iterable of parameters to optimize or dicts defining parameter groups.
-        lr : float, optional
-            Learning rate, by default 1e-3
-        betas : tuple[float, float], optional
-             Coefficients used for computing running averages of gradient and
-             its square, by default (0.9, 0.95)
-        eps : float, optional
-             Term added to the denominator to improve numerical
-             stability, by default 1e-8
-        weight_decay : float, optional
-            Decoupled weight decay factor, by default 1e-5
-        amsgrad : bool, optional
-            Enables the amsgrad variant of Adam, by default False
-        decouple : bool, optional
-            Whether to decouple the learning rate from the weight decay, by default True
-        report_curvature : bool, optional
-            Whether to report curvature metrics
-            for each parameter, by default False
-
-        """
         super().__init__(
             params=params,
             lr=lr,
@@ -130,24 +129,19 @@ class DecoupledAdamW(AdamW):
             eps=eps,
             weight_decay=weight_decay,
             amsgrad=amsgrad,
+            foreach=foreach,
+            maximize=maximize,
+            capturable=capturable,
+            differentiable=differentiable,
+            fused=fused,
         )
         for group in self.param_groups:
             group["initial_lr"] = group["lr"]
             group["decouple"] = decouple
         self.amsgrad = amsgrad
 
-        # NOTE: Added to avoid expensive metrics
-        # calculations
-        self.curvature_metric_function: (
-            Callable[[torch.Tensor, str], dict[str, torch.Tensor]] | None
-        ) = None
-        if report_curvature:
-            # from photon.optimizers.utils import get_report_curvature
-            # self.curvature_metric_function = get_report_curvature()
-            pass
-
     @staticmethod
-    def adamw(  # noqa: PLR0913, PLR0917
+    def adamw(  # noqa: PLR0913
         params: list[torch.Tensor],
         grads: list[torch.Tensor],
         exp_avgs: list[torch.Tensor],
@@ -239,23 +233,14 @@ class DecoupledAdamW(AdamW):
     ) -> torch.Tensor | None:
         """Perform a single optimization step.
 
-        Parameters
-        ----------
-        closure : Optional[Callable[[], torch.Tensor]], optional
-            A closure that reevaluates the model
-                and returns the loss, by default None
+        Args:
+            closure: A closure that reevaluates the model and returns the loss, by default None.
 
-        Returns
-        -------
-        Tensor | None
-            The loss, if the closure is provided and called,
-            otherwise None.
+        Returns:
+            The loss, if the closure is provided and called, otherwise None.
 
-        Raises
-        ------
-        RuntimeError
-            AdamW does not support sparse gradients
-
+        Raises:
+            RuntimeError: AdamW does not support sparse gradients.
         """
         loss = None
         if closure is not None:
@@ -339,69 +324,75 @@ class DecoupledAdamW(AdamW):
         return loss
 
     @staticmethod
-    def dist_reduce_metrics(optimizer_metrics: dict) -> dict:
+    def dist_reduce_metrics(  # noqa: C901, PLR0912
+        optimizer_metrics: dict[str, torch.Tensor],
+    ) -> dict[str, torch.Tensor]:
         """Compute the optimizer metrics across all workers.
 
-        Parameters
-        ----------
-        optimizer_metrics : dict
-            The optimizer metrics per workers
+        Args:
+            optimizer_metrics: The optimizer metrics per workers.
 
-        Returns
-        -------
-        dict
+        Returns:
             The optimizer metrics reduced across all workers.
-
         """
         local_keys = list(optimizer_metrics.keys())
-        all_gathered_keys = dist.all_gather_object(local_keys)
+        all_gathered_keys = [None for _ in range(c10d.get_world_size())]
+        c10d.all_gather_object(all_gathered_keys, local_keys)
         all_keys = set()
         for keys in all_gathered_keys:
-            all_keys.update(set(keys))
+            if keys is not None:
+                all_keys.update(set(keys))
 
         # Sort keys to ensure every rank has the same keys order
         # Only L2 norm metric keys are present, can apply regular sort
         list_all_keys = sorted(all_keys)
+
+        # Determine device from existing metrics, fallback to default device
+        device = None
+        for value in optimizer_metrics.values():
+            if isinstance(value, torch.Tensor):
+                device = value.device
+                break
+        if device is None:
+            # Use default device (respects torch.set_default_device if set)
+            device = torch.tensor(0.0).device
+
         for metric in list_all_keys:
             reduced = optimizer_metrics.get(
                 metric,
-                torch.tensor(0.0, device=torch.cuda.current_device()),
+                torch.tensor(0.0, device=device),
             )
-            if dist.get_world_size() > 1:
+            if c10d.get_world_size() > 1:
                 if metric.startswith("l2_norm"):
-                    dist.all_reduce(reduced, op=dist.ReduceOp.SUM)
+                    c10d.all_reduce(reduced, op=c10d.ReduceOp.SUM)
                     optimizer_metrics[metric] = torch.sqrt(reduced)
                 elif metric.startswith("min"):
-                    dist.all_reduce(reduced, op=dist.ReduceOp.MIN)
+                    c10d.all_reduce(reduced, op=c10d.ReduceOp.MIN)
                     optimizer_metrics[metric] = reduced
                 elif metric.startswith("max"):
-                    dist.all_reduce(reduced, op=dist.ReduceOp.MAX)
+                    c10d.all_reduce(reduced, op=c10d.ReduceOp.MAX)
                     optimizer_metrics[metric] = reduced
                 else:
-                    dist.all_reduce(reduced, op=dist.ReduceOp.SUM)
-                    optimizer_metrics[metric] = reduced / dist.get_world_size()
+                    c10d.all_reduce(reduced, op=c10d.ReduceOp.SUM)
+                    optimizer_metrics[metric] = reduced / c10d.get_world_size()
+            elif metric.startswith("l2_norm"):
+                optimizer_metrics[metric] = torch.sqrt(reduced)
             else:
-                if metric.startswith("l2_norm"):
-                    optimizer_metrics[metric] = torch.sqrt(reduced)
-                else:
-                    optimizer_metrics[metric] = reduced
+                optimizer_metrics[metric] = reduced
 
         return optimizer_metrics
 
     @staticmethod
-    def pre_reduce_metrics(optimizer_metrics: dict) -> dict:
+    def pre_reduce_metrics(
+        optimizer_metrics: dict[str, torch.Tensor]
+    ) -> dict[str, torch.Tensor]:
         """Preprocess metrics to reduce across ranks correctly.
 
-        Parameters
-        ----------
-        optimizer_metrics : dict
-            The optimizer metrics containing only the L2 norm metrics.
+        Args:
+            optimizer_metrics: The optimizer metrics containing only the L2 norm metrics.
 
-        Returns
-        -------
-        dict
+        Returns:
             The optimizer metrics containing the squared L2 norms.
-
         """
         # Only L2 norm metric keys are present, can skip sorting at this stage
         for metric in optimizer_metrics:
@@ -414,24 +405,17 @@ class DecoupledAdamW(AdamW):
         self,
         param: torch.Tensor,
         name: str,
-        optimizer_metrics: dict,
-    ) -> dict:
-        """Report the per-parameter mertics.
+        optimizer_metrics: dict[str, torch.Tensor],
+    ) -> dict[str, torch.Tensor]:
+        """Report the per-parameter metrics.
 
-        Parameters
-        ----------
-        param : torch.Tensor
-            The parameter for which to compute metrics.
-        name : str
-            The name of the name of the parameter to be reported.
-        optimizer_metrics : dict
-            The optimizer metrics.
+        Args:
+            param: The parameter for which to compute metrics.
+            name: The name of the parameter to be reported.
+            optimizer_metrics: The optimizer metrics.
 
-        Returns
-        -------
-        dict
-            The optimizer metrics containing the per-parameter metrics
-
+        Returns:
+            The optimizer metrics containing the per-parameter metrics.
         """
         lr = self.param_groups[0]["lr"]
         eps = self.param_groups[0]["eps"]
@@ -464,8 +448,5 @@ class DecoupledAdamW(AdamW):
                     param_optim_state,
                     step_tensor,
                 )
-            # NOTE: these are heavy and require extra memory
-            if self.curvature_metric_function is not None:
-                optimizer_metrics.update(self.curvature_metric_function(param, name))
 
         return optimizer_metrics

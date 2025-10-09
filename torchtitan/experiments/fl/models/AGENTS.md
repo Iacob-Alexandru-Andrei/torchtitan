@@ -70,8 +70,8 @@ __init__.py→[_get_llama3_mup_spec(void),get_train_spec(void),get_train_spec(vo
 ## DEPENDENCY_PATTERNS
 
 ### EDGE_PATTERNS
-Call: 1 edges
 Contains: 15 edges
+Call: 1 edges
 
 ### CROSS_CLUSTER_FLOW
 

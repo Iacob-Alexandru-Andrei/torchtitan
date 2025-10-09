@@ -1,6 +1,14 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+# All rights reserved.
+#
+# This source code is licensed under the BSD-style license found in the
+# LICENSE file in the root directory of this source tree.
+
+"""New optimizers for FL experiments."""
+
 from .adopt import ADOPT
+from .decoupled_adamw import DecoupledAdamW
 from .qhadamw import QHAdamW
 from .qhadopt import QHADOPT
-from .decoupled_adamw import DecoupledAdamW
 
-__all__ = ["ADOPT", "QHAdamW", "QHADOPT", "DecoupledAdamW"]
+__all__ = ["ADOPT", "QHADOPT", "DecoupledAdamW", "QHAdamW"]

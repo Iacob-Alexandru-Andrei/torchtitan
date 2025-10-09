@@ -17,6 +17,9 @@ enable_tensorboard = false
 save_tb_folder = "tb"
 enable_wandb = true
 save_for_all_ranks = true
+optimizer_monitor_interval = 10
+optimizer_monitor_only_global = true
+optimizer_monitor_log_metrics = true
 
 [model]
 name = "mosaic_llama3_mup"
@@ -27,7 +30,7 @@ hf_assets_path = "./tests/assets/tokenizer"
 
 
 [optimizer]
-name = "AdamW"
+name = "DecoupledAdamW"
 lr = 8e-4
 eps = 1e-8
 
