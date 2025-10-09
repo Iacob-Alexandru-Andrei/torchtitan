@@ -14,9 +14,12 @@ import torch
 import torch.distributed.distributed_c10d as c10d
 
 from torchtitan.components.metrics import MetricsProcessor
+from torchtitan.distributed import utils as dist_utils
 
 if TYPE_CHECKING:
     from collections.abc import Callable
+
+    from torch.distributed.device_mesh import DeviceMesh
 
     from torchtitan.components.optimizer import OptimizersContainer
 
@@ -49,12 +52,56 @@ class OptimizerMonitor:
         self.only_global = only_global
         self.interval = interval
 
+    def _reduce_metrics_across_ranks(
+        self, optimizer_metrics: dict[str, torch.Tensor], mesh: DeviceMesh
+    ) -> dict[str, torch.Tensor]:
+        """Reduce optimizer metrics across all ranks using TorchTitan's distributed utilities.
+
+        Follows the pattern from torchtitan.distributed.utils._dist_reduce.
+        """
+        reduced_metrics = {}
+
+        for metric_name, metric_value in optimizer_metrics.items():
+            if not isinstance(metric_value, torch.Tensor):
+                # Skip non-tensor metrics
+                reduced_metrics[metric_name] = metric_value
+                continue
+
+            # Determine reduction operation based on metric name
+            if "l2_norm" in metric_name or "norm" in metric_name:
+                # For L2 norms, sum the squared norms, then take sqrt
+                squared_norm = metric_value * metric_value
+                sum_squared = dist_utils.dist_sum(squared_norm, mesh)
+                # Convert back to tensor for sqrt
+                reduced_metrics[metric_name] = torch.tensor(sum_squared).sqrt()
+            elif "max" in metric_name:
+                reduced_metrics[metric_name] = torch.tensor(
+                    dist_utils.dist_max(metric_value, mesh)
+                )
+            elif "min" in metric_name:
+                # dist_min not implemented, use -dist_max(-x)
+                reduced_metrics[metric_name] = torch.tensor(
+                    -dist_utils.dist_max(-metric_value, mesh)
+                )
+            elif "mean" in metric_name or "avg" in metric_name:
+                reduced_metrics[metric_name] = torch.tensor(
+                    dist_utils.dist_mean(metric_value, mesh)
+                )
+            else:
+                # Default to sum for other metrics
+                reduced_metrics[metric_name] = torch.tensor(
+                    dist_utils.dist_sum(metric_value, mesh)
+                )
+
+        return reduced_metrics
+
     def batch_end(  # noqa: C901, PLR0912, PLR0915
         self,
         step: int,
         model: torch.nn.Module,
         optimizers: OptimizersContainer,
         logger: Any,
+        mesh: DeviceMesh | None = None,
     ) -> None:
         """Calculate the statistics at the end of the batch."""
         if step % self.interval != 0:
@@ -75,30 +122,25 @@ class OptimizerMonitor:
                         metric_reporter(p, name, optimizer_metrics),
                     )
 
-                if f"l2_norm/grad/{name}" not in optimizer_metrics:
-                    param_grad_norm = torch.linalg.vector_norm(p.grad)
-                    optimizer_metrics[f"l2_norm/grad/{name}"] = param_grad_norm
-
         if (
             c10d.is_initialized()
-            and c10d.get_world_size() > 0
+            and c10d.get_world_size() > 1
             and self.log_optimizer_metrics
+            and mesh is not None
         ):
+            # Pre-process metrics before reduction
             pre_reduce_metrics: Callable[[Any]] | None = getattr(
                 optimizer,
                 "pre_reduce_metrics",
                 None,
             )
-            if callable(pre_reduce_metrics) and self.log_optimizer_metrics:
+            if callable(pre_reduce_metrics):
                 optimizer_metrics = pre_reduce_metrics(optimizer_metrics)
 
-            dist_reduce_metrics: Callable[[Any], dict] | None = getattr(
-                optimizer,
-                "dist_reduce_metrics",
-                None,
+            # Reduce metrics across all ranks using TorchTitan's distributed utilities
+            optimizer_metrics = self._reduce_metrics_across_ranks(
+                optimizer_metrics, mesh
             )
-            if callable(dist_reduce_metrics) and self.log_optimizer_metrics:
-                optimizer_metrics = dist_reduce_metrics(optimizer_metrics)
 
         # Dynamically aggregate all metric names found in optimizer_metrics
         agg_type_values = {agg_type.value for agg_type in AggregationType}
@@ -212,7 +254,10 @@ class FLMetricsProcessor(MetricsProcessor):
 
         """
         super().log(step, global_avg_loss, global_max_loss, grad_norm, extra_metrics)
+
         if self.model_parts and self.optimizers:
+            # Pass the dp_cp mesh for metric reduction across data parallel ranks
+            mesh = self.parallel_dims.world_mesh["dp_cp"]
             self.optimizer_monitor.batch_end(
-                step, self.model_parts[0], self.optimizers, self.logger
+                step, self.model_parts[0], self.optimizers, self.logger, mesh
             )

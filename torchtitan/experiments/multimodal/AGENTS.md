@@ -71,8 +71,8 @@ __init__.py→[] check_padding_mm.py→[] mm_collator.py→[padded_collate((batc
 ## DEPENDENCY_PATTERNS
 
 ### EDGE_PATTERNS
-Call: 19 edges
 Contains: 61 edges
+Call: 19 edges
 
 ### CROSS_CLUSTER_FLOW
 

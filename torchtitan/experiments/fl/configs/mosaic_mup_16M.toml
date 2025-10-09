@@ -1,3 +1,9 @@
+# Optimizer monitor settings (MosaicJobConfig root-level fields)
+# These must be at the top level, not inside any [section]
+optimizer_monitor_interval = 1
+optimizer_monitor_only_global = true
+optimizer_monitor_log_metrics = true
+
 [job]
 dump_folder = "./outputs"
 description = "Llama 3 debug training with Mosaic streaming"
@@ -17,9 +23,6 @@ enable_tensorboard = false
 save_tb_folder = "tb"
 enable_wandb = true
 save_for_all_ranks = true
-optimizer_monitor_interval = 10
-optimizer_monitor_only_global = true
-optimizer_monitor_log_metrics = true
 
 [model]
 name = "mosaic_llama3_mup"

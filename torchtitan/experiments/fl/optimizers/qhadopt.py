@@ -13,6 +13,7 @@ from typing import Any, cast, ClassVar, TYPE_CHECKING
 import torch
 import torch.distributed.distributed_c10d as c10d
 from torch import Tensor
+from torch.distributed.tensor import DTensor
 from torch.optim.optimizer import (
     _default_to_fused_or_foreach,
     _device_dtype_check_for_fused,
@@ -105,13 +106,6 @@ class QHADOPT(Optimizer):
             lambda _param, _optim_state, step_tensor: torch.linalg.vector_norm(
                 step_tensor,
             )
-        ),
-        "l2_norm/grad": (
-            lambda param, _optim_state, _step_tensor: torch.linalg.vector_norm(
-                param.grad,
-            )
-            if param.grad is not None
-            else torch.tensor(0.0)
         ),
     }
 
@@ -405,6 +399,11 @@ class QHADOPT(Optimizer):
                 metric,
                 torch.tensor(0.0, device=device),
             )
+
+            # Convert DTensor to regular tensor if needed (FSDP2 compatibility)
+            if isinstance(reduced, DTensor):
+                reduced = reduced.full_tensor()
+
             if c10d.get_world_size() > 1:
                 if metric.startswith("l2_norm"):
                     c10d.all_reduce(reduced, op=c10d.ReduceOp.SUM)

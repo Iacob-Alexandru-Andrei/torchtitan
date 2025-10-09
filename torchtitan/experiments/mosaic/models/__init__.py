@@ -15,13 +15,17 @@ from torchtitan.experiments.fl.models.llama3_mup.train_configs import (
 from torchtitan.experiments.fl.optimizer_builder import build_mosaic_optimizers
 
 from torchtitan.models.llama3 import get_train_spec as get_base_llama3_spec
-from torchtitan.protocols.train_spec import register_train_spec, TokenizerBuilder
+from torchtitan.protocols.train_spec import (
+    register_train_spec,
+    TokenizerBuilder,
+    TrainSpec,
+)
 
 
-def _get_mosaic_llama3_spec():
-    """
-    This function wraps the base Llama3 TrainSpec to make it compatible with
-    Mosaic streaming. It also adds a new model configuration with a larger
+def _get_mosaic_llama3_spec() -> TrainSpec:
+    """Wrap the base Llama3 TrainSpec to make it Mosaic-compatible.
+
+    It also adds a new model configuration with a larger
     vocab size.
     """
     # Get the base Llama3 spec
@@ -42,7 +46,7 @@ def _get_mosaic_llama3_spec():
         name="mosaic_llama3",
         model_args=model_args,
         build_dataloader_fn=build_mosaic_dataloader,
-        build_tokenizer_fn=cast(TokenizerBuilder, build_mosaic_tokenizer),
+        build_tokenizer_fn=cast("TokenizerBuilder", build_mosaic_tokenizer),
         build_optimizers_fn=build_mosaic_optimizers,
     )
 
@@ -50,7 +54,7 @@ def _get_mosaic_llama3_spec():
 register_train_spec(_get_mosaic_llama3_spec())
 
 
-def _get_llama3_mup_spec():
+def _get_llama3_mup_spec() -> TrainSpec:
     spec = get_llama3_mup_train_spec()
     return replace(
         spec,
