@@ -12,6 +12,7 @@ import math
 from typing import TYPE_CHECKING, ClassVar
 
 import torch
+import torch.distributed as dist
 from torch.optim import AdamW
 
 if TYPE_CHECKING:
@@ -352,7 +353,6 @@ class DecoupledAdamW(AdamW):
             The optimizer metrics reduced across all workers.
 
         """
-        import torch.distributed as dist
         local_keys = list(optimizer_metrics.keys())
         all_gathered_keys = dist.all_gather_object(local_keys)
         all_keys = set()
@@ -363,23 +363,28 @@ class DecoupledAdamW(AdamW):
         # Only L2 norm metric keys are present, can apply regular sort
         list_all_keys = sorted(all_keys)
         for metric in list_all_keys:
-            if metric.startswith("l2_norm"):
-                reduced = optimizer_metrics.get(
-                    metric,
-                    torch.tensor(0.0, device=torch.cuda.current_device()),
-                )
-                if dist.get_world_size() > 1:
-                    dist.all_reduce(reduced, reduce_operation="SUM")
-
-                optimizer_metrics[metric] = math.sqrt(reduced)
+            reduced = optimizer_metrics.get(
+                metric,
+                torch.tensor(0.0, device=torch.cuda.current_device()),
+            )
+            if dist.get_world_size() > 1:
+                if metric.startswith("l2_norm"):
+                    dist.all_reduce(reduced, op=dist.ReduceOp.SUM)
+                    optimizer_metrics[metric] = torch.sqrt(reduced)
+                elif metric.startswith("min"):
+                    dist.all_reduce(reduced, op=dist.ReduceOp.MIN)
+                    optimizer_metrics[metric] = reduced
+                elif metric.startswith("max"):
+                    dist.all_reduce(reduced, op=dist.ReduceOp.MAX)
+                    optimizer_metrics[metric] = reduced
+                else:
+                    dist.all_reduce(reduced, op=dist.ReduceOp.SUM)
+                    optimizer_metrics[metric] = reduced / dist.get_world_size()
             else:
-                reduced = optimizer_metrics.get(
-                    metric,
-                    torch.tensor(0.0, device=torch.cuda.current_device()),
-                )
-                if dist.get_world_size() > 1:
-                    dist.all_reduce(reduced, reduce_operation="SUM")
-                optimizer_metrics[metric] = reduced / dist.get_world_size()
+                if metric.startswith("l2_norm"):
+                    optimizer_metrics[metric] = torch.sqrt(reduced)
+                else:
+                    optimizer_metrics[metric] = reduced
 
         return optimizer_metrics
 
@@ -411,7 +416,7 @@ class DecoupledAdamW(AdamW):
         name: str,
         optimizer_metrics: dict,
     ) -> dict:
-        """Report the per-parameter metrics.
+        """Report the per-parameter mertics.
 
         Parameters
         ----------

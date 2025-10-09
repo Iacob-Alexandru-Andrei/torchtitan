@@ -20,7 +20,7 @@ class OptimizerMonitor:
         log_optimizer_metrics: bool = True,
         report_curvature: bool = False,
     ) -> None:
-        """Initialise the optimizer monitor."""
+        """Initialise the optimzier monitor."""
         self.log_optimizer_metrics = log_optimizer_metrics
         self.only_global = only_global
         self.interval = interval
