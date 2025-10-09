@@ -411,7 +411,7 @@ class DecoupledAdamW(AdamW):
         name: str,
         optimizer_metrics: dict,
     ) -> dict:
-        """Report the per-parameter mertics.
+        """Report the per-parameter metrics.
 
         Parameters
         ----------
