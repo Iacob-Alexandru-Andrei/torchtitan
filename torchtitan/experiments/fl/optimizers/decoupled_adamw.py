@@ -194,7 +194,7 @@ class DecoupledAdamW(AdamW):
             exp_avg_sq = exp_avg_sqs[i]
             step = state_steps[i].item()
 
-            # Perform stepweight decay
+            # Perform step weight decay
             if weight_decay != 0:
                 if decouple:
                     decay_factor = (lr / initial_lr) if initial_lr else 1.0
