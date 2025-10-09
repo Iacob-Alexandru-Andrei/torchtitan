@@ -65,8 +65,8 @@ __init__.py→[get_train_spec(void)] args.py→[] model.py→[forward((self,x: t
 ## DEPENDENCY_PATTERNS
 
 ### EDGE_PATTERNS
-Contains: 14 edges
 Call: 8 edges
+Contains: 14 edges
 
 ### CROSS_CLUSTER_FLOW
 

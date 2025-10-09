@@ -69,9 +69,9 @@ class OptimizerMonitor:
 
             # Determine reduction operation based on metric name
             if "l2_norm" in metric_name or "norm" in metric_name:
-                # For L2 norms, sum the squared norms, then take sqrt
-                squared_norm = metric_value * metric_value
-                sum_squared = dist_utils.dist_sum(squared_norm, mesh)
+                # For L2 norms, the values are already squared by pre_reduce_metrics
+                # Just sum them and take sqrt
+                sum_squared = dist_utils.dist_sum(metric_value, mesh)
                 # Convert back to tensor for sqrt
                 reduced_metrics[metric_name] = torch.tensor(sum_squared).sqrt()
             elif "max" in metric_name:

@@ -67,8 +67,8 @@ __init__.py→[] fast_debug_ao.py→[] mg_grouped_gemm.py→[grouped_gemm_backwa
 ## DEPENDENCY_PATTERNS
 
 ### EDGE_PATTERNS
-Contains: 15 edges
 Call: 34 edges
+Contains: 15 edges
 
 ### CROSS_CLUSTER_FLOW
 TESTS→UTILITY_LAYER: 23
