@@ -166,7 +166,7 @@ class ActivationMonitor:
 
             l2_key = f"activations/l2_norm/full_model{suffix}"
             self._metrics[l2_key] = self._metrics.get(l2_key, 0.0) + float(
-                torch.sum(tensor**2).item()
+                torch.sqrt(torch.sum(tensor**2)).item()
             )
 
             avg_key = f"activations/average/full_model{suffix}"
