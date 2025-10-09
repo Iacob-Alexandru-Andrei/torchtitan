@@ -294,7 +294,7 @@ class ActivationMonitor:
             tensor_value = torch.tensor(value, device=device)
             if "l2_norm" in key:
                 total = dist_utils.dist_sum(tensor_value, mesh)
-                reduced[key] = math.sqrt(total)
+                reduced[key] = torch.sqrt(torch.tensor(total, device=device)).item()
             elif "max" in key:
                 reduced[key] = dist_utils.dist_max(tensor_value, mesh)
             elif "min" in key:
