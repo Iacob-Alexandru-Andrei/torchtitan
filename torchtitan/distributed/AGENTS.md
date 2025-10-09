@@ -63,8 +63,8 @@ __init__.py→[__init__((self,*,input_layout: Placement | None = None,output_lay
 ## DEPENDENCY_PATTERNS
 
 ### EDGE_PATTERNS
-Call: 8 edges
 Contains: 17 edges
+Call: 8 edges
 
 ### CROSS_CLUSTER_FLOW
 

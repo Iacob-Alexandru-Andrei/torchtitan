@@ -63,8 +63,8 @@ __init__.py→[] hf_datasets.py→[__init__((self,dataset_name: str,dataset_path
 ## DEPENDENCY_PATTERNS
 
 ### EDGE_PATTERNS
-Call: 1 edges
 Contains: 5 edges
+Call: 1 edges
 
 ### CROSS_CLUSTER_FLOW
 
