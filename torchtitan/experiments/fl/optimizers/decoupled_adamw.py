@@ -443,6 +443,14 @@ class DecoupledAdamW(AdamW):
                 scaling_factor = (decay_factor * weight_decay) / (
                     1 - decay_factor * weight_decay
                 )
+                # Apply decoupled weight decay adjustment to the parameter update.
+                # This formula implements the decoupled weight decay as described in
+                # "Decoupled Weight Decay Regularization" (Loshchilov & Hutter, 2017).
+                # The scaling_factor adjusts the update to account for the decoupling of
+                # weight decay from the learning rate, ensuring the correct parameter update:
+                #   param = param - step_tensor - scaling_factor * (param + step_tensor)
+                # which is equivalent to:
+                #   step_tensor.mul_(1 + scaling_factor).add_(param, alpha=scaling_factor)
                 step_tensor.mul_(1 + scaling_factor).add_(param, alpha=scaling_factor)
             for metric in self.metric_functions:
                 optimizer_metrics[f"{metric}/{name}"] = self.metric_functions[metric](
