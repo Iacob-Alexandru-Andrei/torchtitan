@@ -257,12 +257,18 @@ class ActivationMonitor:
             or c10d.get_world_size() == 1
         ):
             for key, value in metrics.items():
-                if isinstance(value, list):
+                if "l2_norm" in key:
+                    if isinstance(value, list):
+                        if not value:
+                            continue
+                        # Compute sqrt of sum of squares for L2 norm
+                        reduced[key] = math.sqrt(sum(x ** 2 for x in value))
+                    else:
+                        reduced[key] = math.sqrt(value)
+                elif isinstance(value, list):
                     if not value:
                         continue
                     reduced[key] = float(torch.tensor(value).median().item())
-                elif "l2_norm" in key:
-                    reduced[key] = math.sqrt(value)
                 else:
                     reduced[key] = value
             return reduced
