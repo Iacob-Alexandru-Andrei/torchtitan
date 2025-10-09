@@ -35,6 +35,15 @@ The training job is configured using the `mosaic_job.toml` file. Here are the ke
 *   **`[mosaic_tokenizer]`**:
     *   This section configures the tokenizer to be used with the Mosaic dataloader. You can specify the tokenizer name (e.g., from HuggingFace) and any additional keyword arguments.
 
+## Monitoring
+
+`MosaicJobConfig` exposes two optional monitoring utilities that integrate with TorchTitan's logging stack:
+
+* **Optimizer monitor** – controlled by the `optimizer_monitor_*` root-level fields. When enabled, the monitor reports gradient and optimizer statistics (e.g., L2 norms) at the configured interval. Set the interval to `0` to disable it entirely.
+* **Activation monitor** – enable it with `activation_monitor_enabled = true` and configure its cadence through `activation_monitor_interval`. The activation monitor attaches lightweight forward hooks that collect global statistics (L2 norms, extrema, moments) for both inputs and outputs of every module. You can pass substrings in `activation_monitor_ignore_module_types` to skip modules such as dropout or layer norm layers.
+
+Both monitors rely on the same distributed reduction utilities as the core trainer, so the reported metrics are aggregated across data-parallel ranks.
+
 ## Using with Different Models
 
 To use this integration with a different model, you only need to make two simple changes to the `mosaic_job.toml` file:

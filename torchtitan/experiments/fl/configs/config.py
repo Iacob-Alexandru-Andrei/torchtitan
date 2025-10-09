@@ -60,3 +60,24 @@ class MosaicJobConfig(JobConfig):
             "If False, only log gradient norms."
         },
     )
+
+    activation_monitor_enabled: bool = field(
+        default=False,
+        metadata={
+            "help": "Enable logging of full-model activation statistics."
+        },
+    )
+
+    activation_monitor_interval: int = field(
+        default=25,
+        metadata={
+            "help": "Training step interval for activation monitoring. Set to 0 to disable."
+        },
+    )
+
+    activation_monitor_ignore_module_types: tuple[str, ...] = field(
+        default_factory=tuple,
+        metadata={
+            "help": "Optional substrings of module qualified names to skip when collecting activations."
+        },
+    )

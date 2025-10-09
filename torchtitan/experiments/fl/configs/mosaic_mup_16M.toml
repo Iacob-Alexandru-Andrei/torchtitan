@@ -4,6 +4,11 @@ optimizer_monitor_interval = 1
 optimizer_monitor_only_global = true
 optimizer_monitor_log_metrics = true
 
+# Activation monitor settings (MosaicJobConfig root-level fields)
+activation_monitor_enabled = true
+activation_monitor_interval = 25
+activation_monitor_ignore_module_types = ["dropout", "ln"]
+
 [job]
 dump_folder = "./outputs"
 description = "Llama 3 debug training with Mosaic streaming"

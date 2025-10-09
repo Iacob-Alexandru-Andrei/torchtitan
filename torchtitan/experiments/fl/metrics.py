@@ -7,11 +7,14 @@
 
 from __future__ import annotations
 
+import math
+from collections.abc import Sequence
 from enum import Enum
 from typing import Any, TYPE_CHECKING
 
 import torch
 import torch.distributed.distributed_c10d as c10d
+from torch import distributed as dist
 
 from torchtitan.components.metrics import MetricsProcessor
 from torchtitan.distributed import utils as dist_utils
@@ -30,6 +33,280 @@ class AggregationType(Enum):
     L2_NORM = "l2_norm"
     MIN = "min"
     MAX = "max"
+
+
+def compute_skewness(value: torch.Tensor) -> torch.Tensor:
+    mean = value.mean(dim=-1, keepdim=True)
+    diffs = value - mean
+    m_3 = torch.mean(torch.pow(diffs, 3), dim=-1)
+    var = torch.mean(torch.pow(diffs, 2), dim=-1)
+    eps = torch.finfo(var.dtype).eps if var.dtype.is_floating_point else 1e-12
+    var = torch.clamp(var, min=eps)
+    return (m_3 / (var**2)).mean()
+
+
+def compute_kurtosis(value: torch.Tensor) -> torch.Tensor:
+    mean = value.mean(dim=-1, keepdim=True)
+    diffs = value - mean
+    m_4 = torch.mean(torch.pow(diffs, 4), dim=-1)
+    var = torch.mean(torch.pow(diffs, 2), dim=-1)
+    eps = torch.finfo(var.dtype).eps if var.dtype.is_floating_point else 1e-12
+    var = torch.clamp(var, min=eps)
+    return (m_4 / (var**2)).mean()
+
+
+class ActivationMonitor:
+    """Collects activation statistics across the full model."""
+
+    def __init__(
+        self,
+        *,
+        interval: int = 25,
+        ignore_module_types: Sequence[str] | None = None,
+        gradient_accumulation_steps: int = 1,
+    ) -> None:
+        self.interval = interval
+        self.ignore_module_types = (
+            tuple(ignore_module_types) if ignore_module_types is not None else None
+        )
+        self.gradient_accumulation_steps = max(1, gradient_accumulation_steps)
+
+        self._handles: list[torch.utils.hooks.RemovableHandle] = []
+        self._pre_handle: torch.utils.hooks.RemovableHandle | None = None
+        self._module_names: dict[torch.nn.Module, str] = {}
+        self._metrics: dict[str, list[float] | float] = {}
+        self._collect_this_step = False
+        self._current_step = 0
+        self._microbatch_counter = 0
+        self._device: torch.device | None = None
+        self._registered = False
+
+    @property
+    def enabled(self) -> bool:
+        return self.interval > 0
+
+    def should_log_step(self, step: int) -> bool:
+        return self.enabled and step % self.interval == 0
+
+    @property
+    def is_registered(self) -> bool:
+        return self._registered
+
+    def register(self, model: torch.nn.Module) -> None:
+        if not self.enabled or self._registered:
+            return
+
+        self._module_names = {module: name for name, module in model.named_modules()}
+        self._pre_handle = model.register_forward_pre_hook(
+            self._forward_pre_hook, with_kwargs=True
+        )
+        model.apply(self._register_forward_hook)
+        self._registered = True
+
+    def _register_forward_hook(self, module: torch.nn.Module) -> None:
+        self._handles.append(module.register_forward_hook(self._forward_hook))
+
+    def _forward_pre_hook(self, module: torch.nn.Module, inputs: tuple[Any, ...]) -> None:
+        del module, inputs
+        if not self.enabled:
+            return
+
+        self._microbatch_counter += 1
+        if (self._microbatch_counter - 1) % self.gradient_accumulation_steps == 0:
+            self._current_step += 1
+            self._collect_this_step = self.should_log_step(self._current_step)
+            self._reset_metrics()
+
+    def _forward_hook(
+        self,
+        module: torch.nn.Module,
+        inputs: tuple[Any, ...],
+        output: Any,
+    ) -> None:
+        if not self._collect_this_step:
+            return
+
+        module_name = self._module_names.get(module, "")
+        if self.ignore_module_types is not None:
+            lowered_name = module_name.lower()
+            if any(ignore.lower() in lowered_name for ignore in self.ignore_module_types):
+                return
+
+        self._recursively_add_metrics("_input", inputs)
+        self._recursively_add_metrics("_output", output)
+
+    def _recursively_add_metrics(self, suffix: str, values: Any) -> None:
+        if values is None:
+            return
+        if isinstance(values, (str, bytes)):
+            return
+        if isinstance(values, dict):
+            for val in values.values():
+                self._recursively_add_metrics(suffix, val)
+            return
+        if isinstance(values, torch.Tensor):
+            self._add_metrics(suffix, values)
+            return
+        if isinstance(values, Sequence):
+            for value in values:
+                self._recursively_add_metrics(suffix, value)
+
+    def _add_metrics(self, suffix: str, value: torch.Tensor) -> None:
+        if value.dtype == torch.bool:
+            return
+        if not (value.is_floating_point() or value.is_complex()):
+            return
+
+        with torch.no_grad():
+            tensor = value.detach()
+            if tensor.is_complex():
+                tensor = tensor.real
+            if self._device is None:
+                self._device = tensor.device
+
+            l2_key = f"activations/l2_norm/full_model{suffix}"
+            self._metrics[l2_key] = self._metrics.get(l2_key, 0.0) + float(
+                torch.sum(tensor**2).item()
+            )
+
+            avg_key = f"activations/average/full_model{suffix}"
+            self._metrics.setdefault(avg_key, []).append(float(tensor.mean().item()))
+
+            if tensor.numel() == 0:
+                return
+
+            last_dim = tensor.shape[-1] if tensor.ndim else 1
+            if last_dim > 0 and tensor.ndim:
+                max_values = tensor.max(dim=-1).values
+                max_value = max_values.mean().item()
+            else:
+                max_value = tensor.reshape(-1).max().item()
+            max_key = f"activations/max/full_model{suffix}"
+            self._metrics.setdefault(max_key, []).append(float(max_value))
+
+            if tensor.ndim >= 1 and tensor.shape[-1] > 0:
+                skew_key = f"activations/skewness/full_model{suffix}"
+                kurt_key = f"activations/kurtosis/full_model{suffix}"
+                skewness = compute_skewness(tensor)
+                kurtosis = compute_kurtosis(tensor)
+                self._metrics.setdefault(skew_key, []).append(float(skewness.item()))
+                self._metrics.setdefault(kurt_key, []).append(float(kurtosis.item()))
+
+    def finalize(
+        self,
+        step: int,
+        logger: Any,
+        mesh: "DeviceMesh | None",
+    ) -> None:
+        if not self.enabled or not self._registered:
+            return
+        if not self.should_log_step(step):
+            return
+        if step != self._current_step:
+            return
+
+        metrics = self._prepare_local_metrics()
+        if not metrics:
+            return
+
+        reduced_metrics = self._reduce_metrics(metrics, mesh)
+        if not reduced_metrics:
+            return
+
+        logger.log(reduced_metrics, step)
+        self._collect_this_step = False
+        self._reset_metrics()
+
+    def _prepare_local_metrics(self) -> dict[str, float | list[float]]:
+        prepared: dict[str, float | list[float]] = {}
+        for suffix in ("_input", "_output"):
+            l2_key = f"activations/l2_norm/full_model{suffix}"
+            if l2_key in self._metrics:
+                prepared[l2_key] = float(self._metrics[l2_key])
+
+            max_key = f"activations/max/full_model{suffix}"
+            if max_key in self._metrics and self._metrics[max_key]:
+                prepared[max_key] = float(max(self._metrics[max_key]))
+
+            for metric_name in ("average", "skewness", "kurtosis"):
+                key = f"activations/{metric_name}/full_model{suffix}"
+                values = self._metrics.get(key)
+                if not values:
+                    continue
+                tensor_values = torch.tensor(values)
+                prepared[f"activations/{metric_name}/max/full_model{suffix}"] = float(
+                    tensor_values.max().item()
+                )
+                prepared[f"activations/{metric_name}/min/full_model{suffix}"] = float(
+                    tensor_values.min().item()
+                )
+                prepared[
+                    f"activations/{metric_name}/median/full_model{suffix}"
+                ] = list(values)
+
+        return prepared
+
+    def _reduce_metrics(
+        self, metrics: dict[str, float | list[float]], mesh: "DeviceMesh | None"
+    ) -> dict[str, float]:
+        reduced: dict[str, float] = {}
+
+        if (
+            mesh is None
+            or not c10d.is_initialized()
+            or c10d.get_world_size() == 1
+        ):
+            for key, value in metrics.items():
+                if isinstance(value, list):
+                    if not value:
+                        continue
+                    reduced[key] = float(torch.tensor(value).median().item())
+                elif "l2_norm" in key:
+                    reduced[key] = math.sqrt(value)
+                else:
+                    reduced[key] = value
+            return reduced
+
+        device = self._device or torch.device("cpu")
+        group = mesh.get_group()
+        world_size = dist.get_world_size(group)
+
+        for key, value in metrics.items():
+            if isinstance(value, list):
+                if not value:
+                    continue
+                gathered_lists: list[list[float]] = [list() for _ in range(world_size)]
+                dist.all_gather_object(gathered_lists, value, group=group)
+                combined = torch.tensor(
+                    [item for sublist in gathered_lists for item in sublist]
+                )
+                if combined.numel() == 0:
+                    continue
+                reduced[key] = float(torch.median(combined).item())
+                continue
+
+            tensor_value = torch.tensor(value, device=device)
+            if "l2_norm" in key:
+                total = dist_utils.dist_sum(tensor_value, mesh)
+                reduced[key] = math.sqrt(total)
+            elif "max" in key:
+                reduced[key] = dist_utils.dist_max(tensor_value, mesh)
+            elif "min" in key:
+                reduced[key] = -dist_utils.dist_max(-tensor_value, mesh)
+            elif "median" in key:
+                gathered = [torch.zeros_like(tensor_value) for _ in range(world_size)]
+                dist.all_gather(gathered, tensor_value, group=group)
+                stacked = torch.stack(gathered).cpu()
+                if stacked.numel() == 0:
+                    continue
+                reduced[key] = float(torch.median(stacked).item())
+            else:
+                reduced[key] = dist_utils.dist_mean(tensor_value, mesh)
+
+        return reduced
+
+    def _reset_metrics(self) -> None:
+        self._metrics = {}
 
 
 class OptimizerMonitor:
@@ -239,6 +516,39 @@ class FLMetricsProcessor(MetricsProcessor):
             log_optimizer_metrics=log_optimizer_metrics,
         )
 
+        activation_enabled = getattr(
+            self.job_config, "activation_monitor_enabled", False
+        )
+        if activation_enabled:
+            activation_interval = getattr(
+                self.job_config, "activation_monitor_interval", 25
+            )
+            ignore_types = getattr(
+                self.job_config,
+                "activation_monitor_ignore_module_types",
+                (),
+            )
+            if ignore_types is None:
+                ignore_types = ()
+            grad_accum_steps = getattr(
+                getattr(self.job_config, "training", None),
+                "gradient_accumulation_steps",
+                1,
+            )
+            self.activation_monitor: ActivationMonitor | None = ActivationMonitor(
+                interval=activation_interval,
+                ignore_module_types=ignore_types,
+                gradient_accumulation_steps=grad_accum_steps,
+            )
+        else:
+            self.activation_monitor = None
+
+    def should_log(self, step: int) -> bool:
+        base_decision = super().should_log(step)
+        if self.activation_monitor and self.activation_monitor.should_log_step(step):
+            return True
+        return base_decision
+
     def log(
         self,
         step: int,
@@ -259,14 +569,18 @@ class FLMetricsProcessor(MetricsProcessor):
         """
         super().log(step, global_avg_loss, global_max_loss, grad_norm, extra_metrics)
 
+        mesh = (
+            self.parallel_dims.world_mesh["dp_cp"]
+            if self.parallel_dims.dp_cp_enabled
+            else None
+        )
+
         if self.model_parts and self.optimizers:
-            # Pass the dp_cp mesh for metric reduction across data parallel ranks
-            # Only access dp_cp mesh if data parallel or context parallel is enabled
-            mesh = (
-                self.parallel_dims.world_mesh["dp_cp"]
-                if self.parallel_dims.dp_cp_enabled
-                else None
-            )
             self.optimizer_monitor.batch_end(
                 step, self.model_parts[0], self.optimizers, self.logger, mesh
             )
+
+        if self.activation_monitor and self.model_parts:
+            if not self.activation_monitor.is_registered:
+                self.activation_monitor.register(self.model_parts[0])
+            self.activation_monitor.finalize(step, self.logger, mesh)
