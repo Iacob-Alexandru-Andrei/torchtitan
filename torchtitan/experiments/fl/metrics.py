@@ -257,7 +257,12 @@ class FLMetricsProcessor(MetricsProcessor):
 
         if self.model_parts and self.optimizers:
             # Pass the dp_cp mesh for metric reduction across data parallel ranks
-            mesh = self.parallel_dims.world_mesh["dp_cp"]
+            # Only access dp_cp mesh if data parallel or context parallel is enabled
+            mesh = (
+                self.parallel_dims.world_mesh["dp_cp"]
+                if self.parallel_dims.dp_cp_enabled
+                else None
+            )
             self.optimizer_monitor.batch_end(
                 step, self.model_parts[0], self.optimizers, self.logger, mesh
             )
