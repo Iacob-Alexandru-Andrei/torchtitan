@@ -104,6 +104,10 @@ class OptimizerMonitor:
         mesh: DeviceMesh | None = None,
     ) -> None:
         """Calculate the statistics at the end of the batch."""
+        # Early exit if monitoring is disabled (interval <= 0)
+        if self.interval <= 0:
+            return
+
         if step % self.interval != 0:
             return
 

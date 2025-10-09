@@ -80,8 +80,8 @@ __init__.py→[] adopt.py→[_default_clip_lambda((step: Number | Tensor)),__ini
 ## DEPENDENCY_PATTERNS
 
 ### EDGE_PATTERNS
-Call: 6 edges
 Contains: 41 edges
+Call: 6 edges
 
 ### CROSS_CLUSTER_FLOW
 DATA_MODELS→UTILITY_LAYER: 1
