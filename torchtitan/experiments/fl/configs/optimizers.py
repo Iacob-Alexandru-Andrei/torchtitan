@@ -15,3 +15,9 @@ class MosaicOptimizerConfig(BaseOptimizer):
 
     v1: float = 0.0
     """v1 hyperparameter for quasi-hyperbolic optimizers"""
+
+    decouple: bool = True
+    """Whether to decouple the learning rate from the weight decay"""
+
+    report_curvature: bool = False
+    """Whether to report curvature metrics"""

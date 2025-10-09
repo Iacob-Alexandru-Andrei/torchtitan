@@ -16,7 +16,7 @@ from torchtitan.components.optimizer import (
 )
 from torchtitan.distributed import ParallelDims
 from torchtitan.experiments.fl.configs.optimizers import MosaicOptimizerConfig
-from torchtitan.experiments.fl.optimizers import ADOPT, QHAdamW, QHADOPT
+from torchtitan.experiments.fl.optimizers import ADOPT, DecoupledAdamW, QHAdamW, QHADOPT
 
 
 def build_mosaic_optimizers(
@@ -69,6 +69,7 @@ def build_mosaic_optimizers(
         "ADOPT": ADOPT,
         "QHADOPT": QHADOPT,
         "QHAdamW": QHAdamW,
+        "DecoupledAdamW": DecoupledAdamW,
     }
     if name not in optimizer_classes:
         raise NotImplementedError(f"Optimizer {name} not added.")
@@ -78,6 +79,11 @@ def build_mosaic_optimizers(
         optimizer_kwargs["v1"] = optimizer_config.v1
     if name in ["ADOPT", "QHADOPT"]:
         optimizer_kwargs["clip_lambda"] = None
+    if name == "DecoupledAdamW":
+        optimizer_kwargs["decouple"] = getattr(optimizer_config, "decouple", True)
+        optimizer_kwargs["report_curvature"] = getattr(
+            optimizer_config, "report_curvature", False
+        )
 
     if optim_in_bwd:
         return OptimizersInBackwardContainer(
