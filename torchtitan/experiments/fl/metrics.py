@@ -175,12 +175,7 @@ class ActivationMonitor:
             if tensor.numel() == 0:
                 return
 
-            last_dim = tensor.shape[-1] if tensor.ndim else 1
-            if last_dim > 0 and tensor.ndim:
-                max_values = tensor.max(dim=-1).values
-                max_value = max_values.mean().item()
-            else:
-                max_value = tensor.reshape(-1).max().item()
+            max_value = tensor.max().item()
             max_key = f"activations/max/full_model{suffix}"
             self._metrics.setdefault(max_key, []).append(float(max_value))
 
