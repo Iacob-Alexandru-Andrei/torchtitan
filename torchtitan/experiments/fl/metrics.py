@@ -42,7 +42,7 @@ def compute_skewness(value: torch.Tensor) -> torch.Tensor:
     var = torch.mean(torch.pow(diffs, 2), dim=-1)
     eps = torch.finfo(var.dtype).eps if var.dtype.is_floating_point else 1e-12
     var = torch.clamp(var, min=eps)
-    return (m_3 / (var**2)).mean()
+    return (m_3 / (var * torch.sqrt(var))).mean()
 
 
 def compute_kurtosis(value: torch.Tensor) -> torch.Tensor:
