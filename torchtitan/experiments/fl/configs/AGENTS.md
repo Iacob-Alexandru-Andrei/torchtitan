@@ -48,7 +48,7 @@ You are analyzing a codebase dependency graph optimized for AI understanding. Th
 ---
 
 # CODE_GRAPH
-NODES:3 EDGES:0
+NODES:5 EDGES:0
 
 ## DIRECTORY_TREE
 ROOT: torchtitan/experiments/fl/configs/
@@ -56,9 +56,9 @@ ROOT: torchtitan/experiments/fl/configs/
 ## ARCHITECTURAL_CLUSTERS
 
 ### UTILITY_LAYER
-NODES:3 CALL_DEPTH:1
+NODES:5 CALL_DEPTH:1
 
-config.py→[] 
+config.py→[] optimizers.py→[] 
 
 ## DEPENDENCY_PATTERNS
 

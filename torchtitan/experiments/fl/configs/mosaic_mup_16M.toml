@@ -1,3 +1,9 @@
+# Optimizer monitor settings (MosaicJobConfig root-level fields)
+# These must be at the top level, not inside any [section]
+optimizer_monitor_interval = 1
+optimizer_monitor_only_global = true
+optimizer_monitor_log_metrics = true
+
 [job]
 dump_folder = "./outputs"
 description = "Llama 3 debug training with Mosaic streaming"
@@ -27,7 +33,7 @@ hf_assets_path = "./tests/assets/tokenizer"
 
 
 [optimizer]
-name = "AdamW"
+name = "DecoupledAdamW"
 lr = 8e-4
 eps = 1e-8
 

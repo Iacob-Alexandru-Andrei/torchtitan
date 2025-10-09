@@ -69,8 +69,8 @@ __init__.py→[__init__((self,job_config: JobConfig,parallel_dims: ParallelDims)
 ## DEPENDENCY_PATTERNS
 
 ### EDGE_PATTERNS
-Contains: 105 edges
 Call: 11 edges
+Contains: 105 edges
 
 ### CROSS_CLUSTER_FLOW
 
