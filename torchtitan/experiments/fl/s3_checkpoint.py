@@ -128,6 +128,8 @@ class S3CheckpointManager:
         self._pending_steps: deque[tuple[int, Path]] = deque()
         self._uploaded_steps: set[int] = set()
         self._latest_uploaded_step: int | None = None
+        self._missing_directory_steps: set[int] = set()
+        self._not_ready_steps: set[int] = set()
         self._installed = False
         self._orig_save = checkpointer.save
         self._orig_maybe_wait = checkpointer.maybe_wait_for_staging
@@ -200,8 +202,14 @@ class S3CheckpointManager:
     ) -> None:  # noqa: FBT001, FBT002
         self._orig_save(curr_step, last_step=last_step)
         checkpoint_dir = self._checkpoint_dir(curr_step)
-        if checkpoint_dir.exists() or last_step:
-            self._pending_steps.append((curr_step, checkpoint_dir))
+        if not checkpoint_dir.exists():
+            logger.warning(
+                "Checkpoint directory %s for step %s does not exist immediately after save; "
+                "upload will be retried once it becomes available.",
+                checkpoint_dir,
+                curr_step,
+            )
+        self._pending_steps.append((curr_step, checkpoint_dir))
         if last_step:
             try:
                 self._orig_maybe_wait()
@@ -223,16 +231,59 @@ class S3CheckpointManager:
                 continue
             if not directory.exists():
                 if flush:
-                    logger.warning(
-                        "Checkpoint directory %s for step %s not found during flush. Skipping upload.",
+                    logger.error(
+                        "Checkpoint directory %s for step %s does not exist and will not "
+                        "be uploaded during flush.",
                         directory,
                         step,
                     )
                 else:
+                    if step not in self._missing_directory_steps:
+                        logger.warning(
+                            "Checkpoint directory %s for step %s is not available yet; "
+                            "retrying staging before upload.",
+                            directory,
+                            step,
+                        )
+                        self._missing_directory_steps.add(step)
                     pending.append((step, directory))
                 continue
+            self._missing_directory_steps.discard(step)
+            if not self._is_directory_ready_for_upload(directory):
+                if flush:
+                    logger.error(
+                        "Checkpoint directory %s for step %s is not ready for upload "
+                        "during flush and will be skipped.",
+                        directory,
+                        step,
+                    )
+                else:
+                    if step not in self._not_ready_steps:
+                        logger.info(
+                            "Checkpoint directory %s for step %s is still being written; "
+                            "deferring upload.",
+                            directory,
+                            step,
+                        )
+                        self._not_ready_steps.add(step)
+                    pending.append((step, directory))
+                continue
+            self._not_ready_steps.discard(step)
             self._upload_step(step, directory)
         self._pending_steps = pending
+
+    def _is_directory_ready_for_upload(self, directory: Path) -> bool:
+        try:
+            has_entries = any(directory.iterdir())
+        except FileNotFoundError:
+            return False
+        if not has_entries:
+            return False
+        try:
+            has_temp_files = any(directory.rglob("*.tmp"))
+        except FileNotFoundError:
+            return False
+        return not has_temp_files
 
     def _upload_step(self, step: int, directory: Path) -> None:
         files = sorted(self._iter_checkpoint_files(directory))
