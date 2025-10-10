@@ -18,6 +18,6 @@ __all__ = [
     "AggMoAdamW",
     "AggMoAdopt",
     "DecoupledAdamW",
-    "QHAdamW",
     "QHADOPT",
+    "QHAdamW",
 ]
