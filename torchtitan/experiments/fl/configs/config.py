@@ -15,6 +15,77 @@ from torchtitan.config import JobConfig
 
 
 @dataclass
+class S3CheckpointingConfig:
+    """Configuration for syncing checkpoints with S3."""
+
+    enable: bool = field(
+        default=False,
+        metadata={"help": "Enable uploading and downloading checkpoints from S3."},
+    )
+    bucket: str = field(
+        default="",
+        metadata={"help": "Name of the S3 bucket used for checkpoint storage."},
+    )
+    prefix: str = field(
+        default="",
+        metadata={"help": "Prefix within the bucket for storing checkpoint artifacts."},
+    )
+    run_uuid: str | None = field(
+        default=None,
+        metadata={
+            "help": "Optional unique identifier appended to remote checkpoint paths."
+        },
+    )
+    num_attempts: int = field(
+        default=3,
+        metadata={
+            "help": "Number of retry attempts for uploads and downloads handled by "
+            "the remote uploader/downloader."
+        },
+    )
+    # python-explicit-any
+    client_config: dict[str, Any] = field(
+        default_factory=dict,
+        metadata={
+            "help": "Optional boto client configuration forwarded to the "
+            "RemoteUploaderDownloader backend."
+        },
+    )
+    num_concurrent_uploads: int = field(
+        default=1,
+        metadata={"help": "Number of files to upload concurrently when syncing to S3."},
+    )
+    upload_staging_folder: str | None = field(
+        default=None,
+        metadata={
+            "help": "Optional staging directory used by the remote uploader/downloader "
+            "before transferring files to S3."
+        },
+    )
+    use_procs: bool = field(
+        default=True,
+        metadata={
+            "help": "Whether to use multiprocessing workers inside the remote "
+            "uploader/downloader."
+        },
+    )
+    remote_checkpoint_folder: str | None = field(
+        default=None,
+        metadata={
+            "help": "Optional remote folder relative to the prefix for storing checkpoints. "
+            "Defaults to the local checkpoint folder name if unset."
+        },
+    )
+    download_on_start: bool = field(
+        default=True,
+        metadata={
+            "help": "Download a checkpoint from S3 before training when no local checkpoints "
+            "are present."
+        },
+    )
+
+
+@dataclass
 class MosaicJobConfig(JobConfig):
     """A dataclass for holding all configuration settings for a MosaicML training job.
 
@@ -63,9 +134,7 @@ class MosaicJobConfig(JobConfig):
 
     activation_monitor_enabled: bool = field(
         default=False,
-        metadata={
-            "help": "Enable logging of full-model activation statistics."
-        },
+        metadata={"help": "Enable logging of full-model activation statistics."},
     )
 
     activation_monitor_interval: int = field(
@@ -79,5 +148,12 @@ class MosaicJobConfig(JobConfig):
         default_factory=tuple,
         metadata={
             "help": "Optional substrings of module qualified names to skip when collecting activations."
+        },
+    )
+
+    s3_checkpoint: S3CheckpointingConfig = field(
+        default_factory=S3CheckpointingConfig,
+        metadata={
+            "help": "Configuration for synchronizing checkpoints with S3 storage."
         },
     )

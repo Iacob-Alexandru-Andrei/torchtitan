@@ -4,7 +4,8 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 
-"""
+"""TorchTitan MosaicML training entry point.
+
 This script provides an example of how to train a TorchTitan model using the
 MosaicML streaming dataloader integration.
 
@@ -33,6 +34,10 @@ from torchtitan.experiments.fl.components import build_metrics_processor
 from torchtitan.experiments.fl.configs.config import MosaicJobConfig
 from torchtitan.experiments.fl.dataloader.dataloader import build_mosaic_dataloader
 from torchtitan.experiments.fl.dataloader.tokenizer import build_mosaic_tokenizer
+from torchtitan.experiments.fl.s3_checkpoint import (
+    S3CheckpointManager,
+    setup_s3_checkpointing,
+)
 from torchtitan.protocols.train_spec import (
     get_train_spec,
     register_train_spec,
@@ -42,9 +47,8 @@ from torchtitan.tools.logging import init_logger, logger
 from torchtitan.train import Trainer
 
 
-def main() -> None:
-    """
-    The main entry point for the Mosaic training script.
+def main() -> None:  # noqa: C901, PLR0912, PLR0915
+    """The main entry point for the Mosaic training script.
 
     This function parses the job configuration, sets up the Mosaic-enabled
     TrainSpec, and launches the TorchTitan trainer.
@@ -75,7 +79,7 @@ def main() -> None:
             mosaic_spec = replace(
                 base_spec,
                 build_dataloader_fn=build_mosaic_dataloader,
-                build_tokenizer_fn=cast(TokenizerBuilder, build_mosaic_tokenizer),
+                build_tokenizer_fn=cast("TokenizerBuilder", build_mosaic_tokenizer),
                 build_metrics_processor_fn=build_metrics_processor,
             )
             mosaic_spec.name = mosaic_spec_name
@@ -87,13 +91,15 @@ def main() -> None:
 
     # Launch the trainer
     trainer: Trainer | None = None
+    s3_manager: S3CheckpointManager | None = None
     try:
         trainer = Trainer(job_config)
+        s3_manager = setup_s3_checkpointing(trainer.checkpointer, job_config)
 
         # Override WandB run name to include rank if save_for_all_ranks is enabled
         if job_config.metrics.save_for_all_ranks and job_config.metrics.enable_wandb:
             try:
-                import wandb
+                import wandb  # noqa: PLC0415
 
                 if wandb.run is not None and torch.distributed.is_initialized():
                     rank = torch.distributed.get_rank()
@@ -107,7 +113,7 @@ def main() -> None:
                     )
             except ImportError:
                 logger.warning("wandb not available, skipping run name update")
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001
                 logger.warning(f"Failed to update WandB run name: {e}")
 
         if job_config.checkpoint.create_seed_checkpoint:
@@ -120,8 +126,12 @@ def main() -> None:
             trainer.checkpointer.save(curr_step=0, last_step=True)
             logger.info("Created seed checkpoint")
         else:
+            if s3_manager:
+                s3_manager.download_if_needed(job_config.checkpoint.load_step)
             trainer.train()
     finally:
+        if s3_manager:
+            s3_manager.close()
         if trainer:
             trainer.close()
         # In some cases, the process group is not destroyed automatically,
