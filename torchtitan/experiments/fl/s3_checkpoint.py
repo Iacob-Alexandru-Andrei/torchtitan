@@ -135,7 +135,15 @@ class S3CheckpointManager:
         return self._checkpointer
 
     def __getattr__(self, name: str) -> Any:
-        return getattr(self._checkpointer, name)
+        if hasattr(self._checkpointer, name):
+            return getattr(self._checkpointer, name)
+        raise AttributeError(
+            f"'{type(self).__name__}' proxy: '{type(self._checkpointer).__name__}' object "
+            f"has no attribute '{name}'"
+        )
+
+    def __del__(self) -> None:
+        self.close()
 
     def download_if_needed(self, requested_step: int) -> None:
         """Optionally download a checkpoint from S3 before training starts."""
@@ -165,12 +173,7 @@ class S3CheckpointManager:
         if self._closed:
             return
         try:
-            try:
-                self._checkpointer.maybe_wait_for_staging()
-            except Exception:  # noqa: BLE001
-                logger.exception(
-                    "Failed while waiting for staged checkpoints before upload."
-                )
+            self._wait_for_staging_with_logging()
             self._process_pending(flush=True)
             if hasattr(self.remote_up_down, "close"):
                 try:
@@ -180,6 +183,14 @@ class S3CheckpointManager:
             self._checkpointer.close()
         finally:
             self._closed = True
+
+    def _wait_for_staging_with_logging(self) -> None:
+        try:
+            self._checkpointer.maybe_wait_for_staging()
+        except Exception:  # noqa: BLE001
+            logger.exception(
+                "Failed while waiting for staged checkpoints before upload."
+            )
 
     def _resolve_remote_root(self) -> str:
         root = self.config.remote_checkpoint_folder or self.job_config.checkpoint.folder
