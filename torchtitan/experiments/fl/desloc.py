@@ -145,7 +145,7 @@ class _ParameterFragment(_BaseFragment):
     def perform_sync(self) -> None:
         with torch.no_grad():
             for param, avg_param in zip(
-                self._model.parameters(), self._averaged_parameters, strict=False
+                self._model.parameters(), self._averaged_parameters, strict=True
             ):
                 _copy_into_tensor(param.data, avg_param)
 
