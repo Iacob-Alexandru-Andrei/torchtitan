@@ -295,7 +295,8 @@ class MosaicParallelAwareDataloader(StatefulDataLoader, BaseDataLoader):
 
 
 def titan_collate_fn(batch: list[Any]) -> tuple[dict[str, torch.Tensor], torch.Tensor]:
-    """Collates samples from StreamingTextDataset and formats them for the
+    """
+    Collates samples from StreamingTextDataset and formats them for the
     TorchTitan training loop.
 
     Args:
