@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import inspect
 import pickle
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Mapping, Sequence
 from copy import deepcopy
 from typing import Any
 
