@@ -18,7 +18,7 @@ from torch.distributed.pipelining.schedules import (
     get_schedule_class,
     PipelineScheduleMulti,
     PipelineScheduleSingle,
-    ScheduleDualPipeV,
+    ScheduleInterleaved1F1B,
     ScheduleZBVZeroBubble,
 )
 
@@ -339,7 +339,9 @@ def pipeline_module_split(
 
     schedule_class = get_schedule_class(pp_schedule)
     style = (
-        "v" if schedule_class in (ScheduleZBVZeroBubble, ScheduleDualPipeV) else "loop"
+        "v"
+        if schedule_class in (ScheduleZBVZeroBubble, ScheduleInterleaved1F1B)
+        else "loop"
     )
 
     for stage_idx in stage_ids_this_rank(pp_rank, pp_size, num_stages, style=style):

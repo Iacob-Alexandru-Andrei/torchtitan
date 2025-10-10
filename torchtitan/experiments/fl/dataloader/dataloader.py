@@ -17,6 +17,7 @@ from __future__ import annotations
 import inspect
 import pickle
 from copy import deepcopy
+from functools import partial
 from typing import Any, Callable
 
 import torch
@@ -165,13 +166,16 @@ class MosaicParallelAwareDataloader(StatefulDataLoader, BaseDataLoader):
         super().load_state_dict(pickle.loads(state_dict[self._rank_id]))
 
 
-def titan_collate_fn(batch: list[Any]) -> tuple[dict[str, torch.Tensor], torch.Tensor]:
+def titan_collate_fn(
+    batch: list[Any], eos_token_id: int
+) -> tuple[dict[str, torch.Tensor], torch.Tensor]:
     """
     Collates samples from StreamingTextDataset and formats them for the
     TorchTitan training loop.
 
     Args:
         batch: A list of samples from the dataset.
+        eos_token_id: The end-of-sentence token id, used to generate sequence_id.
 
     Returns:
         A tuple where the first element is an `input_dict` and the second is a
@@ -188,9 +192,15 @@ def titan_collate_fn(batch: list[Any]) -> tuple[dict[str, torch.Tensor], torch.T
     else:
         raise TypeError(f"Unsupported batch item type from dataset: {type(batch[0])}")
 
+    is_separator = torch.eq(input_ids_tensor, eos_token_id)
+    cumulative_sep = torch.cumsum(is_separator, dim=1).to(input_ids_tensor.dtype)
+    left_zeros = cumulative_sep.new_zeros((cumulative_sep.shape[0], 1))
+    sequence_id = torch.cat([left_zeros, cumulative_sep[:, :-1]], dim=1)
+
     model_inputs = input_ids_tensor[:, :-1].contiguous()
     labels = input_ids_tensor[:, 1:].contiguous()
-    input_dict = {"input": model_inputs}
+    sequence_id = sequence_id[:, :-1].contiguous()
+    input_dict = {"input": model_inputs, "sequence_id": sequence_id}
     return input_dict, labels
 
 
@@ -261,12 +271,14 @@ def build_mosaic_dataloader(
         **dataset_config_filtered,
     )
 
+    collate_fn = partial(titan_collate_fn, eos_token_id=hf_tokenizer.eos_token_id)
+
     return MosaicParallelAwareDataloader(
         dataset=text_dataset,
         dp_rank=dp_rank,
         dp_world_size=dp_world_size,
         batch_size=job_config.training.local_batch_size,
-        collate_fn=titan_collate_fn,
+        collate_fn=collate_fn,
         num_workers=num_workers,
         prefetch_factor=prefetch_factor,
         pin_memory=pin_memory,
