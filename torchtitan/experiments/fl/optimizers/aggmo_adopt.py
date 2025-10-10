@@ -52,6 +52,22 @@ def _sum_weights(moment_specs: Iterable[tuple[float, str]]) -> float:
     return sum(weight for weight, _ in moment_specs)
 
 
+def _get_decay_factor(lr: float | Tensor, initial_lr: float | Tensor | None) -> float | Tensor:
+    """Return the decay factor applied for decoupled weight decay updates."""
+    if initial_lr is None:
+        return 1.0
+
+    if isinstance(initial_lr, Tensor):
+        if (initial_lr == 0).any():
+            return 1.0
+        return lr / initial_lr
+
+    if initial_lr == 0.0:
+        return 1.0
+
+    return lr / initial_lr
+
+
 class AggMoAdopt(QHADOPT):
     """QHADOPT optimizer supporting an arbitrary number of first moment buffers."""
 
@@ -271,18 +287,7 @@ class AggMoAdopt(QHADOPT):
             step_tensor = qh_update * lr
 
             if weight_decay != 0 and decouple:
-                if (
-                    initial_lr is None
-                    or (
-                        isinstance(initial_lr, Tensor)
-                        and cast("Tensor", (initial_lr == 0)).any()
-                    )
-                    or initial_lr == 0.0
-                ):
-                    decay_factor = 1.0
-                else:
-                    decay_factor = lr / initial_lr
-
+                decay_factor = _get_decay_factor(lr, initial_lr)
                 effective_weight_decay = decay_factor * weight_decay
                 step_tensor = step_tensor.add(param, alpha=effective_weight_decay)
 
@@ -356,18 +361,7 @@ def _single_tensor_aggmo_qhadopt(  # noqa: C901, PLR0913
             continue
 
         if weight_decay != 0 and decouple:
-            if (
-                initial_lr is None
-                or (
-                    isinstance(initial_lr, Tensor)
-                    and cast("Tensor", (initial_lr == 0)).any()
-                )
-                or initial_lr == 0.0
-            ):
-                decay_factor = 1.0
-            else:
-                decay_factor = lr / initial_lr
-
+            decay_factor = _get_decay_factor(lr, initial_lr)
             param.mul_(1 - decay_factor * weight_decay)
 
         denom = torch.clamp(exp_avg_sq.sqrt(), eps)
