@@ -454,7 +454,7 @@ class DesLocFTOptimizersContainer(FTOptimizersContainer):
 
         self._desloc_controllers: list[DesLocController] = []
         for idx, (model, optimizer) in enumerate(
-            zip(self.model_parts, self.optimizers, strict=False)
+            zip(self.model_parts, self.optimizers, strict=True)
         ):
             controller = DesLocController(
                 manager=ft_manager,
