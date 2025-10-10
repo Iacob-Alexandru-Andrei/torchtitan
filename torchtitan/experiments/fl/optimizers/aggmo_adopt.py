@@ -26,6 +26,7 @@ from torch.types import Number  # noqa: TC002
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable, Sequence
 
+from ._decoupled_decay import compute_decoupled_weight_decay_factor
 from .qhadopt import QHADOPT, _default_clip_lambda
 
 
@@ -286,19 +287,13 @@ class AggMoAdopt(QHADOPT):
             step_tensor = qh_update * lr
 
             if weight_decay != 0 and decouple:
-                if (
-                    initial_lr is None
-                    or (
-                        isinstance(initial_lr, Tensor)
-                        and cast("Tensor", (initial_lr == 0)).any()
-                    )
-                    or initial_lr == 0.0
-                ):
-                    decay_factor = 1.0
-                else:
-                    decay_factor = lr / initial_lr
-                effective_weight_decay = decay_factor * weight_decay
-                step_tensor = step_tensor.add(param, alpha=effective_weight_decay)
+                decay_factor = compute_decoupled_weight_decay_factor(lr, initial_lr)
+                scaling_factor = (decay_factor * weight_decay) / (
+                    1 - decay_factor * weight_decay
+                )
+                step_tensor = (
+                    step_tensor * (1 + scaling_factor) + param * scaling_factor
+                )
 
             for metric in self.metric_functions:
                 optimizer_metrics[f"{metric}/{name}"] = self.metric_functions[metric](
@@ -340,6 +335,8 @@ def _single_tensor_aggmo_qhadopt(  # noqa: C901, PLR0913
     if torch.jit.is_scripting():  # type: ignore[attr-defined]
         assert isinstance(lr, float)
 
+    moment_specs = _build_moment_specs(vs)
+
     for i, param in enumerate(params):
         grad = grads[i] if not maximize else -grads[i]
         buffers = moment_buffers[i]
@@ -370,17 +367,7 @@ def _single_tensor_aggmo_qhadopt(  # noqa: C901, PLR0913
             continue
 
         if weight_decay != 0 and decouple:
-            if (
-                initial_lr is None
-                or (
-                    isinstance(initial_lr, Tensor)
-                    and cast("Tensor", (initial_lr == 0)).any()
-                )
-                or initial_lr == 0.0
-            ):
-                decay_factor = 1.0
-            else:
-                decay_factor = lr / initial_lr
+            decay_factor = compute_decoupled_weight_decay_factor(lr, initial_lr)
             param.mul_(1 - decay_factor * weight_decay)
 
         denom = torch.clamp(exp_avg_sq.sqrt(), eps)
@@ -393,7 +380,7 @@ def _single_tensor_aggmo_qhadopt(  # noqa: C901, PLR0913
             buf.lerp_(normed_grad, 1 - beta1)
 
         update = normed_grad.mul(grad_coeff)
-        for weight, buf in zip(vs, buffers, strict=True):
+        for (weight, _), buf in zip(moment_specs, buffers, strict=True):
             update.add_(buf, alpha=weight)
 
         param.add_(update, alpha=-_get_value(lr))
