@@ -209,7 +209,9 @@ class StatefulStreamingTextDataset(StreamingTextDataset):
         return parent_state
 
     def load_state_dict(self, obj: dict[str, Any]) -> None:
-        """Restores the dataset's state from a state dictionary."""
+        """
+        Restores the dataset's state from a state dictionary.
+        """
         self._num_samples_yielded = obj.pop("_num_samples_yielded", 0)
         super().load_state_dict(obj)
 
