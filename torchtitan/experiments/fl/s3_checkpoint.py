@@ -129,7 +129,7 @@ class S3CheckpointManager:
                 shutil.rmtree(destination)
             except OSError:
                 logger.warning(
-                    "Failed to clean up incomplete checkpoint directory at %s.",
+                    "Failed to clean up incomplete checkpoint at %s after a download error.",
                     destination,
                 )
             raise
@@ -185,6 +185,7 @@ class S3CheckpointManager:
                 )
                 return local_latest_step
 
+            local_marker_step = self._read_local_marker_step()
             if (
                 local_latest_step == remote_step
                 and self._read_local_marker_step() == remote_step
