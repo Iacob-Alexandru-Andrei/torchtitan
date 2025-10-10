@@ -312,6 +312,8 @@ def _single_tensor_aggmo_qhadamw(  # noqa: C901, PLR0913, PLR0912
     if torch.jit.is_scripting():  # type: ignore[attr-defined]
         assert isinstance(lr, float)
 
+    moment_specs = _build_moment_specs(vs)
+
     for i, param in enumerate(params):
         grad = grads[i] if not maximize else -grads[i]
         buffers = moment_buffers[i]
@@ -373,7 +375,7 @@ def _single_tensor_aggmo_qhadamw(  # noqa: C901, PLR0913, PLR0912
 
         m_hats = [buf / bias_correction1 for buf in buffers]
         qh_numerator = grad.mul(grad_coeff)
-        for weight, m_hat in zip(vs, m_hats, strict=True):
+        for (weight, _), m_hat in zip(moment_specs, m_hats, strict=True):
             qh_numerator.add_(m_hat, alpha=weight)
 
         param_data.addcdiv_(qh_numerator, denom, value=-_get_value(lr))
