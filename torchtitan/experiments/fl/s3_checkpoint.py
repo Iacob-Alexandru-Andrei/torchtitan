@@ -167,15 +167,14 @@ class S3CheckpointManager:
 
     def close(self) -> None:
         """Flush pending uploads and release remote resources."""
-        if not self._installed:
-            return
-        try:
-            self._orig_maybe_wait()
-        except Exception:  # noqa: BLE001
-            logger.exception(
-                "Failed while waiting for staged checkpoints before upload."
-            )
-        self._process_pending(flush=True)
+        if self._installed:
+            try:
+                self._orig_maybe_wait()
+            except Exception:  # noqa: BLE001
+                logger.exception(
+                    "Failed while waiting for staged checkpoints before upload."
+                )
+            self._process_pending(flush=True)
         if hasattr(self.remote_up_down, "close"):
             try:
                 self.remote_up_down.close()
@@ -310,7 +309,10 @@ class S3CheckpointManager:
 
 
 def setup_s3_checkpointing(
-    checkpointer: CheckpointManager, job_config: MosaicJobConfig
+    checkpointer: CheckpointManager,
+    job_config: MosaicJobConfig,
+    *,
+    install: bool = True,
 ) -> S3CheckpointManager | None:
     """Create and install an :class:`S3CheckpointManager` if configured."""
     config = job_config.s3_checkpoint
@@ -323,5 +325,6 @@ def setup_s3_checkpointing(
         return None
 
     manager = S3CheckpointManager(checkpointer, config, job_config)
-    manager.install()
+    if install:
+        manager.install()
     return manager
