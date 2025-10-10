@@ -125,7 +125,13 @@ def _resource_to_closer(resource: Any) -> Callable[[], None] | None:
         return None
 
     if isinstance(resource, AbstractContextManager):
-        resource.__enter__()
+        try:
+            resource.__enter__()
+        except Exception:  # pragma: no cover - defensive logging
+            logger.exception(
+                "Failed to enter DES-LOC context manager; continuing without it"
+            )
+            return None
 
         def _close_ctx() -> None:
             resource.__exit__(None, None, None)
