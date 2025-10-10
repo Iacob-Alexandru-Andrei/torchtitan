@@ -56,7 +56,7 @@ class _TokenizerWithEosId:
 
         return self._tokenizer
 
-    def __getattr__(self, name: str) -> Any:  # pragma: no cover - simple delegation
+    def __getattr__(self, name: str) -> Any:  # pragma: no cover
         return getattr(self._tokenizer, name)
 
 
