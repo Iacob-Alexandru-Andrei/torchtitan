@@ -200,8 +200,7 @@ class S3CheckpointManager:
     ) -> None:  # noqa: FBT001, FBT002
         self._orig_save(curr_step, last_step=last_step)
         checkpoint_dir = self._checkpoint_dir(curr_step)
-        if checkpoint_dir.exists() or last_step:
-            self._pending_steps.append((curr_step, checkpoint_dir))
+        self._pending_steps.append((curr_step, checkpoint_dir))
         if last_step:
             try:
                 self._orig_maybe_wait()
