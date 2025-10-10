@@ -182,7 +182,8 @@ class StatefulStreamingTextDataset(StreamingTextDataset):
         self._num_samples_yielded = 0
 
     def __getitem__(self, idx: int) -> dict[str, list[int]] | torch.Tensor:
-        """Overrides the parent method to increment the internal sample counter
+        """
+        Overrides the parent method to increment the internal sample counter
         each time an item is fetched.
         """
         self._num_samples_yielded += 1
