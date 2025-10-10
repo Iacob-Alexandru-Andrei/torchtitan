@@ -188,7 +188,7 @@ class S3CheckpointManager:
             local_marker_step = self._read_local_marker_step()
             if (
                 local_latest_step == remote_step
-                and local_marker_step == remote_step
+                and self._read_local_marker_step() == remote_step
                 and self._checkpoint_dir(remote_step).exists()
             ):
                 logger.info(
