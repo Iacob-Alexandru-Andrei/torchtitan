@@ -121,17 +121,13 @@ class S3CheckpointManager:
 
     def _download_step(self, step: int) -> None:
         destination = self._checkpoint_dir(step)
+        preexisting_dir = destination.exists()
         destination.mkdir(parents=True, exist_ok=True)
         try:
             self._step_download_fn(step, destination)
         except Exception:
-            try:
-                shutil.rmtree(destination)
-            except OSError:
-                logger.warning(
-                    "Failed to clean up incomplete checkpoint at %s after a download error.",
-                    destination,
-                )
+            if not preexisting_dir and destination.exists():
+                shutil.rmtree(destination, ignore_errors=True)
             raise
 
     # ------------------------------------------------------------------
