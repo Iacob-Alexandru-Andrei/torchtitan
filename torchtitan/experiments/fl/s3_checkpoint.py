@@ -140,6 +140,19 @@ class S3CheckpointManager:
         raise AttributeError(
             f"'{type(self).__name__}' proxy: '{type(self._checkpointer).__name__}' object "
             f"has no attribute '{name}'"
+        self._missing_directory_steps: set[int] = set()
+        self._not_ready_steps: set[int] = set()
+        self._installed = False
+        self._orig_save = checkpointer.save
+        self._orig_maybe_wait = checkpointer.maybe_wait_for_staging
+
+    def install(self) -> None:
+        """Hook into the wrapped :class:`CheckpointManager`."""
+        if self._installed:
+            return
+        self.checkpointer.save = self._save  # type: ignore[assignment]
+        self.checkpointer.maybe_wait_for_staging = (  # type: ignore[assignment]
+            self._maybe_wait_for_staging
         )
 
     def __del__(self) -> None:
@@ -191,6 +204,19 @@ class S3CheckpointManager:
             logger.exception(
                 "Failed while waiting for staged checkpoints before upload."
             )
+        if self._installed:
+            try:
+                self._orig_maybe_wait()
+            except Exception:  # noqa: BLE001
+                logger.exception(
+                    "Failed while waiting for staged checkpoints before upload."
+                )
+            self._process_pending(flush=True)
+        if hasattr(self.remote_up_down, "close"):
+            try:
+                self.remote_up_down.close()
+            except Exception:  # noqa: BLE001
+                logger.exception("Failed to close RemoteUploaderDownloader.")
 
     def _resolve_remote_root(self) -> str:
         root = self.config.remote_checkpoint_folder or self.job_config.checkpoint.folder
@@ -210,8 +236,14 @@ class S3CheckpointManager:
     ) -> None:  # noqa: FBT001, FBT002
         self._checkpointer.save(curr_step, last_step=last_step)
         checkpoint_dir = self._checkpoint_dir(curr_step)
-        if checkpoint_dir.exists() or last_step:
-            self._pending_steps.append((curr_step, checkpoint_dir))
+        if not checkpoint_dir.exists():
+            logger.warning(
+                "Checkpoint directory %s for step %s does not exist immediately after save; "
+                "upload will be retried once it becomes available.",
+                checkpoint_dir,
+                curr_step,
+            )
+        self._pending_steps.append((curr_step, checkpoint_dir))
         if last_step:
             try:
                 self._checkpointer.maybe_wait_for_staging()
@@ -233,13 +265,59 @@ class S3CheckpointManager:
                 continue
             if not directory.exists():
                 if flush:
-                    if directory.exists():
-                        self._upload_step(step, directory)
+                    logger.error(
+                        "Checkpoint directory %s for step %s does not exist and will not "
+                        "be uploaded during flush.",
+                        directory,
+                        step,
+                    )
                 else:
+                    if step not in self._missing_directory_steps:
+                        logger.warning(
+                            "Checkpoint directory %s for step %s is not available yet; "
+                            "retrying staging before upload.",
+                            directory,
+                            step,
+                        )
+                        self._missing_directory_steps.add(step)
                     pending.append((step, directory))
                 continue
+            self._missing_directory_steps.discard(step)
+            if not self._is_directory_ready_for_upload(directory):
+                if flush:
+                    logger.error(
+                        "Checkpoint directory %s for step %s is not ready for upload "
+                        "during flush and will be skipped.",
+                        directory,
+                        step,
+                    )
+                else:
+                    if step not in self._not_ready_steps:
+                        logger.info(
+                            "Checkpoint directory %s for step %s is still being written; "
+                            "deferring upload.",
+                            directory,
+                            step,
+                        )
+                        self._not_ready_steps.add(step)
+                    pending.append((step, directory))
+                continue
+            self._not_ready_steps.discard(step)
             self._upload_step(step, directory)
         self._pending_steps = pending
+
+    def _is_directory_ready_for_upload(self, directory: Path) -> bool:
+        try:
+            has_entries = any(directory.iterdir())
+        except FileNotFoundError:
+            return False
+        if not has_entries:
+            return False
+        try:
+            has_temp_files = any(directory.rglob("*.tmp"))
+        except FileNotFoundError:
+            return False
+        return not has_temp_files
 
     def _upload_step(self, step: int, directory: Path) -> None:
         files = sorted(self._iter_checkpoint_files(directory))
@@ -320,7 +398,10 @@ class S3CheckpointManager:
 
 
 def setup_s3_checkpointing(
-    checkpointer: CheckpointManager, job_config: MosaicJobConfig
+    checkpointer: CheckpointManager,
+    job_config: MosaicJobConfig,
+    *,
+    install: bool = True,
 ) -> S3CheckpointManager | None:
     """Create an :class:`S3CheckpointManager` if configured."""
     config = job_config.s3_checkpoint
@@ -332,4 +413,7 @@ def setup_s3_checkpointing(
         )
         return None
 
-    return S3CheckpointManager(checkpointer, config, job_config)
+    manager = S3CheckpointManager(checkpointer, config, job_config)
+    if install:
+        manager.install()
+    return manager
