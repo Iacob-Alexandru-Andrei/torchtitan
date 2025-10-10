@@ -32,6 +32,7 @@ from the actual storage backend which makes it easy to test.
 from __future__ import annotations
 
 import re
+import shutil
 from pathlib import Path
 from typing import Callable
 
@@ -87,16 +88,12 @@ class S3CheckpointManager:
 
     def _find_local_latest_step(self) -> int:
         pattern = re.compile(r"step-(\d+)")
-        latest = -1
-        for child in self._root.iterdir():
-            if not child.is_dir():
-                continue
-            match = pattern.fullmatch(child.name)
-            if not match:
-                continue
-            step = int(match.group(1))
-            latest = max(latest, step)
-        return latest
+        steps = (
+            int(match.group(1))
+            for child in self._root.iterdir()
+            if child.is_dir() and (match := pattern.fullmatch(child.name))
+        )
+        return max(steps, default=-1)
 
     def _read_local_marker_step(self) -> int | None:
         if not self._marker_path.exists():
@@ -124,8 +121,14 @@ class S3CheckpointManager:
 
     def _download_step(self, step: int) -> None:
         destination = self._checkpoint_dir(step)
+        preexisting_dir = destination.exists()
         destination.mkdir(parents=True, exist_ok=True)
-        self._step_download_fn(step, destination)
+        try:
+            self._step_download_fn(step, destination)
+        except Exception:
+            if not preexisting_dir and destination.exists():
+                shutil.rmtree(destination, ignore_errors=True)
+            raise
 
     # ------------------------------------------------------------------
     # Public API
@@ -161,37 +164,25 @@ class S3CheckpointManager:
             logger.exception("Failed to determine the latest checkpoint available on S3.")
             return None
 
-        step_to_fetch: int | None = None
-
         if requested_step != -1:
             step_to_fetch = requested_step
-            if self._checkpoint_dir(step_to_fetch).exists():
-                logger.info(
-                    "Skipping remote download; checkpoint for explicit step %s already exists locally.",
-                    step_to_fetch,
-                )
-                if self._read_local_marker_step() != step_to_fetch:
-                    self._write_local_marker_step(step_to_fetch)
-                return step_to_fetch
         else:
             if remote_step is None:
                 logger.info("Remote checkpoint marker not found; nothing to download.")
                 return None
 
             local_latest_step = self._find_local_latest_step()
-            local_marker_step = self._read_local_marker_step()
-
             if local_latest_step > remote_step:
                 logger.info(
                     "Latest local checkpoint (step %s) is newer than the remote marker %s; skipping download.",
                     local_latest_step,
                     remote_step,
                 )
-                return remote_step
+                return local_latest_step
 
             if (
                 local_latest_step == remote_step
-                and local_marker_step == remote_step
+                and self._read_local_marker_step() == remote_step
                 and self._checkpoint_dir(remote_step).exists()
             ):
                 logger.info(
@@ -202,14 +193,18 @@ class S3CheckpointManager:
 
             step_to_fetch = remote_step
 
-        if step_to_fetch is None:
-            return None
-
-        if self._checkpoint_dir(step_to_fetch).exists():
-            logger.info(
-                "Checkpoint for step %s already present locally; skipping remote transfer.",
-                step_to_fetch,
-            )
+        checkpoint_dir = self._checkpoint_dir(step_to_fetch)
+        if checkpoint_dir.exists():
+            if requested_step != -1:
+                logger.info(
+                    "Skipping remote download; checkpoint for explicit step %s already exists locally.",
+                    step_to_fetch,
+                )
+            else:
+                logger.info(
+                    "Checkpoint for step %s already present locally; skipping remote transfer.",
+                    step_to_fetch,
+                )
             if self._read_local_marker_step() != step_to_fetch:
                 self._write_local_marker_step(step_to_fetch)
             return step_to_fetch
