@@ -167,7 +167,8 @@ def _build_stream_objects(
 
 
 class StatefulStreamingTextDataset(StreamingTextDataset):
-    """A stateful wrapper around StreamingTextDataset that internally tracks the number
+    """
+    A stateful wrapper around StreamingTextDataset that internally tracks the number
     of samples yielded. This makes it compatible with dataloaders like TorchTitan's
     StatefulDataLoader that do not pass arguments to the dataset's state_dict method.
 
