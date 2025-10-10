@@ -44,7 +44,6 @@ def _copy_into_tensor(param: torch.Tensor, value: torch.Tensor) -> None:
                 param.device_mesh,
                 param.placements,
                 shape=param.shape,
-                stride=param.stride(),
             )
         )
     else:
@@ -240,14 +239,16 @@ class _OptimizerStateFragment(_BaseFragment):
             for name, averaged in zip(
                 self._original_state_tensors.keys(),
                 self._averaged_state_tensors,
-                strict=False,
+                strict=True,
             ):
                 param = self._param_map[name]
                 self._optimizer.state[param][self.state_key].copy_(averaged)
 
     def register_state_dict_fn(self) -> None:
         def load_fn(state_dict: dict[str, torch.Tensor]) -> None:
-            self._original_state_tensors = state_dict
+            for name, tensor in state_dict.items():
+                if name in self._original_state_tensors:
+                    self._original_state_tensors[name].copy_(tensor)
 
         def save_fn() -> dict[str, torch.Tensor]:
             return self._original_state_tensors
@@ -454,7 +455,7 @@ class DesLocFTOptimizersContainer(FTOptimizersContainer):
 
         self._desloc_controllers: list[DesLocController] = []
         for idx, (model, optimizer) in enumerate(
-            zip(self.model_parts, self.optimizers, strict=False)
+            zip(self.model_parts, self.optimizers, strict=True)
         ):
             controller = DesLocController(
                 manager=ft_manager,
