@@ -30,10 +30,6 @@ shuffle = false
 
 # Keyed override: rank 2 gets its own definition, taking precedence over the
 # sequential entry at index 2.
-[mosaic_dataloader.dataset.non_iid.by_dp_rank."2".streams.train]
-remote = "s3://example-bucket/datasets/client2/train"
-local = "/datasets/client2/train"
-
-[mosaic_dataloader.dataset.non_iid.by_dp_rank."2".client_streams.client_2]
-remote = "s3://example-bucket/datasets/client2/cache"
-local = "/datasets/client2/cache"
+[mosaic_dataloader.dataset.non_iid.by_dp_rank."2"]
+streams = { train = { remote = "s3://example-bucket/datasets/client2/train", local = "/datasets/client2/train" } }
+client_streams = { client_2 = { remote = "s3://example-bucket/datasets/client2/cache", local = "/datasets/client2/cache" } }
