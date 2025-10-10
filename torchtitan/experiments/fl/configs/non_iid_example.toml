@@ -1,0 +1,99 @@
+# Optimizer monitor settings (MosaicJobConfig root-level fields)
+optimizer_monitor_interval = 10
+optimizer_monitor_only_global = true
+optimizer_monitor_log_metrics = true
+
+# Minimal job configuration fields for demonstration purposes
+[job]
+dump_folder = "./outputs"
+description = "Example non-IID Mosaic streaming job"
+print_args = false
+
+[model]
+name = "mosaic_llama3_mup"
+flavor = "16M"
+hf_assets_path = "./tests/assets/tokenizer"
+
+[training]
+local_batch_size = 8
+seq_len = 2048
+steps = 10
+
+[mosaic_dataloader]
+name = "text"
+drop_last = true
+
+[mosaic_dataloader.dataset]
+max_seq_len = 2048
+shuffle = true
+shuffle_seed = 9176
+batching_method = "random"
+
+# Global stream catalog. Every entry can be reused by worker-specific overrides.
+[mosaic_dataloader.dataset.streams]
+
+  [mosaic_dataloader.dataset.streams.stream_0]
+  local = "shared/fineweb_edu_dedup/client_0"
+  remote = "shared/fineweb_edu_dedup/client_0"
+  proportion = 70
+
+  [mosaic_dataloader.dataset.streams.stream_1]
+  local = "shared/fineweb_edu_dedup/client_1"
+  remote = "shared/fineweb_edu_dedup/client_1"
+  proportion = 70
+
+  [mosaic_dataloader.dataset.streams.stream_16]
+  local = "private/cosmo/client_0"
+  remote = "private/cosmo/client_0"
+  proportion = 10
+
+  [mosaic_dataloader.dataset.streams.stream_17]
+  local = "private/cosmo/client_1"
+  remote = "private/cosmo/client_1"
+  proportion = 10
+
+  [mosaic_dataloader.dataset.streams.stream_32]
+  local = "shared/python_edu/client_0"
+  remote = "shared/python_edu/client_0"
+  proportion = 10
+
+  [mosaic_dataloader.dataset.streams.stream_33]
+  local = "shared/python_edu/client_1"
+  remote = "shared/python_edu/client_1"
+  proportion = 10
+
+# Worker-specific overrides. Each rank inherits the global definition and can tweak
+# per-stream proportions (or other supported Stream kwargs).
+[mosaic_dataloader.dataset.non_iid_streams]
+
+  [mosaic_dataloader.dataset.non_iid_streams.dp_rank_0.stream_0]
+  proportion = 70
+
+  [mosaic_dataloader.dataset.non_iid_streams.dp_rank_0.stream_16]
+  proportion = 20
+
+  [mosaic_dataloader.dataset.non_iid_streams.dp_rank_0.stream_32]
+  proportion = 10
+
+  [mosaic_dataloader.dataset.non_iid_streams.dp_rank_1.stream_1]
+  proportion = 60
+
+  [mosaic_dataloader.dataset.non_iid_streams.dp_rank_1.stream_17]
+  proportion = 30
+
+  [mosaic_dataloader.dataset.non_iid_streams.dp_rank_1.stream_33]
+  proportion = 10
+
+  [mosaic_dataloader.dataset.non_iid_streams.default.stream_0]
+  proportion = 50
+
+  [mosaic_dataloader.dataset.non_iid_streams.default.stream_1]
+  proportion = 50
+
+[mosaic_tokenizer]
+name = "HuggingFaceTB/SmolLM-1.7B"
+
+[parallelism]
+data_parallel_replicate_degree = 2
+tensor_parallel_degree = 1
+pipeline_parallel_degree = 1

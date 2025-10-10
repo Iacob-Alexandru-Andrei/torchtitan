@@ -6,7 +6,7 @@ This directory contains a refactored and generalized integration for using Mosai
 
 The integration consists of three main components:
 
-1.  **Dataloader (`dataloader/`)**: Contains the `MosaicParallelAwareDataloader`, a wrapper around Mosaic's `StreamingTextDataset` that adds support for TorchTitan's distributed training and checkpointing. It also includes a `build_mosaic_dataloader` factory function to construct the dataloader from a configuration.
+1.  **Dataloader (`dataloader/`)**: Contains the `MosaicParallelAwareDataloader`, a wrapper around Mosaic's `StreamingTextDataset` that adds support for TorchTitan's distributed training and checkpointing. It also includes a `build_mosaic_dataloader` factory function to construct the dataloader from a configuration. The builder supports both IID sampling (the default) and configurable non-IID sampling across data-parallel workers.
 
 2.  **Configuration (`configs/`)**: Includes `MosaicJobConfig`, a custom configuration class that inherits from `JobConfig` and adds fields for Mosaic-specific settings. This provides a clean separation of concerns and makes the integration more modular. An example configuration file, `mosaic_job.toml`, demonstrates how to set up a training job.
 
@@ -31,6 +31,7 @@ The training job is configured using the `mosaic_job.toml` file. Here are the ke
 
 *   **`[mosaic_dataloader]`**:
     *   This section contains all the configuration for the Mosaic `StreamingTextDataset`. You can specify the dataset name, paths, shuffling options, and other parameters here. Refer to the llm-foundry documentation for a complete list of available options.
+    *   To opt into non-IID sampling, define a base catalog of streams under `[mosaic_dataloader.dataset.streams]` and then add overrides under `[mosaic_dataloader.dataset.non_iid_streams]`. Each nested table is keyed by the data-parallel rank identifier (e.g., `dp_rank_0`) and inherits the base stream definition, allowing you to override fields such as `proportion`, `repeat`, or `download` settings on a per-rank basis. A `default` section acts as a fallback for unspecified ranks. See `configs/non_iid_example.toml` for a fully worked example mirroring large federated setups.
 
 *   **`[mosaic_tokenizer]`**:
     *   This section configures the tokenizer to be used with the Mosaic dataloader. You can specify the tokenizer name (e.g., from HuggingFace) and any additional keyword arguments.

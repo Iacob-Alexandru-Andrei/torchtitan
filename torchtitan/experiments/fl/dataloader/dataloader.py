@@ -16,8 +16,9 @@ from __future__ import annotations
 
 import inspect
 import pickle
+from collections.abc import Callable, Mapping, Sequence
 from copy import deepcopy
-from typing import Any, Callable
+from typing import Any, TYPE_CHECKING
 
 import torch
 from torchdata.stateful_dataloader import StatefulDataLoader
@@ -26,45 +27,48 @@ try:
     from llmfoundry.data.text_data import StreamingTextDataset
     from streaming import Stream, StreamingDataset
 except ImportError as exc:  # pragma: no cover - optional dependency
-    raise RuntimeError(
+    missing_dependency_msg = (
         "llm-foundry and streaming are required to build Mosaic dataloaders. "
         "Please install llm-foundry, mosaicml-streaming, and composer to enable this integration."
-    ) from exc
+    )
+    raise RuntimeError(missing_dependency_msg) from exc
 
 from torchtitan.components.dataloader import BaseDataLoader
-from torchtitan.components.tokenizer import BaseTokenizer
-from torchtitan.experiments.fl.configs.config import MosaicJobConfig
 from torchtitan.tools.logging import logger
+
+if TYPE_CHECKING:
+    from torchtitan.components.tokenizer import BaseTokenizer
+    from torchtitan.experiments.fl.configs.config import MosaicJobConfig
 
 
 class StatefulStreamingTextDataset(StreamingTextDataset):
-    """
-    A stateful wrapper around StreamingTextDataset that internally tracks the number
-    of samples yielded. This makes it compatible with dataloaders like TorchTitan's
-    StatefulDataLoader that do not pass arguments to the dataset's state_dict method.
+    """Track how many samples the streaming dataset has yielded.
+
+    This makes the dataset compatible with dataloaders like TorchTitan's
+    ``StatefulDataLoader`` that do not pass arguments to the dataset's
+    ``state_dict`` method.
 
     Args:
-        *args: Positional arguments to pass to StreamingTextDataset.
-        **kwargs: Keyword arguments to pass to StreamingTextDataset.
+        *args: Positional arguments to pass to ``StreamingTextDataset``.
+        **kwargs: Keyword arguments to pass to ``StreamingTextDataset``.
     """
 
-    def __init__(self, *args: Any, **kwargs: Any):
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
         self._num_samples_yielded = 0
 
     def __getitem__(self, idx: int) -> dict[str, list[int]] | torch.Tensor:
-        """
-        Overrides the parent method to increment the internal sample counter
-        each time an item is fetched.
-        """
+        """Increment the internal sample counter each time an item is fetched."""
         self._num_samples_yielded += 1
         return super().__getitem__(idx)
 
     def state_dict(
-        self, num_samples: int | None = None, from_beginning: bool = True
+        self,
+        num_samples: int | None = None,
+        *,
+        from_beginning: bool = True,
     ) -> dict[str, Any]:
-        """
-        Saves the dataset's state.
+        """Saves the dataset's state.
 
         If `num_samples` is not provided by the caller, it defaults to using
         the internal `_num_samples_yielded` counter. This makes it compatible
@@ -80,9 +84,7 @@ class StatefulStreamingTextDataset(StreamingTextDataset):
         return parent_state
 
     def load_state_dict(self, obj: dict[str, Any]) -> None:
-        """
-        Restores the dataset's state from a state dictionary.
-        """
+        """Restore the dataset's state from a state dictionary."""
         self._num_samples_yielded = obj.pop("_num_samples_yielded", 0)
         super().load_state_dict(obj)
 
@@ -111,7 +113,7 @@ class MosaicParallelAwareDataloader(StatefulDataLoader, BaseDataLoader):
     dp_world_size: int
     batch_size: int
 
-    def __init__(
+    def __init__(  # noqa: PLR0913
         self,
         dataset: StatefulStreamingTextDataset,
         dp_rank: int,
@@ -119,11 +121,12 @@ class MosaicParallelAwareDataloader(StatefulDataLoader, BaseDataLoader):
         batch_size: int,
         collate_fn: Callable | None = None,
         num_workers: int = 0,
+        *,
         prefetch_factor: int | None = 2,
         pin_memory: bool = True,
         persistent_workers: bool = True,
         drop_last: bool = True,
-    ):
+    ) -> None:
         self.dp_world_size = dp_world_size
         self.dp_rank = dp_rank
         self.batch_size = batch_size
@@ -162,13 +165,11 @@ class MosaicParallelAwareDataloader(StatefulDataLoader, BaseDataLoader):
             "dp_degree is inconsistent before and after checkpoint, "
             "dataloader resharding is not supported yet."
         )
-        super().load_state_dict(pickle.loads(state_dict[self._rank_id]))
+        super().load_state_dict(pickle.loads(state_dict[self._rank_id]))  # noqa: S301
 
 
 def titan_collate_fn(batch: list[Any]) -> tuple[dict[str, torch.Tensor], torch.Tensor]:
-    """
-    Collates samples from StreamingTextDataset and formats them for the
-    TorchTitan training loop.
+    """Collate samples from ``StreamingTextDataset`` for the TorchTitan loop.
 
     Args:
         batch: A list of samples from the dataset.
@@ -186,12 +187,133 @@ def titan_collate_fn(batch: list[Any]) -> tuple[dict[str, torch.Tensor], torch.T
     elif isinstance(batch[0], torch.Tensor):
         input_ids_tensor = torch.stack(batch)
     else:
-        raise TypeError(f"Unsupported batch item type from dataset: {type(batch[0])}")
+        batch_type_msg = f"Unsupported batch item type from dataset: {type(batch[0])}"
+        raise TypeError(batch_type_msg)
 
     model_inputs = input_ids_tensor[:, :-1].contiguous()
     labels = input_ids_tensor[:, 1:].contiguous()
     input_dict = {"input": model_inputs}
     return input_dict, labels
+
+
+def _get_stream_arg_names() -> set[str]:
+    """Return the valid keyword arguments accepted by :class:`~streaming.Stream`."""
+    if not hasattr(_get_stream_arg_names, "_cache"):
+        stream_params = inspect.signature(Stream.__init__).parameters
+        _get_stream_arg_names._cache = {
+            name for name in stream_params if name != "self"
+        }
+    return _get_stream_arg_names._cache  # type: ignore[attr-defined]
+
+
+def _build_streams_from_config(
+    streams_cfg: Mapping[str, Any] | None,
+    *,
+    base_streams: Mapping[str, Any] | None = None,
+) -> list[Stream] | None:
+    """Construct :class:`Stream` objects from configuration dictionaries.
+
+    Args:
+        streams_cfg: Mapping of stream names to their configuration dictionaries.
+        base_streams: Optional mapping of base stream definitions that can be
+            referenced by name. When provided, the configuration for a stream is
+            merged on top of the corresponding base configuration sharing the
+            same key.
+
+    Returns:
+        A list of instantiated :class:`Stream` objects or ``None`` if
+        ``streams_cfg`` is ``None``.
+    """
+    if not streams_cfg:
+        return None
+
+    valid_keys = _get_stream_arg_names()
+    resolved_streams: list[Stream] = []
+    for stream_name, stream_config in streams_cfg.items():
+        if not isinstance(stream_config, Mapping):
+            type_error_msg = (
+                "Stream configuration entries must be mappings. "
+                f"Got {type(stream_config)!r} for stream '{stream_name}'."
+            )
+            raise TypeError(type_error_msg)
+
+        merged_config: dict[str, Any] = {}
+        if base_streams and stream_name in base_streams:
+            merged_config.update(deepcopy(base_streams[stream_name]))
+        merged_config.update(deepcopy(stream_config))
+
+        # Filter out any unsupported keys before instantiating the Stream.
+        stream_kwargs = {
+            key: merged_config[key] for key in valid_keys if key in merged_config
+        }
+        resolved_streams.append(Stream(**stream_kwargs))
+
+    return resolved_streams
+
+
+def _select_non_iid_streams_from_mapping(
+    config: Mapping[str, Any], dp_rank: int
+) -> Mapping[str, Any] | None:
+    """Resolve the non-IID configuration from a mapping structure."""
+    candidate_keys = (
+        str(dp_rank),
+        f"dp_rank_{dp_rank}",
+        f"rank_{dp_rank}",
+        f"worker_{dp_rank}",
+    )
+    for key in candidate_keys:
+        if key in config:
+            return config[key]
+    return config.get("default")
+
+
+def _select_non_iid_streams_from_sequence(
+    config: Sequence[Mapping[str, Any]], dp_rank: int
+) -> Mapping[str, Any] | None:
+    """Resolve the non-IID configuration from a sequence of mappings."""
+    default_entry: Mapping[str, Any] | None = None
+    for entry in config:
+        if not isinstance(entry, Mapping):
+            continue
+
+        ranks = (
+            entry.get("dp_ranks")
+            or entry.get("ranks")
+            or entry.get("workers")
+            or entry.get("clients")
+        )
+        if ranks is None:
+            if entry.get("default"):
+                default_entry = entry
+            continue
+
+        if isinstance(ranks, int):
+            ranks = [ranks]
+
+        if dp_rank in ranks:
+            return entry.get("streams") or entry.get("client_streams")
+
+    if default_entry is not None:
+        return default_entry.get("streams") or default_entry.get("client_streams")
+    return None
+
+
+def _select_non_iid_streams_config(
+    non_iid_cfg: Mapping[str, Any] | Sequence[Mapping[str, Any]] | None,
+    *,
+    dp_rank: int,
+) -> Mapping[str, Any] | None:
+    """Pick the appropriate stream configuration for a given data-parallel rank."""
+    if non_iid_cfg is None:
+        return None
+
+    if isinstance(non_iid_cfg, Mapping):
+        return _select_non_iid_streams_from_mapping(non_iid_cfg, dp_rank)
+
+    if isinstance(non_iid_cfg, Sequence):
+        return _select_non_iid_streams_from_sequence(non_iid_cfg, dp_rank)
+
+    return None
 
 
 def build_mosaic_dataloader(
@@ -209,7 +331,8 @@ def build_mosaic_dataloader(
     """
     mosaic_cfg = job_config.mosaic_dataloader
     if mosaic_cfg is None:
-        raise ValueError("mosaic_dataloader config must be set.")
+        missing_cfg_msg = "mosaic_dataloader config must be set."
+        raise ValueError(missing_cfg_msg)
 
     # The tokenizer is expected to be a HuggingFace tokenizer or a wrapper.
     # We attempt to extract it here.
@@ -227,19 +350,37 @@ def build_mosaic_dataloader(
 
     # Build streams
     streams_cfg = dataset_cfg.pop("streams", None)
+    base_streams = (
+        {name: deepcopy(config) for name, config in streams_cfg.items()}
+        if isinstance(streams_cfg, Mapping)
+        else {}
+    )
+    non_iid_streams_cfg = dataset_cfg.pop("non_iid_streams", None)
+
+    selected_non_iid_cfg = _select_non_iid_streams_config(
+        non_iid_streams_cfg, dp_rank=dp_rank
+    )
     streams = None
-    if streams_cfg:
-        streams = [
-            Stream(
-                remote=stream_config.get("remote"),
-                local=stream_config.get("local"),
-                proportion=stream_config.get("proportion", 1.0),
-                download_retry=stream_config.get("download_retry", 2),
-                download_timeout=stream_config.get("download_timeout", 60),
+
+    if selected_non_iid_cfg is not None:
+        streams = _build_streams_from_config(
+            selected_non_iid_cfg, base_streams=base_streams
+        )
+        if streams is None:
+            empty_stream_msg = (
+                "non_iid_streams configuration for rank "
+                f"{dp_rank} must define at least one stream."
             )
-            for stream_config in streams_cfg.values()
-        ]
-        logger.info(f"Built {len(streams)} streams for Mosaic dataloader")
+            raise ValueError(empty_stream_msg)
+        logger.info(
+            "Using non-IID stream configuration for dp_rank %s with %s streams",
+            dp_rank,
+            len(streams),
+        )
+    elif isinstance(streams_cfg, Mapping):
+        streams = _build_streams_from_config(streams_cfg)
+        if streams:
+            logger.info(f"Built {len(streams)} streams for Mosaic dataloader")
 
     # Filter dataset config to only include valid StreamingTextDataset parameters
     valid_params = {
