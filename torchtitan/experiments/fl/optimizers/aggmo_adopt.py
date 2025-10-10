@@ -298,7 +298,7 @@ def _single_tensor_aggmo_qhadopt(  # noqa: C901, PLR0913
     grad_scale: Tensor | None,
     found_inf: Tensor | None,
     *,
-    initial_lr: float | None,
+    initial_lr: float | Tensor | None,
     decouple: bool,
     clip_lambda: Callable[[Number | Tensor | Any], float] | None,
     beta1: float,
@@ -349,7 +349,17 @@ def _single_tensor_aggmo_qhadopt(  # noqa: C901, PLR0913
             continue
 
         if weight_decay != 0 and decouple:
-            decay_factor = (lr / initial_lr) if initial_lr != 0 else 1.0  # type: ignore[operator]
+            if (
+                initial_lr is None
+                or (
+                    isinstance(initial_lr, Tensor)
+                    and cast("Tensor", (initial_lr == 0)).any()
+                )
+                or initial_lr == 0.0
+            ):
+                decay_factor = 1.0
+            else:
+                decay_factor = lr / initial_lr
             param.mul_(1 - decay_factor * weight_decay)
 
         denom = torch.clamp(exp_avg_sq.sqrt(), eps)
@@ -362,7 +372,7 @@ def _single_tensor_aggmo_qhadopt(  # noqa: C901, PLR0913
             buf.lerp_(normed_grad, 1 - beta1)
 
         update = normed_grad.mul(grad_coeff)
-        for weight, buf in zip(vs, buffers, strict=False):
+        for weight, buf in zip(vs, buffers, strict=True):
             update.add_(buf, alpha=weight)
 
         param.add_(update, alpha=-_get_value(lr))
@@ -379,7 +389,7 @@ def aggmo_qhadopt(  # noqa: PLR0913, D103
     exp_avg_sqs: list[Tensor],
     state_steps: list[Tensor],
     *,
-    initial_lr: float | None = None,
+    initial_lr: float | Tensor | None = None,
     foreach: bool | None = None,
     capturable: bool = False,
     differentiable: bool = False,

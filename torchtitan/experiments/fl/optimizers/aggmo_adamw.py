@@ -266,13 +266,20 @@ class AggMoAdamW(QHAdamW):
             step_tensor = (numerator / denom) * lr
 
             if weight_decay != 0 and decouple:
-                decay_factor = (lr / initial_lr) if initial_lr else 1.0
-                scaling_factor = (decay_factor * weight_decay) / (
-                    1 - decay_factor * weight_decay
-                )
-                step_tensor = (
-                    step_tensor * (1 + scaling_factor) + param * scaling_factor
-                )
+                if (
+                    initial_lr is None
+                    or (
+                        isinstance(initial_lr, Tensor)
+                        and cast("Tensor", (initial_lr == 0)).any()
+                    )
+                    or initial_lr == 0.0
+                ):
+                    decay_factor = 1.0
+                else:
+                    decay_factor = lr / initial_lr
+
+                effective_weight_decay = decay_factor * weight_decay
+                step_tensor = step_tensor.add(param, alpha=effective_weight_decay)
 
             for metric in self.metric_functions:
                 optimizer_metrics[f"{metric}/{name}"] = self.metric_functions[metric](
@@ -387,7 +394,7 @@ def _single_tensor_aggmo_qhadamw(  # noqa: C901, PLR0913, PLR0912, PLR0915
 
         m_hats = [buf / bias_correction1 for buf in buffers]
         qh_numerator = grad.mul(grad_coeff)
-        for weight, m_hat in zip(vs, m_hats, strict=False):
+        for weight, m_hat in zip(vs, m_hats, strict=True):
             qh_numerator.add_(m_hat, alpha=weight)
 
         param_data.addcdiv_(qh_numerator, denom, value=-_get_value(lr))
