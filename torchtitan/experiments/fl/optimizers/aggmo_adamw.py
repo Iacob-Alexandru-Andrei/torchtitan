@@ -23,7 +23,13 @@ from torch.optim.optimizer import (
     ParamsT,
 )
 
-from .aggmo_adopt import _WEIGHT_SUM_TOL, _build_moment_specs, _is_moment_key, _sum_weights
+from .aggmo_adopt import (
+    _WEIGHT_SUM_TOL,
+    _build_moment_specs,
+    _compute_decay_factor,
+    _is_moment_key,
+    _sum_weights,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
@@ -290,7 +296,7 @@ class AggMoAdamW(QHAdamW):
         return optimizer_metrics
 
 
-def _single_tensor_aggmo_qhadamw(  # noqa: C901, PLR0913, PLR0912, PLR0915
+def _single_tensor_aggmo_qhadamw(  # noqa: C901, PLR0913, PLR0912
     params: list[Tensor],
     grads: list[Tensor],
     moment_buffers: list[list[Tensor]],
@@ -351,18 +357,7 @@ def _single_tensor_aggmo_qhadamw(  # noqa: C901, PLR0913, PLR0912, PLR0915
             param_data = param
 
         if weight_decay != 0 and decouple:
-            if (
-                initial_lr is None
-                or (
-                    isinstance(initial_lr, Tensor)
-                    and cast("Tensor", (initial_lr == 0)).any()
-                )
-                or initial_lr == 0.0
-            ):
-                decay_factor = 1.0
-            else:
-                decay_factor = lr / initial_lr
-
+            decay_factor = _compute_decay_factor(lr, initial_lr)
             param_data.mul_(1.0 - decay_factor * weight_decay)
 
         for buf in buffers:
