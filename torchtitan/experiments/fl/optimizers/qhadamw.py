@@ -29,6 +29,8 @@ from torch.optim.optimizer import (
 )
 
 
+from ._decoupled_decay import compute_decoupled_weight_decay_factor
+
 if TYPE_CHECKING:
     from collections.abc import Callable
 
@@ -490,7 +492,7 @@ class QHAdamW(Optimizer):
 
             # Apply weight decay adjustment if decoupled
             if weight_decay != 0 and decouple:
-                decay_factor = (lr / initial_lr) if initial_lr else 1.0
+                decay_factor = compute_decoupled_weight_decay_factor(lr, initial_lr)
                 scaling_factor = (decay_factor * weight_decay) / (
                     1 - decay_factor * weight_decay
                 )
@@ -508,7 +510,7 @@ class QHAdamW(Optimizer):
         return optimizer_metrics
 
 
-def _single_tensor_qhadamw(  # noqa: C901, PLR0913, PLR0912
+def _single_tensor_qhadamw(  # noqa: PLR0913
     params: list[Tensor],
     grads: list[Tensor],
     exp_avgs: list[Tensor],
@@ -570,18 +572,7 @@ def _single_tensor_qhadamw(  # noqa: C901, PLR0913, PLR0912
             param_data = param
 
         if weight_decay != 0 and decouple:
-            if (
-                initial_lr is None
-                or (
-                    isinstance(initial_lr, Tensor)
-                    and cast("Tensor", (initial_lr == 0)).any()
-                )
-                or initial_lr == 0.0
-            ):
-                decay_factor = 1.0
-            else:
-                decay_factor = lr / initial_lr
-
+            decay_factor = compute_decoupled_weight_decay_factor(lr, initial_lr)
             param_data.mul_(1.0 - decay_factor * weight_decay)
 
         exp_avg.mul_(beta1).add_(grad, alpha=1 - beta1)
@@ -740,24 +731,14 @@ def _multi_tensor_qhadamw(  # noqa: C901, PLR0913, PLR0912, PLR0915
                 )
 
         if weight_decay != 0 and decouple:
-            if (
-                initial_lr is None
-                or (
-                    isinstance(initial_lr, Tensor)
-                    and cast("Tensor", (initial_lr == 0)).any()
-                )
-                or initial_lr == 0.0
-            ):
-                decay_factor = 1.0
-            else:
-                decay_factor = lr / initial_lr
+            decay_factor = compute_decoupled_weight_decay_factor(lr, initial_lr)
 
-            if capturable:
-                weight_decay_term = decay_factor * weight_decay
-                torch._foreach_mul_(device_params, 1.0 - weight_decay_term)
-            else:
-                weight_decay_term = _get_value(decay_factor) * weight_decay
-                torch._foreach_mul_(device_params, 1.0 - weight_decay_term)
+            weight_decay_term = (
+                decay_factor * weight_decay
+                if capturable
+                else _get_value(decay_factor) * weight_decay
+            )
+            torch._foreach_mul_(device_params, 1.0 - weight_decay_term)
 
         torch._foreach_mul_(device_exp_avgs, beta1)
         torch._foreach_add_(device_exp_avgs, device_grads, alpha=1 - beta1)

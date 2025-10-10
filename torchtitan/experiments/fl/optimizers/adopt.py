@@ -28,6 +28,8 @@ from torch.optim.optimizer import (
 )
 from torch.types import Number
 
+from ._decoupled_decay import compute_decoupled_weight_decay_factor
+
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -447,7 +449,7 @@ class ADOPT(Optimizer):
 
             # Apply weight decay adjustment if decoupled
             if weight_decay != 0 and decouple:
-                decay_factor = (lr / initial_lr) if initial_lr else 1.0  # type: ignore[operator]
+                decay_factor = compute_decoupled_weight_decay_factor(lr, initial_lr)
                 scaling_factor = (decay_factor * weight_decay) / (
                     1 - decay_factor * weight_decay
                 )
@@ -518,7 +520,6 @@ def _single_tensor_adopt(  # noqa: PLR0913
 
         # Apply weight decay if not decoupled
         if weight_decay != 0 and not decouple:
-            decay_factor = (lr / initial_lr) if initial_lr else 1.0  # type: ignore[operator]
             grad = grad.add(param, alpha=weight_decay)
 
         if torch.is_complex(param):
@@ -535,7 +536,7 @@ def _single_tensor_adopt(  # noqa: PLR0913
 
         # Apply decoupled weight decay
         if weight_decay != 0 and decouple:
-            decay_factor = (lr / initial_lr) if initial_lr else 1.0  # type: ignore[operator]
+            decay_factor = compute_decoupled_weight_decay_factor(lr, initial_lr)
             param.mul_(1 - decay_factor * weight_decay)
 
         # Compute normalized gradient
@@ -637,7 +638,7 @@ def _multi_tensor_adopt(  # noqa: C901, PLR0912, PLR0913, PLR0915
 
         # Apply weight decay if not decoupled
         if weight_decay != 0 and not decouple:
-            decay_factor = (lr / initial_lr) if initial_lr else 1.0  # type: ignore[operator]
+            decay_factor = compute_decoupled_weight_decay_factor(lr, initial_lr)
             weight_decay_unscaled = decay_factor * weight_decay
             if maximize:
                 torch._foreach_add_(
@@ -668,7 +669,7 @@ def _multi_tensor_adopt(  # noqa: C901, PLR0912, PLR0913, PLR0915
 
         # Apply decoupled weight decay
         if weight_decay != 0 and decouple:
-            decay_factor = (lr / initial_lr) if initial_lr else 1.0  # type: ignore[operator]
+            decay_factor = compute_decoupled_weight_decay_factor(lr, initial_lr)
             weight_decay_unscaled = decay_factor * weight_decay
             torch._foreach_add_(
                 device_params,
