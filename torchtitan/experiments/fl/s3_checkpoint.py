@@ -7,7 +7,7 @@ but it is not part of the public repository used for the exercises.  The
 implementation below mirrors the private helper closely enough for the unit
 tests bundled with this kata.
 
-The helper centres around :class:`S3CheckpointManager`.  The manager knows how
+The helper centers around :class:`S3CheckpointManager`.  The manager knows how
 to discover the latest checkpoint in a remote S3 bucket, keeps track of what is
 available locally and downloads new checkpoints on demand.  It supports both
 explicitly requested steps (useful for debugging) and the more common
