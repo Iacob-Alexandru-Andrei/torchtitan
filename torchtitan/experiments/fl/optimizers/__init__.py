@@ -8,7 +8,8 @@
 
 from .adopt import ADOPT
 from .decoupled_adamw import DecoupledAdamW
+from .desloc import DesLoc
 from .qhadamw import QHAdamW
 from .qhadopt import QHADOPT
 
-__all__ = ["ADOPT", "QHADOPT", "DecoupledAdamW", "QHAdamW"]
+__all__ = ["ADOPT", "QHADOPT", "QHAdamW", "DecoupledAdamW", "DesLoc"]

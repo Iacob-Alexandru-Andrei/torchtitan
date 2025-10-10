@@ -19,3 +19,9 @@ class MosaicOptimizerConfig(BaseOptimizer):
 
     decouple: bool = True
     """Whether to decouple the learning rate from the weight decay"""
+
+    param_sync_every: int = 10
+    """Frequency for synchronizing model parameters in DesLoc."""
+
+    optimizer_sync_every: list[int] = (20, 20)
+    """Frequencies for synchronizing optimizer states in DesLoc."""

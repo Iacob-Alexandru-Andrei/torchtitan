@@ -17,7 +17,13 @@ from torchtitan.components.optimizer import (
 )
 from torchtitan.distributed import ParallelDims
 from torchtitan.experiments.fl.configs.optimizers import MosaicOptimizerConfig
-from torchtitan.experiments.fl.optimizers import ADOPT, DecoupledAdamW, QHAdamW, QHADOPT
+from torchtitan.experiments.fl.optimizers import (
+    ADOPT,
+    DecoupledAdamW,
+    DesLoc,
+    QHAdamW,
+    QHADOPT,
+)
 
 
 def build_mosaic_optimizers(  # noqa: C901
@@ -78,6 +84,7 @@ def build_mosaic_optimizers(  # noqa: C901
         "QHADOPT": QHADOPT,
         "QHAdamW": QHAdamW,
         "DecoupledAdamW": DecoupledAdamW,
+        "DesLoc": torch.optim.AdamW,  # DesLoc wraps an existing optimizer
     }
     if name not in optimizer_classes:
         msg = f"Optimizer {name} not added."
@@ -96,16 +103,26 @@ def build_mosaic_optimizers(  # noqa: C901
             model_parts, optimizer_cls, optimizer_kwargs
         )
 
-    if ft_manager and ft_manager.enabled:
-        return FTOptimizersContainer(
-            model_parts,
-            optimizer_cls,
-            optimizer_kwargs,
-            ft_manager.manager,
-            use_ft_optimizer=ft_manager.use_async_quorum,
-            param_groups=param_groups,
-        )
-
-    return OptimizersContainer(
+    container_class = (
+        FTOptimizersContainer
+        if ft_manager and ft_manager.enabled
+        else OptimizersContainer
+    )
+    optimizers = container_class(
         model_parts, optimizer_cls, optimizer_kwargs, param_groups=param_groups
     )
+
+    if name == "DesLoc":
+        if not (ft_manager and ft_manager.enabled):
+            raise ValueError("DesLoc requires TorchFT to be enabled.")
+        # Attach the DesLoc instance to the container to prevent it from being
+        # garbage collected and ensure its hooks remain active.
+        optimizers._desloc_instance = DesLoc(
+            manager=ft_manager.manager,
+            model=torch.nn.Sequential(*model_parts),
+            optimizer=optimizers,
+            param_sync_every=optimizer_config.param_sync_every,
+            optimizer_sync_every=optimizer_config.optimizer_sync_every,
+        )
+
+    return optimizers
