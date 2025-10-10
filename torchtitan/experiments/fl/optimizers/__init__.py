@@ -15,9 +15,9 @@ from .qhadopt import QHADOPT
 
 __all__ = [
     "ADOPT",
-    "QHADOPT",
+    "AggMoAdamW",
     "AggMoAdopt",
     "DecoupledAdamW",
+    "QHADOPT",
     "QHAdamW",
-    "AggMoAdamW",
 ]
