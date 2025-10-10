@@ -21,22 +21,12 @@ shuffle = false
 # Sequential shorthand: entries without explicit rank metadata map to dp_rank
 # according to their order in the array.
 [[mosaic_dataloader.dataset.non_iid.sequence]]
-  [mosaic_dataloader.dataset.non_iid.sequence.streams.train]
-  remote = "s3://example-bucket/datasets/client0/train"
-  local = "/datasets/client0/train"
-
-  [mosaic_dataloader.dataset.non_iid.sequence.client_streams.client_0]
-  remote = "s3://example-bucket/datasets/client0/cache"
-  local = "/datasets/client0/cache"
+  streams = { train = { remote = "s3://example-bucket/datasets/client0/train", local = "/datasets/client0/train" } }
+  client_streams = { client_0 = { remote = "s3://example-bucket/datasets/client0/cache", local = "/datasets/client0/cache" } }
 
 [[mosaic_dataloader.dataset.non_iid.sequence]]
-  [mosaic_dataloader.dataset.non_iid.sequence.streams.train]
-  remote = "s3://example-bucket/datasets/client1/train"
-  local = "/datasets/client1/train"
-
-  [mosaic_dataloader.dataset.non_iid.sequence.client_streams.client_1]
-  remote = "s3://example-bucket/datasets/client1/cache"
-  local = "/datasets/client1/cache"
+  streams = { train = { remote = "s3://example-bucket/datasets/client1/train", local = "/datasets/client1/train" } }
+  client_streams = { client_1 = { remote = "s3://example-bucket/datasets/client1/cache", local = "/datasets/client1/cache" } }
 
 # Keyed override: rank 2 gets its own definition, taking precedence over the
 # sequential entry at index 2.
