@@ -165,7 +165,13 @@ class MosaicParallelAwareDataloader(StatefulDataLoader, BaseDataLoader):
             "dp_degree is inconsistent before and after checkpoint, "
             "dataloader resharding is not supported yet."
         )
-        super().load_state_dict(pickle.loads(state_dict[self._rank_id]))  # noqa: S301
+        value = state_dict[self._rank_id]
+        if not isinstance(value, bytes):
+            logger.warning(
+                f"Expected bytes for DataLoader state at key {self._rank_id}, got {type(value)}. Aborting load_state_dict."
+            )
+            return
+        super().load_state_dict(pickle.loads(value))  # noqa: S301
 
 
 def titan_collate_fn(batch: list[Any]) -> tuple[dict[str, torch.Tensor], torch.Tensor]:
