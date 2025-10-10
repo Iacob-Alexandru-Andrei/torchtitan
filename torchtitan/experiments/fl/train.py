@@ -94,7 +94,26 @@ def main() -> None:  # noqa: C901, PLR0912, PLR0915
     s3_manager: S3CheckpointManager | None = None
     try:
         trainer = Trainer(job_config)
-        s3_manager = setup_s3_checkpointing(trainer.checkpointer, job_config)
+
+        checkpointer = trainer.checkpointer
+        ft_manager = getattr(checkpointer, "ft_manager", None)
+        is_checkpoint_writer = True
+        if torch.distributed.is_initialized():
+            is_checkpoint_writer = torch.distributed.get_rank() == 0
+        if ft_manager is not None:
+            is_checkpoint_writer = ft_manager.participating_rank() == 0
+
+        s3_checkpointing_active = (
+            job_config.s3_checkpoint.enable
+            and bool(job_config.s3_checkpoint.bucket)
+            and bool(job_config.s3_checkpoint.prefix)
+        )
+
+        s3_manager = (
+            setup_s3_checkpointing(checkpointer, job_config)
+            if is_checkpoint_writer and s3_checkpointing_active
+            else None
+        )
 
         # Override WandB run name to include rank if save_for_all_ranks is enabled
         if job_config.metrics.save_for_all_ranks and job_config.metrics.enable_wandb:
@@ -126,7 +145,11 @@ def main() -> None:  # noqa: C901, PLR0912, PLR0915
             trainer.checkpointer.save(curr_step=0, last_step=True)
             logger.info("Created seed checkpoint")
         else:
-            if s3_manager:
+            if s3_checkpointing_active and torch.distributed.is_initialized():
+                if s3_manager:
+                    s3_manager.download_if_needed(job_config.checkpoint.load_step)
+                torch.distributed.barrier()
+            elif s3_manager:
                 s3_manager.download_if_needed(job_config.checkpoint.load_step)
             trainer.train()
     finally:
