@@ -164,6 +164,7 @@ class S3CheckpointManager:
             logger.exception("Failed to determine the latest checkpoint available on S3.")
             return None
 
+        step_to_fetch: int | None
         if requested_step != -1:
             step_to_fetch = requested_step
         else:
@@ -180,6 +181,7 @@ class S3CheckpointManager:
                 )
                 return local_latest_step
 
+            local_marker_step = self._read_local_marker_step()
             if (
                 local_latest_step == remote_step
                 and self._read_local_marker_step() == remote_step
