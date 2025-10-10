@@ -362,7 +362,7 @@ def _single_tensor_aggmo_qhadopt(  # noqa: C901, PLR0913
             buf.lerp_(normed_grad, 1 - beta1)
 
         update = normed_grad.mul(grad_coeff)
-        for weight, buf in zip(vs, buffers, strict=False):
+        for weight, buf in zip(vs, buffers, strict=True):
             update.add_(buf, alpha=weight)
 
         param.add_(update, alpha=-_get_value(lr))
