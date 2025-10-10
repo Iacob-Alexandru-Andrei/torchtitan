@@ -286,7 +286,17 @@ class AggMoAdopt(QHADOPT):
             step_tensor = qh_update * lr
 
             if weight_decay != 0 and decouple:
-                decay_factor = _compute_decay_factor(lr, initial_lr)
+                if (
+                    initial_lr is None
+                    or (
+                        isinstance(initial_lr, Tensor)
+                        and cast("Tensor", (initial_lr == 0)).any()
+                    )
+                    or initial_lr == 0.0
+                ):
+                    decay_factor = 1.0
+                else:
+                    decay_factor = lr / initial_lr
                 effective_weight_decay = decay_factor * weight_decay
                 step_tensor = step_tensor.add(param, alpha=effective_weight_decay)
 
@@ -360,7 +370,17 @@ def _single_tensor_aggmo_qhadopt(  # noqa: C901, PLR0913
             continue
 
         if weight_decay != 0 and decouple:
-            decay_factor = _compute_decay_factor(lr, initial_lr)
+            if (
+                initial_lr is None
+                or (
+                    isinstance(initial_lr, Tensor)
+                    and cast("Tensor", (initial_lr == 0)).any()
+                )
+                or initial_lr == 0.0
+            ):
+                decay_factor = 1.0
+            else:
+                decay_factor = lr / initial_lr
             param.mul_(1 - decay_factor * weight_decay)
 
         denom = torch.clamp(exp_avg_sq.sqrt(), eps)
