@@ -15,6 +15,40 @@ from torchtitan.config import JobConfig
 
 
 @dataclass
+class S3Config:
+    """Configuration for S3 checkpointing."""
+
+    enabled: bool = field(
+        default=False,
+        metadata={"help": "Enable S3 checkpointing."},
+    )
+    bucket_name: str = field(
+        default="",
+        metadata={"help": "The name of the S3 bucket."},
+    )
+    prefix: str = field(
+        default="",
+        metadata={"help": "The prefix in the S3 bucket."},
+    )
+    run_uuid: str | None = field(
+        default=None,
+        metadata={"help": "The UUID of the run."},
+    )
+    num_attempts: int = field(
+        default=5,
+        metadata={"help": "The number of attempts for S3 operations."},
+    )
+    client_config: dict[str, Any] = field(
+        default_factory=dict,
+        metadata={"help": "The configuration for the S3 client."},
+    )
+    num_concurrent_uploads: int = field(
+        default=1,
+        metadata={"help": "The number of concurrent uploads."},
+    )
+
+
+@dataclass
 class MosaicJobConfig(JobConfig):
     """A dataclass for holding all configuration settings for a MosaicML training job.
 
@@ -80,4 +114,8 @@ class MosaicJobConfig(JobConfig):
         metadata={
             "help": "Optional substrings of module qualified names to skip when collecting activations."
         },
+    )
+    s3: S3Config = field(
+        default_factory=S3Config,
+        metadata={"help": "S3 checkpointing configuration."},
     )

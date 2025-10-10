@@ -29,6 +29,7 @@ from typing import cast
 import torch
 
 from torchtitan.config import ConfigManager
+from torchtitan.experiments.fl.checkpoint import S3CheckpointWrapper
 from torchtitan.experiments.fl.components import build_metrics_processor
 from torchtitan.experiments.fl.configs.config import MosaicJobConfig
 from torchtitan.experiments.fl.dataloader.dataloader import build_mosaic_dataloader
@@ -89,6 +90,13 @@ def main() -> None:
     trainer: Trainer | None = None
     try:
         trainer = Trainer(job_config)
+
+        if job_config.s3.enabled:
+            logger.info("S3 checkpointing enabled. Wrapping the checkpointer.")
+            trainer.checkpointer = S3CheckpointWrapper(
+                checkpointer=trainer.checkpointer,
+                s3_config=job_config.s3,
+            )
 
         # Override WandB run name to include rank if save_for_all_ranks is enabled
         if job_config.metrics.save_for_all_ranks and job_config.metrics.enable_wandb:
