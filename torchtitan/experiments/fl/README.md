@@ -63,7 +63,7 @@ client_streams = {client0 = {remote = "s3://bucket/client0", local = "client0"}}
 
 [[mosaic_dataloader.dataset.non_iid.sequence]]
 streams = {train = {remote = "s3://bucket/shard1", local = "client1"}}
-client_streams = {client0 = {remote = "s3://bucket/client1", local = "client1"}}
+client_streams = {client1 = {remote = "s3://bucket/client1", local = "client1"}}
 
 [mosaic_dataloader.dataset.non_iid.by_dp_rank."3".streams.override]
 remote = "s3://bucket/override"
