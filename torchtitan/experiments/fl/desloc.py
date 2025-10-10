@@ -240,7 +240,7 @@ class _OptimizerStateFragment(_BaseFragment):
             for name, averaged in zip(
                 self._original_state_tensors.keys(),
                 self._averaged_state_tensors,
-                strict=False,
+                strict=True,
             ):
                 param = self._param_map[name]
                 self._optimizer.state[param][self.state_key].copy_(averaged)
