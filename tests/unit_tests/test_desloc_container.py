@@ -6,12 +6,11 @@ import pytest
 import torch.nn as nn
 import torch.optim as optim
 
-from tests.utils.module_loading import load_module_from_path
+from tests.utils.imports import load_module
 
-
-_DESLOC_MODULE, _cleanup_desloc_module = load_module_from_path(
-    "torchtitan.experiments.fl.desloc", "torchtitan/experiments/fl/desloc.py"
-)
+_MODULE_NAME = "torchtitan.experiments.fl.desloc"
+_MODULE_PATH = Path(__file__).resolve().parents[2] / "torchtitan" / "experiments" / "fl" / "desloc.py"
+_DESLOC_MODULE = load_module(_MODULE_NAME, _MODULE_PATH)
 
 DesLocFTOptimizersContainer = _DESLOC_MODULE.DesLocFTOptimizersContainer
 get_desloc_activator = _DESLOC_MODULE.get_desloc_activator
