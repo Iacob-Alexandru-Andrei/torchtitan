@@ -225,10 +225,41 @@ def build_mosaic_dataloader(
     persistent_workers = cfg.get("persistent_workers", True)
     drop_last = cfg.get("drop_last", True)
 
-    # Build streams
+    # Build streams. If a client-specific stream configuration is provided, use it.
+    # Otherwise, fall back to the IID stream configuration.
     streams_cfg = dataset_cfg.pop("streams", None)
+    client_streams_cfg = dataset_cfg.pop("client_streams", None)
     streams = None
-    if streams_cfg:
+
+    if client_streams_cfg:
+        if not isinstance(client_streams_cfg, list) or not all(
+            isinstance(item, dict) for item in client_streams_cfg
+        ):
+            raise ValueError(
+                "client_streams must be a list of stream configurations, one for each client/rank."
+            )
+
+        if dp_rank >= len(client_streams_cfg):
+            raise ValueError(
+                f"dp_rank {dp_rank} is out of bounds for client_streams configuration"
+            )
+
+        # Each worker gets its own set of streams based on its data parallel rank
+        worker_streams_cfg = client_streams_cfg[dp_rank]
+        streams = [
+            Stream(
+                remote=stream_config.get("remote"),
+                local=stream_config.get("local"),
+                proportion=stream_config.get("proportion"),
+                download_retry=stream_config.get("download_retry", 2),
+                download_timeout=stream_config.get("download_timeout", 60),
+            )
+            for stream_config in worker_streams_cfg.values()
+        ]
+        logger.info(
+            f"Built {len(streams)} client-specific streams for Mosaic dataloader for rank {dp_rank}"
+        )
+    elif streams_cfg:
         streams = [
             Stream(
                 remote=stream_config.get("remote"),
@@ -239,7 +270,7 @@ def build_mosaic_dataloader(
             )
             for stream_config in streams_cfg.values()
         ]
-        logger.info(f"Built {len(streams)} streams for Mosaic dataloader")
+        logger.info(f"Built {len(streams)} IID streams for Mosaic dataloader")
 
     # Filter dataset config to only include valid StreamingTextDataset parameters
     valid_params = {
