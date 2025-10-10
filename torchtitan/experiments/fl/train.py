@@ -95,6 +95,8 @@ def main() -> None:  # noqa: C901, PLR0912, PLR0915
     try:
         trainer = Trainer(job_config)
         s3_manager = setup_s3_checkpointing(trainer.checkpointer, job_config)
+        if s3_manager is not None:
+            trainer.checkpointer = s3_manager
 
         # Override WandB run name to include rank if save_for_all_ranks is enabled
         if job_config.metrics.save_for_all_ranks and job_config.metrics.enable_wandb:

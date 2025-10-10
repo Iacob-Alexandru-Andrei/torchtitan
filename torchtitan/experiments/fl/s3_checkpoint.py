@@ -110,7 +110,7 @@ class S3CheckpointManager:
         config: S3CheckpointingConfig,
         job_config: MosaicJobConfig,
     ) -> None:
-        self.checkpointer = checkpointer
+        self._checkpointer = checkpointer
         self.config = config
         self.job_config = job_config
         self.remote_root = self._resolve_remote_root()
@@ -128,19 +128,14 @@ class S3CheckpointManager:
         self._pending_steps: deque[tuple[int, Path]] = deque()
         self._uploaded_steps: set[int] = set()
         self._latest_uploaded_step: int | None = None
-        self._installed = False
-        self._orig_save = checkpointer.save
-        self._orig_maybe_wait = checkpointer.maybe_wait_for_staging
+        self._closed = False
 
-    def install(self) -> None:
-        """Hook into the wrapped :class:`CheckpointManager`."""
-        if self._installed:
-            return
-        self.checkpointer.save = self._save  # type: ignore[assignment]
-        self.checkpointer.maybe_wait_for_staging = (  # type: ignore[assignment]
-            self._maybe_wait_for_staging
-        )
-        self._installed = True
+    @property
+    def checkpointer(self) -> CheckpointManager:
+        return self._checkpointer
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._checkpointer, name)
 
     def download_if_needed(self, requested_step: int) -> None:
         """Optionally download a checkpoint from S3 before training starts."""
@@ -167,20 +162,24 @@ class S3CheckpointManager:
 
     def close(self) -> None:
         """Flush pending uploads and release remote resources."""
-        if not self._installed:
+        if self._closed:
             return
         try:
-            self._orig_maybe_wait()
-        except Exception:  # noqa: BLE001
-            logger.exception(
-                "Failed while waiting for staged checkpoints before upload."
-            )
-        self._process_pending(flush=True)
-        if hasattr(self.remote_up_down, "close"):
             try:
-                self.remote_up_down.close()
+                self._checkpointer.maybe_wait_for_staging()
             except Exception:  # noqa: BLE001
-                logger.exception("Failed to close RemoteUploaderDownloader.")
+                logger.exception(
+                    "Failed while waiting for staged checkpoints before upload."
+                )
+            self._process_pending(flush=True)
+            if hasattr(self.remote_up_down, "close"):
+                try:
+                    self.remote_up_down.close()
+                except Exception:  # noqa: BLE001
+                    logger.exception("Failed to close RemoteUploaderDownloader.")
+            self._checkpointer.close()
+        finally:
+            self._closed = True
 
     def _resolve_remote_root(self) -> str:
         root = self.config.remote_checkpoint_folder or self.job_config.checkpoint.folder
@@ -195,24 +194,24 @@ class S3CheckpointManager:
             return f"{self.remote_root}/{relative_key}"
         return relative_key
 
-    def _save(
+    def save(
         self, curr_step: int, last_step: bool = False
     ) -> None:  # noqa: FBT001, FBT002
-        self._orig_save(curr_step, last_step=last_step)
+        self._checkpointer.save(curr_step, last_step=last_step)
         checkpoint_dir = self._checkpoint_dir(curr_step)
         if checkpoint_dir.exists() or last_step:
             self._pending_steps.append((curr_step, checkpoint_dir))
         if last_step:
             try:
-                self._orig_maybe_wait()
+                self._checkpointer.maybe_wait_for_staging()
             except Exception:  # noqa: BLE001
                 logger.exception(
                     "Failed while waiting for staged checkpoints before final upload."
                 )
             self._process_pending(flush=True)
 
-    def _maybe_wait_for_staging(self) -> None:
-        self._orig_maybe_wait()
+    def maybe_wait_for_staging(self) -> None:
+        self._checkpointer.maybe_wait_for_staging()
         self._process_pending()
 
     def _process_pending(self, flush: bool = False) -> None:  # noqa: FBT001, FBT002
@@ -312,7 +311,7 @@ class S3CheckpointManager:
 def setup_s3_checkpointing(
     checkpointer: CheckpointManager, job_config: MosaicJobConfig
 ) -> S3CheckpointManager | None:
-    """Create and install an :class:`S3CheckpointManager` if configured."""
+    """Create an :class:`S3CheckpointManager` if configured."""
     config = job_config.s3_checkpoint
     if not config.enable:
         return None
@@ -322,6 +321,4 @@ def setup_s3_checkpointing(
         )
         return None
 
-    manager = S3CheckpointManager(checkpointer, config, job_config)
-    manager.install()
-    return manager
+    return S3CheckpointManager(checkpointer, config, job_config)
