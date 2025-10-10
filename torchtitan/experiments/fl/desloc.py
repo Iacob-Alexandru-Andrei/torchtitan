@@ -125,7 +125,13 @@ def _resource_to_closer(resource: Any) -> Callable[[], None] | None:
         return None
 
     if isinstance(resource, AbstractContextManager):
-        resource.__enter__()
+        try:
+            resource.__enter__()
+        except Exception:
+            logger.exception(
+                "Failed to enter DES-LOC context manager; disabling hooks"
+            )
+            return None
 
         def _close_ctx() -> None:
             resource.__exit__(None, None, None)
@@ -135,7 +141,7 @@ def _resource_to_closer(resource: Any) -> Callable[[], None] | None:
     if isinstance(resource, _SupportsClose):
         return resource.close
 
-    if callable(resource):  # pragma: no branch - callable resource
+    if callable(resource):
         return resource
 
     logger.debug("Ignoring unsupported DES-LOC resource of type %s", type(resource))

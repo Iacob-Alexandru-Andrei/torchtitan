@@ -1,6 +1,4 @@
 import gc
-import importlib.util
-import sys
 import types
 import weakref
 from pathlib import Path
@@ -9,21 +7,11 @@ import pytest
 import torch.nn as nn
 import torch.optim as optim
 
-import torchtitan.experiments  # noqa: F401 - ensure parent package exists
+from tests.utils.imports import load_module
 
 _MODULE_NAME = "torchtitan.experiments.fl.desloc"
 _MODULE_PATH = Path(__file__).resolve().parents[2] / "torchtitan" / "experiments" / "fl" / "desloc.py"
-
-if "torchtitan.experiments.fl" not in sys.modules:
-    parent_module = types.ModuleType("torchtitan.experiments.fl")
-    parent_module.__path__ = [str(_MODULE_PATH.parent)]
-    sys.modules["torchtitan.experiments.fl"] = parent_module
-
-_SPEC = importlib.util.spec_from_file_location(_MODULE_NAME, _MODULE_PATH)
-_DESLOC_MODULE = importlib.util.module_from_spec(_SPEC)
-sys.modules[_MODULE_NAME] = _DESLOC_MODULE
-assert _SPEC.loader is not None
-_SPEC.loader.exec_module(_DESLOC_MODULE)
+_DESLOC_MODULE = load_module(_MODULE_NAME, _MODULE_PATH)
 
 DesLocFTOptimizersContainer = _DESLOC_MODULE.DesLocFTOptimizersContainer
 get_desloc_activator = _DESLOC_MODULE.get_desloc_activator
