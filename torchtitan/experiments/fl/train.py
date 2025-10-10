@@ -95,6 +95,9 @@ def main() -> None:  # noqa: C901, PLR0912, PLR0915
     download_manager: S3CheckpointManager | None = None
     try:
         trainer = Trainer(job_config)
+        s3_manager = setup_s3_checkpointing(trainer.checkpointer, job_config)
+        if s3_manager is not None:
+            trainer.checkpointer = s3_manager  # type: ignore[assignment]
 
         checkpointer = trainer.checkpointer
         ft_manager = getattr(checkpointer, "ft_manager", None)
