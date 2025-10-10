@@ -15,6 +15,7 @@ from torchtitan.components.optimizer import (
     OptimizersContainer,
     OptimizersInBackwardContainer,
 )
+from torchtitan.experiments.fl.desloc import DesLocFTOptimizersContainer
 from torchtitan.distributed import ParallelDims
 from torchtitan.experiments.fl.configs.optimizers import MosaicOptimizerConfig
 from torchtitan.experiments.fl.optimizers import ADOPT, DecoupledAdamW, QHAdamW, QHADOPT
@@ -97,7 +98,12 @@ def build_mosaic_optimizers(  # noqa: C901
         )
 
     if ft_manager and ft_manager.enabled:
-        return FTOptimizersContainer(
+        container_cls = (
+            DesLocFTOptimizersContainer
+            if getattr(optimizer_config, "enable_desloc", False)
+            else FTOptimizersContainer
+        )
+        return container_cls(
             model_parts,
             optimizer_cls,
             optimizer_kwargs,

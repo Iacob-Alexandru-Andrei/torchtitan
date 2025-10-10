@@ -324,6 +324,16 @@ class CheckpointManager:
             if self.stager is not None:
                 self.stager.close()
 
+        optimizer_state = None
+        if hasattr(self, "states"):
+            optimizer_state = self.states.get(OPTIMIZER)
+
+        if optimizer_state is not None and hasattr(optimizer_state, "close"):
+            try:
+                optimizer_state.close()
+            except Exception:  # pragma: no cover - defensive logging
+                logger.exception("Failed to close optimizer container during checkpoint shutdown")
+
     @torch.no_grad()
     def dcp_save(
         self,

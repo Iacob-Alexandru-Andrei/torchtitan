@@ -19,3 +19,6 @@ class MosaicOptimizerConfig(BaseOptimizer):
 
     decouple: bool = True
     """Whether to decouple the learning rate from the weight decay"""
+
+    enable_desloc: bool = False
+    """Enable DES-LOC optimizer hooks when TorchFT is active."""
