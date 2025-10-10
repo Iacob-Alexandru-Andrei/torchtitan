@@ -187,7 +187,7 @@ class S3CheckpointManager:
                     local_latest_step,
                     remote_step,
                 )
-                return remote_step
+                return local_latest_step
 
             if (
                 local_latest_step == remote_step
