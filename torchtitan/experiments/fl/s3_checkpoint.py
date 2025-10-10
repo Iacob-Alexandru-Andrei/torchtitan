@@ -223,8 +223,8 @@ class S3CheckpointManager:
                 continue
             if not directory.exists():
                 if flush:
-                    if directory.exists():
-                        self._upload_step(step, directory)
+                    logger.warning(f"Checkpoint directory {directory} for step {step} does not exist and will be skipped during flush.")
+                    # Optionally, handle any cleanup or record-keeping here
                 else:
                     pending.append((step, directory))
                 continue
