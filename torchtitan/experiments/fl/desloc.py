@@ -44,7 +44,6 @@ def _copy_into_tensor(param: torch.Tensor, value: torch.Tensor) -> None:
                 param.device_mesh,
                 param.placements,
                 shape=param.shape,
-                stride=param.stride(),
             )
         )
     else:
@@ -247,7 +246,9 @@ class _OptimizerStateFragment(_BaseFragment):
 
     def register_state_dict_fn(self) -> None:
         def load_fn(state_dict: dict[str, torch.Tensor]) -> None:
-            self._original_state_tensors = state_dict
+            for name, tensor in state_dict.items():
+                if name in self._original_state_tensors:
+                    self._original_state_tensors[name].copy_(tensor)
 
         def save_fn() -> dict[str, torch.Tensor]:
             return self._original_state_tensors
