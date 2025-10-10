@@ -23,8 +23,13 @@ from torch.optim.optimizer import (
     ParamsT,
 )
 
-from ._decoupled_decay import compute_decoupled_weight_decay_factor
-from .aggmo_adopt import _WEIGHT_SUM_TOL, _build_moment_specs, _is_moment_key, _sum_weights
+from .aggmo_adopt import (
+    _WEIGHT_SUM_TOL,
+    _build_moment_specs,
+    _compute_decay_factor,
+    _is_moment_key,
+    _sum_weights,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence

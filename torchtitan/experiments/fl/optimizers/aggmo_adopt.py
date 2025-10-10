@@ -53,6 +53,21 @@ def _sum_weights(moment_specs: Iterable[tuple[float, str]]) -> float:
     return sum(weight for weight, _ in moment_specs)
 
 
+def _compute_decay_factor(
+    lr: float | Tensor,
+    initial_lr: float | Tensor | None,
+) -> float | Tensor:
+    if initial_lr is None:
+        return 1.0
+    if isinstance(initial_lr, Tensor):
+        if cast("Tensor", (initial_lr == 0)).any().item():
+            return 1.0
+        return lr / initial_lr
+    if initial_lr == 0.0:
+        return 1.0
+    return lr / initial_lr
+
+
 class AggMoAdopt(QHADOPT):
     """QHADOPT optimizer supporting an arbitrary number of first moment buffers."""
 
