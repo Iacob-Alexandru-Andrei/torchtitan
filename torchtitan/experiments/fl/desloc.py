@@ -234,5 +234,6 @@ __all__ = [
     "DesLocActivator",
     "get_desloc_activator",
     "register_desloc_activator",
+    "_SupportsClose",
 ]
 
