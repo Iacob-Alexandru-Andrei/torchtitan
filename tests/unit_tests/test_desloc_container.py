@@ -1,7 +1,6 @@
 import gc
 import types
 import weakref
-from pathlib import Path
 
 import pytest
 import torch.nn as nn
@@ -16,6 +15,11 @@ _DESLOC_MODULE = load_module(_MODULE_NAME, _MODULE_PATH)
 DesLocFTOptimizersContainer = _DESLOC_MODULE.DesLocFTOptimizersContainer
 get_desloc_activator = _DESLOC_MODULE.get_desloc_activator
 register_desloc_activator = _DESLOC_MODULE.register_desloc_activator
+
+
+@pytest.fixture(scope="module", autouse=True)
+def _cleanup_desloc_import(request):
+    request.addfinalizer(_cleanup_desloc_module)
 
 
 class _FakeFtOptimizer:
