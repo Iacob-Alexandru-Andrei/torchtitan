@@ -28,9 +28,41 @@ except ImportError as exc:
     ) from exc
 
 
+class _TokenizerWithEosId:
+    """Lightweight wrapper that exposes ``eos_id`` for HF tokenizers.
+
+    TorchTitan's training loop expects tokenizers to define an ``eos_id``
+    attribute so that FlexAttention can build block-causal masks using the
+    end-of-sequence token. HuggingFace tokenizers instead expose the value
+    under ``eos_token_id``. This wrapper forwards all attribute lookups to the
+    underlying tokenizer while providing the expected aliases.
+    """
+
+    def __init__(self, tokenizer: PreTrainedTokenizerBase | PreTrainedTokenizerFast):
+        self._tokenizer = tokenizer
+
+        eos_token_id = getattr(tokenizer, "eos_token_id", None)
+        if eos_token_id is None:
+            raise ValueError("Tokenizer must define eos_token_id for FlexAttention support.")
+        self.eos_id = eos_token_id
+
+        bos_token_id = getattr(tokenizer, "bos_token_id", None)
+        if bos_token_id is not None:
+            self.bos_id = bos_token_id
+
+    @property
+    def tokenizer(self) -> PreTrainedTokenizerBase | PreTrainedTokenizerFast:
+        """Expose the wrapped tokenizer for components expecting the raw object."""
+
+        return self._tokenizer
+
+    def __getattr__(self, name: str) -> Any:  # pragma: no cover - simple delegation
+        return getattr(self._tokenizer, name)
+
+
 def build_mosaic_tokenizer(
     job_config: MosaicJobConfig,
-) -> PreTrainedTokenizerBase | PreTrainedTokenizerFast:
+) -> _TokenizerWithEosId:
     """Build a Mosaic tokenizer using the provided job configuration.
 
     This function supports building tokenizers from either the llm-foundry
@@ -82,7 +114,7 @@ def build_mosaic_tokenizer(
             f"The tokenizer {tokenizer_name} must have an eos_token.",
         )
 
-    return tokenizer
+    return _TokenizerWithEosId(tokenizer)
 
 
 __all__ = ["build_mosaic_tokenizer"]
