@@ -192,7 +192,8 @@ class StatefulStreamingTextDataset(StreamingTextDataset):
     def state_dict(
         self, num_samples: int | None = None, from_beginning: bool = True
     ) -> dict[str, Any]:
-        """Saves the dataset's state.
+        """
+        Saves the dataset's state.
 
         If `num_samples` is not provided by the caller, it defaults to using
         the internal `_num_samples_yielded` counter. This makes it compatible
