@@ -16,8 +16,9 @@ from __future__ import annotations
 
 import inspect
 import pickle
+from collections.abc import Callable, Mapping, Sequence
 from copy import deepcopy
-from typing import Any, Callable
+from typing import Any
 
 import torch
 from torchdata.stateful_dataloader import StatefulDataLoader
@@ -37,9 +38,136 @@ from torchtitan.experiments.fl.configs.config import MosaicJobConfig
 from torchtitan.tools.logging import logger
 
 
+def _coerce_rank(value: Any) -> int:
+    """Return ``value`` as an integer data parallel rank."""
+    try:
+        return int(value)
+    except (TypeError, ValueError) as exc:  # pragma: no cover - defensive
+        raise ValueError(
+            f"Invalid dp_rank value {value!r} in non_iid configuration"
+        ) from exc
+
+
+def _collect_candidate_ranks(entry: Mapping[str, Any], fallback_index: int) -> set[int]:
+    """Extract all candidate data parallel ranks from a non-IID sequence entry."""
+    candidate_ranks: set[int] = set()
+    explicit_rank = False
+
+    if "dp_rank" in entry:
+        candidate_ranks.add(_coerce_rank(entry["dp_rank"]))
+        explicit_rank = True
+
+    if "dp_ranks" in entry:
+        ranks_value = entry["dp_ranks"]
+        if isinstance(ranks_value, Sequence) and not isinstance(
+            ranks_value, (str, bytes)
+        ):
+            candidate_ranks.update(_coerce_rank(rank) for rank in ranks_value)
+        else:
+            candidate_ranks.add(_coerce_rank(ranks_value))
+        explicit_rank = True
+
+    if not explicit_rank:
+        candidate_ranks.add(fallback_index)
+
+    return candidate_ranks
+
+
+def _select_non_iid_streams_from_sequence(
+    sequence: Sequence[Mapping[str, Any]], dp_rank: int
+) -> dict[str, Any] | None:
+    """Select streams for ``dp_rank`` from a sequential non-IID definition."""
+    for index, entry in enumerate(sequence):
+        if not isinstance(entry, Mapping):  # pragma: no cover - defensive
+            logger.warning(
+                "Skipping non_iid entry at index %s because it is not a mapping: %r",
+                index,
+                entry,
+            )
+            continue
+
+        candidate_ranks = _collect_candidate_ranks(entry, index)
+        if dp_rank in candidate_ranks:
+            return {
+                "streams": entry.get("streams"),
+                "client_streams": entry.get("client_streams"),
+            }
+
+    return None
+
+
+def _select_non_iid_streams(
+    non_iid_cfg: Mapping[str, Any] | None, *, dp_rank: int
+) -> dict[str, Any] | None:
+    """Select non-IID stream definitions for the provided ``dp_rank``."""
+    if not non_iid_cfg:
+        return None
+
+    by_dp_rank = non_iid_cfg.get("by_dp_rank")
+    if isinstance(by_dp_rank, Mapping):
+        entry: Any | None = None
+        if str(dp_rank) in by_dp_rank:
+            entry = by_dp_rank[str(dp_rank)]
+        elif dp_rank in by_dp_rank:
+            entry = by_dp_rank[dp_rank]
+        elif "default" in by_dp_rank:
+            entry = by_dp_rank["default"]
+
+        if entry is not None:
+            if not isinstance(entry, Mapping):  # pragma: no cover - defensive
+                raise TypeError(
+                    "non_iid.by_dp_rank entries must be mappings containing "
+                    "streams/client_streams definitions"
+                )
+            return {
+                "streams": entry.get("streams"),
+                "client_streams": entry.get("client_streams"),
+            }
+
+    sequence = non_iid_cfg.get("sequence")
+    if sequence is None:
+        return None
+    if not isinstance(sequence, Sequence) or isinstance(sequence, (str, bytes)):
+        raise TypeError(
+            "non_iid.sequence must be a sequence of mappings containing "
+            "streams/client_streams definitions"
+        )
+
+    return _select_non_iid_streams_from_sequence(sequence, dp_rank)
+
+
+def _build_stream_objects(
+    stream_configs: Mapping[str, Any] | Sequence[Mapping[str, Any]] | None,
+) -> list[Stream] | None:
+    """Materialise configured stream dictionaries into ``Stream`` objects."""
+    if stream_configs is None:
+        return None
+
+    if isinstance(stream_configs, Mapping):
+        configs_iter = stream_configs.values()
+    elif isinstance(stream_configs, Sequence) and not isinstance(
+        stream_configs, (str, bytes)
+    ):
+        configs_iter = stream_configs
+    else:  # pragma: no cover - defensive
+        raise TypeError(
+            "streams configuration must be a mapping or sequence of mappings"
+        )
+
+    return [
+        Stream(
+            remote=stream_config.get("remote"),
+            local=stream_config.get("local"),
+            proportion=stream_config.get("proportion", 1.0),
+            download_retry=stream_config.get("download_retry", 2),
+            download_timeout=stream_config.get("download_timeout", 60),
+        )
+        for stream_config in configs_iter
+    ]
+
+
 class StatefulStreamingTextDataset(StreamingTextDataset):
-    """
-    A stateful wrapper around StreamingTextDataset that internally tracks the number
+    """A stateful wrapper around StreamingTextDataset that internally tracks the number
     of samples yielded. This makes it compatible with dataloaders like TorchTitan's
     StatefulDataLoader that do not pass arguments to the dataset's state_dict method.
 
@@ -53,8 +181,7 @@ class StatefulStreamingTextDataset(StreamingTextDataset):
         self._num_samples_yielded = 0
 
     def __getitem__(self, idx: int) -> dict[str, list[int]] | torch.Tensor:
-        """
-        Overrides the parent method to increment the internal sample counter
+        """Overrides the parent method to increment the internal sample counter
         each time an item is fetched.
         """
         self._num_samples_yielded += 1
@@ -63,8 +190,7 @@ class StatefulStreamingTextDataset(StreamingTextDataset):
     def state_dict(
         self, num_samples: int | None = None, from_beginning: bool = True
     ) -> dict[str, Any]:
-        """
-        Saves the dataset's state.
+        """Saves the dataset's state.
 
         If `num_samples` is not provided by the caller, it defaults to using
         the internal `_num_samples_yielded` counter. This makes it compatible
@@ -80,9 +206,7 @@ class StatefulStreamingTextDataset(StreamingTextDataset):
         return parent_state
 
     def load_state_dict(self, obj: dict[str, Any]) -> None:
-        """
-        Restores the dataset's state from a state dictionary.
-        """
+        """Restores the dataset's state from a state dictionary."""
         self._num_samples_yielded = obj.pop("_num_samples_yielded", 0)
         super().load_state_dict(obj)
 
@@ -166,8 +290,7 @@ class MosaicParallelAwareDataloader(StatefulDataLoader, BaseDataLoader):
 
 
 def titan_collate_fn(batch: list[Any]) -> tuple[dict[str, torch.Tensor], torch.Tensor]:
-    """
-    Collates samples from StreamingTextDataset and formats them for the
+    """Collates samples from StreamingTextDataset and formats them for the
     TorchTitan training loop.
 
     Args:
@@ -225,21 +348,26 @@ def build_mosaic_dataloader(
     persistent_workers = cfg.get("persistent_workers", True)
     drop_last = cfg.get("drop_last", True)
 
-    # Build streams
+    # Build streams and optionally apply non-IID selections
     streams_cfg = dataset_cfg.pop("streams", None)
-    streams = None
-    if streams_cfg:
-        streams = [
-            Stream(
-                remote=stream_config.get("remote"),
-                local=stream_config.get("local"),
-                proportion=stream_config.get("proportion", 1.0),
-                download_retry=stream_config.get("download_retry", 2),
-                download_timeout=stream_config.get("download_timeout", 60),
-            )
-            for stream_config in streams_cfg.values()
-        ]
-        logger.info(f"Built {len(streams)} streams for Mosaic dataloader")
+    client_streams_cfg = dataset_cfg.pop("client_streams", None)
+    non_iid_cfg = dataset_cfg.pop("non_iid", None)
+
+    if non_iid_cfg:
+        selection = _select_non_iid_streams(non_iid_cfg, dp_rank=dp_rank)
+        if selection is not None:
+            logger.info("Applying non-IID stream selection for dp_rank %s", dp_rank)
+            if selection.get("streams") is not None:
+                streams_cfg = selection.get("streams")
+            if selection.get("client_streams") is not None:
+                client_streams_cfg = selection.get("client_streams")
+
+    if client_streams_cfg is not None:
+        dataset_cfg["client_streams"] = client_streams_cfg
+
+    streams = _build_stream_objects(streams_cfg)
+    if streams is not None:
+        logger.info("Built %s streams for Mosaic dataloader", len(streams))
 
     # Filter dataset config to only include valid StreamingTextDataset parameters
     valid_params = {
