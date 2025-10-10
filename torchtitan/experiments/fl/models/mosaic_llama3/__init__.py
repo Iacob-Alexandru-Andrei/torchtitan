@@ -12,6 +12,9 @@ from torchtitan.experiments.fl.components import build_metrics_processor
 
 from torchtitan.experiments.fl.dataloader.dataloader import build_mosaic_dataloader
 from torchtitan.experiments.fl.dataloader.tokenizer import build_mosaic_tokenizer
+from torchtitan.experiments.fl.models.mosaic_llama3.model import (
+    Transformer as SequenceIdTransformer,
+)
 
 from torchtitan.models.llama3 import get_train_spec as get_base_llama3_spec
 from torchtitan.protocols.train_spec import TokenizerBuilder, TrainSpec
@@ -29,7 +32,12 @@ def get_train_spec() -> TrainSpec:
 
     # Update all model configurations with larger vocab size for Mosaic tokenizer
     model_args = {
-        name: replace(config, vocab_size=50368)
+        name: replace(
+            config,
+            vocab_size=50368,
+            use_flex_attn=True,
+            attn_mask_type="sequence_id_causal",
+        )
         for name, config in base_spec.model_args.items()
     }
 
@@ -37,6 +45,7 @@ def get_train_spec() -> TrainSpec:
     return replace(
         base_spec,
         name="mosaic_llama3",
+        model_cls=SequenceIdTransformer,
         model_args=model_args,
         build_dataloader_fn=build_mosaic_dataloader,
         build_tokenizer_fn=cast("TokenizerBuilder", build_mosaic_tokenizer),
