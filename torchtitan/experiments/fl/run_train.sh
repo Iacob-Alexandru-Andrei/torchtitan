@@ -40,7 +40,7 @@ export WANDB_RUN_NAME="${RUN_UUID}"
 # Format: {run_uuid}/step-{N}
 # Example: export RESUME_FROM_RUN_STEP="16M-baseline-20251011-122516/step-10"
 # export RESUME_FROM_RUN_STEP="${RESUME_FROM_RUN_STEP:-}"
-export RESUME_FROM_RUN_STEP="16M-baseline-20251011-132852/step-10"
+# export RESUME_FROM_RUN_STEP="16M-baseline-20251011-132852/step-10"
 
 TORCHFT_LIGHTHOUSE=${TORCHFT_LIGHTHOUSE:-"http://localhost:29510"}
 
