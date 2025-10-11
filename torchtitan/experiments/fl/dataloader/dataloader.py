@@ -16,6 +16,9 @@ from __future__ import annotations
 
 import inspect
 import pickle
+import os
+import posixpath
+from collections.abc import Mapping
 from copy import deepcopy
 from typing import Any, Callable
 
@@ -35,6 +38,102 @@ from torchtitan.components.dataloader import BaseDataLoader
 from torchtitan.components.tokenizer import BaseTokenizer
 from torchtitan.experiments.fl.configs.config import MosaicJobConfig
 from torchtitan.tools.logging import logger
+
+
+def _is_uri(path: str | None) -> bool:
+    return bool(path and "://" in path)
+
+
+def _join_remote_path(root: str | None, path: str | None) -> str | None:
+    if path is None or _is_uri(path) or root is None or _is_uri(path):
+        return path
+    if _is_uri(root):
+        return f"{root.rstrip('/')}/{path.lstrip('/')}"
+    return posixpath.join(root, path)
+
+
+def _join_local_path(root: str | None, path: str | None) -> str | None:
+    if path is None or root is None:
+        return path
+    if os.path.isabs(path):
+        return path
+    return os.path.join(root, path)
+
+
+def _flatten_stream_configs(streams_cfg: Any) -> dict[str, dict[str, Any]]:
+    """Flatten nested stream configurations into a simple mapping."""
+
+    flattened: dict[str, dict[str, Any]] = {}
+
+    def _collect(config: Any, parent_key: str | None = None) -> None:
+        if isinstance(config, Mapping):
+            if "remote" in config or "local" in config:
+                flattened_key = config.get("name") or parent_key or f"stream_{len(flattened)}"
+                flattened[flattened_key] = dict(config)
+                flattened[flattened_key].setdefault("name", flattened_key)
+                return
+
+            for key, value in config.items():
+                if key == "client_streams":
+                    _collect(value)
+                elif isinstance(value, Mapping) and ("remote" in value or "local" in value):
+                    flattened[key] = dict(value)
+                    flattened[key].setdefault("name", key)
+                else:
+                    _collect(value, key)
+        elif isinstance(config, (list, tuple)):
+            for item in config:
+                _collect(item)
+
+    _collect(streams_cfg)
+    return flattened
+
+
+def _select_dataset_config(dataset_cfg: Mapping[str, Any] | None, split: str) -> dict[str, Any]:
+    if not dataset_cfg:
+        return {}
+
+    cfg = deepcopy(dict(dataset_cfg))
+    if "common" in cfg or split in cfg:
+        merged: dict[str, Any] = {}
+        merged.update(cfg.pop("common", {}) or {})
+        merged.update(cfg.pop(split, {}) or {})
+        return merged
+    return cfg
+
+
+def _extract_streams(dataset_cfg: dict[str, Any]) -> tuple[list[Stream] | None, dict[str, Any]]:
+    root_remote = dataset_cfg.pop("root_remote", None)
+    root_local = dataset_cfg.pop("root_local", None)
+    streams_cfg = dataset_cfg.pop("streams", None)
+
+    if not streams_cfg:
+        return None, dataset_cfg
+
+    flattened = _flatten_stream_configs(streams_cfg)
+    streams: list[Stream] = []
+    for name, stream_cfg in flattened.items():
+        stream_kwargs = dict(stream_cfg)
+        stream_kwargs = {key: value for key, value in stream_kwargs.items() if value is not None}
+        stream_kwargs.pop("name", None)
+
+        if "remote" in stream_kwargs:
+            stream_kwargs["remote"] = _join_remote_path(root_remote, stream_kwargs["remote"])
+        elif root_remote is not None:
+            logger.warning(
+                "Stream %s is missing a remote path; root_remote was provided.",
+                name,
+            )
+
+        if "local" in stream_kwargs:
+            stream_kwargs["local"] = _join_local_path(root_local, stream_kwargs["local"])
+        elif root_local is not None:
+            logger.warning("Stream %s is missing a local path; root_local was provided.", name)
+
+        streams.append(Stream(**stream_kwargs))
+
+    logger.info("Built %d streams for Mosaic dataloader", len(streams))
+    return streams, dataset_cfg
 
 
 class StatefulStreamingTextDataset(StreamingTextDataset):
@@ -60,9 +159,7 @@ class StatefulStreamingTextDataset(StreamingTextDataset):
         self._num_samples_yielded += 1
         return super().__getitem__(idx)
 
-    def state_dict(
-        self, num_samples: int | None = None, from_beginning: bool = True
-    ) -> dict[str, Any]:
+    def state_dict(self, num_samples: int | None = None, from_beginning: bool = True) -> dict[str, Any]:
         """
         Saves the dataset's state.
 
@@ -70,12 +167,8 @@ class StatefulStreamingTextDataset(StreamingTextDataset):
         the internal `_num_samples_yielded` counter. This makes it compatible
         with the StatefulDataLoader.
         """
-        effective_num_samples = (
-            num_samples if num_samples is not None else self._num_samples_yielded
-        )
-        parent_state = super().state_dict(
-            num_samples=effective_num_samples, from_beginning=from_beginning
-        )
+        effective_num_samples = num_samples if num_samples is not None else self._num_samples_yielded
+        parent_state = super().state_dict(num_samples=effective_num_samples, from_beginning=from_beginning)
         parent_state["_num_samples_yielded"] = self._num_samples_yielded
         return parent_state
 
@@ -152,15 +245,11 @@ class MosaicParallelAwareDataloader(StatefulDataLoader, BaseDataLoader):
             return
 
         if self._rank_id not in state_dict:
-            logger.warning(
-                f"DataLoader state is empty for dp rank {self.dp_rank}, "
-                f"expected key {self._rank_id}"
-            )
+            logger.warning(f"DataLoader state is empty for dp rank {self.dp_rank}, expected key {self._rank_id}")
             return
 
         assert self.dp_world_size == state_dict["world_size"], (
-            "dp_degree is inconsistent before and after checkpoint, "
-            "dataloader resharding is not supported yet."
+            "dp_degree is inconsistent before and after checkpoint, dataloader resharding is not supported yet."
         )
         super().load_state_dict(pickle.loads(state_dict[self._rank_id]))
 
@@ -194,70 +283,67 @@ def titan_collate_fn(batch: list[Any]) -> tuple[dict[str, torch.Tensor], torch.T
     return input_dict, labels
 
 
-def build_mosaic_dataloader(
+def _build_mosaic_dataloader(
     *,
+    job_config: MosaicJobConfig,
+    tokenizer: BaseTokenizer,
     dp_world_size: int,
     dp_rank: int,
-    tokenizer: BaseTokenizer,
-    job_config: MosaicJobConfig,
+    split: str,
+    default_drop_last: bool,
 ) -> MosaicParallelAwareDataloader:
-    """Build a dataloader using Mosaic's StreamingTextDataset.
-
-    This function constructs a StreamingTextDataset and wraps it in a
-    MosaicParallelAwareDataloader that supports prefetching and distributed
-    data parallelism.
-    """
     mosaic_cfg = job_config.mosaic_dataloader
-    if mosaic_cfg is None:
+    if not mosaic_cfg:
         raise ValueError("mosaic_dataloader config must be set.")
 
-    # The tokenizer is expected to be a HuggingFace tokenizer or a wrapper.
-    # We attempt to extract it here.
-    hf_tokenizer = getattr(tokenizer, "tokenizer", tokenizer)
-
     cfg = deepcopy(mosaic_cfg)
-    dataset_cfg = cfg.get("dataset", {})
+    dataset_cfg_raw = cfg.pop("dataset", {})
+    dataset_cfg = _select_dataset_config(dataset_cfg_raw, split)
 
     # Extract dataloader-specific config
     num_workers = cfg.get("num_workers", 8)
     prefetch_factor = cfg.get("prefetch_factor", 2)
     pin_memory = cfg.get("pin_memory", True)
     persistent_workers = cfg.get("persistent_workers", True)
-    drop_last = cfg.get("drop_last", True)
+    drop_last = cfg.get("drop_last", default_drop_last)
 
-    # Build streams
-    streams_cfg = dataset_cfg.pop("streams", None)
-    streams = None
-    if streams_cfg:
-        streams = [
-            Stream(
-                remote=stream_config.get("remote"),
-                local=stream_config.get("local"),
-                proportion=stream_config.get("proportion", 1.0),
-                download_retry=stream_config.get("download_retry", 2),
-                download_timeout=stream_config.get("download_timeout", 60),
-            )
-            for stream_config in streams_cfg.values()
-        ]
-        logger.info(f"Built {len(streams)} streams for Mosaic dataloader")
+    # Allow per-split overrides
+    split_overrides = cfg.get(split, {})
+    if isinstance(split_overrides, Mapping):
+        num_workers = split_overrides.get("num_workers", num_workers)
+        prefetch_factor = split_overrides.get("prefetch_factor", prefetch_factor)
+        pin_memory = split_overrides.get("pin_memory", pin_memory)
+        persistent_workers = split_overrides.get("persistent_workers", persistent_workers)
+        drop_last = split_overrides.get("drop_last", drop_last)
+
+    streams, dataset_cfg = _extract_streams(dataset_cfg)
 
     # Filter dataset config to only include valid StreamingTextDataset parameters
     valid_params = {
         *inspect.signature(StreamingTextDataset).parameters,
         *inspect.signature(StreamingDataset).parameters,
     }
-    dataset_config_filtered = {
-        k: v for k, v in dataset_cfg.items() if k in valid_params
-    }
+    dataset_config_filtered = {k: v for k, v in dataset_cfg.items() if k in valid_params}
 
-    # Build the StreamingTextDataset
+    # Resolve optional subset configuration
+    subset_num_samples = dataset_cfg.pop("subset_num_samples", None)
+    if subset_num_samples is not None:
+        dataset_config_filtered["epoch_size"] = subset_num_samples
+
+    # The tokenizer is expected to be a HuggingFace tokenizer or a wrapper.
+    hf_tokenizer = getattr(tokenizer, "tokenizer", tokenizer)
+
+    batch_size = job_config.validation.local_batch_size if split == "val" else job_config.training.local_batch_size
+
     logger.info(
-        "Building StreamingTextDataset with config: %s", dataset_config_filtered
+        "Building StreamingTextDataset (%s split) with config: %s",
+        split,
+        dataset_config_filtered,
     )
     text_dataset = StatefulStreamingTextDataset(
         tokenizer=hf_tokenizer,
         streams=streams,
-        batch_size=job_config.training.local_batch_size,
+        batch_size=batch_size,
         **dataset_config_filtered,
     )
 
@@ -265,7 +351,7 @@ def build_mosaic_dataloader(
         dataset=text_dataset,
         dp_rank=dp_rank,
         dp_world_size=dp_world_size,
-        batch_size=job_config.training.local_batch_size,
+        batch_size=batch_size,
         collate_fn=titan_collate_fn,
         num_workers=num_workers,
         prefetch_factor=prefetch_factor,
@@ -275,4 +361,47 @@ def build_mosaic_dataloader(
     )
 
 
-__all__ = ["MosaicParallelAwareDataloader", "build_mosaic_dataloader"]
+def build_mosaic_dataloader(
+    *,
+    dp_world_size: int,
+    dp_rank: int,
+    tokenizer: BaseTokenizer,
+    job_config: MosaicJobConfig,
+) -> MosaicParallelAwareDataloader:
+    """Build a Mosaic dataloader for the training split."""
+
+    return _build_mosaic_dataloader(
+        job_config=job_config,
+        tokenizer=tokenizer,
+        dp_world_size=dp_world_size,
+        dp_rank=dp_rank,
+        split="train",
+        default_drop_last=True,
+    )
+
+
+def build_mosaic_validation_dataloader(
+    *,
+    dp_world_size: int,
+    dp_rank: int,
+    tokenizer: BaseTokenizer,
+    job_config: MosaicJobConfig,
+    infinite: bool = False,  # noqa: ARG001 - kept for compatibility
+) -> MosaicParallelAwareDataloader:
+    """Build a Mosaic dataloader for the validation split."""
+
+    return _build_mosaic_dataloader(
+        job_config=job_config,
+        tokenizer=tokenizer,
+        dp_world_size=dp_world_size,
+        dp_rank=dp_rank,
+        split="val",
+        default_drop_last=False,
+    )
+
+
+__all__ = [
+    "MosaicParallelAwareDataloader",
+    "build_mosaic_dataloader",
+    "build_mosaic_validation_dataloader",
+]
