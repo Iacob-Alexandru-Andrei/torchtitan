@@ -16,7 +16,11 @@ from torchtitan.components.optimizer import (
     OptimizersInBackwardContainer,
 )
 from torchtitan.distributed import ParallelDims
-from torchtitan.experiments.fl.configs.optimizers import MosaicOptimizerConfig
+from torchtitan.experiments.fl.configs.optimizers import (
+    DesLocConfig,
+    MosaicOptimizerConfig,
+)
+from torchtitan.experiments.fl.desloc import DesLocFTOptimizersContainer
 from torchtitan.experiments.fl.optimizers import (
     ADOPT,
     AggMoAdamW,
@@ -27,7 +31,7 @@ from torchtitan.experiments.fl.optimizers import (
 )
 
 
-def build_mosaic_optimizers(  # noqa: C901
+def build_mosaic_optimizers(  # noqa: C901, PLR0912
     model_parts: list[torch.nn.Module],
     optimizer_config: MosaicOptimizerConfig | dict[str, Any],
     parallel_dims: ParallelDims,
@@ -48,6 +52,14 @@ def build_mosaic_optimizers(  # noqa: C901
     if isinstance(optimizer_config, dict):
         optimizer_config = MosaicOptimizerConfig(**optimizer_config)
 
+    desloc_config: DesLocConfig | None = (
+        DesLocConfig(**config)
+        if (config := getattr(optimizer_config, "desloc", None)) is not None
+        else None
+    )
+
+    desloc_enabled = bool(getattr(desloc_config, "enabled", False))
+
     optim_in_bwd = optimizer_config.early_step_in_backward
     if optim_in_bwd:
         if parallel_dims.ep_enabled:
@@ -59,6 +71,10 @@ def build_mosaic_optimizers(  # noqa: C901
         if ft_manager and ft_manager.enabled:
             msg = "TorchFT is not supported with optimizers in backward."
             raise NotImplementedError(msg)
+
+    if desloc_enabled and not (ft_manager and ft_manager.enabled):
+        msg = "DES-LOC requires TorchFT to be enabled. Set fault_tolerance.enable to true."
+        raise ValueError(msg)
 
     name = optimizer_config.name
     lr = optimizer_config.lr
@@ -114,6 +130,17 @@ def build_mosaic_optimizers(  # noqa: C901
     if optim_in_bwd:
         return OptimizersInBackwardContainer(
             model_parts, optimizer_cls, optimizer_kwargs
+        )
+
+    if desloc_enabled and ft_manager is not None and desloc_config is not None:
+        return DesLocFTOptimizersContainer(
+            model_parts,
+            optimizer_cls,
+            optimizer_kwargs,
+            ft_manager.manager,
+            desloc_config,
+            use_ft_optimizer=ft_manager.use_async_quorum,
+            param_groups=param_groups,
         )
 
     if ft_manager and ft_manager.enabled:
