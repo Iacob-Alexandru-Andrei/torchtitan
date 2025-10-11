@@ -53,7 +53,7 @@ min_lr_factor = 0.0
 local_batch_size = 8
 seq_len = 2048
 max_norm = 1.0  # grad norm clipping
-steps = 10
+steps = 20
 dataset = "c4_test"  # supported datasets: c4_test (2K), c4 (177M)
 
 # Mosaic-specific configurations are now at the root level
@@ -96,12 +96,19 @@ pipeline_parallel_degree = 1
 context_parallel_degree = 1
 
 [checkpoint]
-enable = false
-folder = "checkpoint"
+enable = true
+folder = "checkpoints"
 interval = 10
 last_save_model_only = false
 export_dtype = "float32"
-async_mode = "disabled"  # ["disabled", "async", "async_with_pinned_mem"]
+async_mode = "async_with_pinned_mem"  # ["disabled", "async", "async_with_pinned_mem"]
+
+[s3_checkpoint]
+enable = true
+bucket = "checkpoints"
+prefix = ""  # Root of bucket
+download_on_start = true
+# run_uuid and remote_checkpoint_folder will be set via RUN_UUID environment variable
 
 [activation_checkpoint]
 mode = "selective"  # ["none", "selective", "full"]
@@ -121,4 +128,4 @@ filter_fqns = ["output"]
 enable = false
 dataset = "c4_validation"
 freq = 5
-steps = 10
+steps = 20
