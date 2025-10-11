@@ -545,7 +545,8 @@ def _single_tensor_qhadamw(  # noqa: PLR0913
         step_t = state_steps[i]
 
         if (
-            not torch._utils.is_compiling() and capturable
+            not torch._utils.is_compiling()
+            and capturable  # pyright: ignore[reportAttributeAccessIssue]
         ):  # pyright: ignore[reportAttributeAccessIssue]
             device = _get_capturable_supported_devices()
             assert param.device.type == step_t.device.type
