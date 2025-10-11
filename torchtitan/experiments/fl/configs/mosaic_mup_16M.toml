@@ -59,9 +59,12 @@ dataset = "c4_test"  # supported datasets: c4_test (2K), c4 (177M)
 # Mosaic-specific configurations are now at the root level
 [mosaic_dataloader]
 name = "text"
-drop_last = true
+num_workers = 8
+prefetch_factor = 2
+pin_memory = true
+persistent_workers = true
 
-[mosaic_dataloader.dataset]
+[mosaic_dataloader.dataset.common]
 max_seq_len = 2048
 download_retry = 2
 download_timeout = 60
@@ -74,11 +77,37 @@ sampling_method = "balanced"
 sampling_granularity = 1
 batching_method = "random"
 
-[mosaic_dataloader.dataset.streams]
-  [mosaic_dataloader.dataset.streams.stream_0]
-  local = "/nfs-share/datasets/photon/dataset_cache/smollm-corpus-shared-val/fineweb_edu_dedup/client_0/train"
-  proportion = 70
-  remote = "s3://smollm-corpus/shared/fineweb_edu_dedup/client_0/train"
+[mosaic_dataloader.dataset.train]
+split = "train"
+root_remote = "s3://smollm-corpus/shared"
+root_local = "/nfs-share/datasets/photon/dataset_cache/smollm-corpus-shared"
+
+[mosaic_dataloader.dataset.train.streams.client_streams.stream_0]
+local = "fineweb_edu_dedup/client_0/train"
+remote = "fineweb_edu_dedup/client_0/train"
+proportion = 70
+
+[mosaic_dataloader.dataset.train.streams.client_streams.stream_16]
+local = "cosmo/client_0/train"
+remote = "cosmo/client_0/train"
+proportion = 10
+
+[mosaic_dataloader.dataset.val]
+# The validation samples are stored under the "train" split on disk.
+split = "train"
+root_remote = "s3://smollm-corpus/shared"
+root_local = "/nfs-share/datasets/photon/dataset_cache/smollm-corpus-shared-val"
+subset_num_samples = 8192
+
+[mosaic_dataloader.dataset.val.streams.client_streams.stream_0]
+local = "fineweb_edu_dedup/client_0/train"
+remote = "fineweb_edu_dedup/client_0/train"
+proportion = 70
+
+[mosaic_dataloader.dataset.val.streams.client_streams.stream_16]
+local = "cosmo/client_0/train"
+remote = "cosmo/client_0/train"
+proportion = 10
 
 [mosaic_tokenizer]
 name = "HuggingFaceTB/SmolLM-1.7B"

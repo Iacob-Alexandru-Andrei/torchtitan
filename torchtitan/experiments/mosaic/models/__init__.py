@@ -9,6 +9,7 @@ from typing import cast
 
 from torchtitan.experiments.fl.dataloader.dataloader import build_mosaic_dataloader
 from torchtitan.experiments.fl.dataloader.tokenizer import build_mosaic_tokenizer
+from torchtitan.experiments.fl.validate import build_mosaic_validator
 from torchtitan.experiments.fl.models.llama3_mup.train_configs import (
     get_train_spec as get_llama3_mup_train_spec,
 )
@@ -48,6 +49,7 @@ def _get_mosaic_llama3_spec() -> TrainSpec:
         build_dataloader_fn=build_mosaic_dataloader,
         build_tokenizer_fn=cast("TokenizerBuilder", build_mosaic_tokenizer),
         build_optimizers_fn=build_mosaic_optimizers,
+        build_validator_fn=build_mosaic_validator,
     )
 
 

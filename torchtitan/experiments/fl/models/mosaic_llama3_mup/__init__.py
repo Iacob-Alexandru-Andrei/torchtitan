@@ -18,6 +18,7 @@ from torchtitan.experiments.fl.components import build_metrics_processor
 from torchtitan.experiments.fl.configs.optimizers import MosaicOptimizerConfig
 from torchtitan.experiments.fl.dataloader.dataloader import build_mosaic_dataloader
 from torchtitan.experiments.fl.dataloader.tokenizer import build_mosaic_tokenizer
+from torchtitan.experiments.fl.validate import build_mosaic_validator
 from torchtitan.experiments.fl.models.llama3_mup.train_configs import (
     get_train_spec as get_llama3_mup_train_spec,
 )
@@ -64,14 +65,10 @@ def build_mosaic_mup_optimizers(
     }
 
     # MuP requires custom parameter groups for different learning rates.
-    param_groups_or_iter, final_optimizer_kwargs = model.get_optimizer_param_groups(
-        initial_optimizer_kwargs
-    )
+    param_groups_or_iter, final_optimizer_kwargs = model.get_optimizer_param_groups(initial_optimizer_kwargs)
 
     # Convert Iterator to None for build_optimizers (it will use model.parameters())
-    param_groups_list = (
-        param_groups_or_iter if isinstance(param_groups_or_iter, list) else None
-    )
+    param_groups_list = param_groups_or_iter if isinstance(param_groups_or_iter, list) else None
 
     # Update the config with MuP-adjusted values
     optimizer_config.eps = final_optimizer_kwargs.get("eps", optimizer_config.eps)
@@ -98,10 +95,7 @@ def get_train_spec() -> TrainSpec:
     base_spec = get_llama3_mup_train_spec()
 
     # Update all model configurations with larger vocab size for Mosaic tokenizer
-    model_args = {
-        name: replace(config, vocab_size=50368)
-        for name, config in base_spec.model_args.items()
-    }
+    model_args = {name: replace(config, vocab_size=50368) for name, config in base_spec.model_args.items()}
 
     # Return a new spec with Mosaic components and updated vocab sizes
     return replace(
@@ -112,4 +106,5 @@ def get_train_spec() -> TrainSpec:
         build_tokenizer_fn=cast("TokenizerBuilder", build_mosaic_tokenizer),
         build_optimizers_fn=build_mosaic_mup_optimizers,
         build_metrics_processor_fn=build_metrics_processor,
+        build_validator_fn=build_mosaic_validator,
     )

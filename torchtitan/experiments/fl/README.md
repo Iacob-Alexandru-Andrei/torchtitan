@@ -30,7 +30,19 @@ The training job is configured using the `mosaic_job.toml` file. Here are the ke
     *   `name`: The name of the base model's `TrainSpec` you want to use (e.g., "llama3"). The training script will dynamically apply the Mosaic customizations to this `TrainSpec`.
 
 *   **`[mosaic_dataloader]`**:
-    *   This section contains all the configuration for the Mosaic `StreamingTextDataset`. You can specify the dataset name, paths, shuffling options, and other parameters here. Refer to the llm-foundry documentation for a complete list of available options.
+    *   This section contains all the configuration for the Mosaic `StreamingTextDataset`. You can specify the dataset name, paths, shuffling options, and other parameters here. The configuration supports split-specific overrides via `[mosaic_dataloader.dataset.common]`, `[mosaic_dataloader.dataset.train]`, and `[mosaic_dataloader.dataset.val]`. The common block is merged into each split, letting you keep shared options (like shuffling) in one place while overriding paths or stream definitions per split. You can also cap validation to a deterministic subset by setting `subset_num_samples` in the validation block—this value is forwarded to the underlying streaming dataset as its `epoch_size`.
+
+### Validation Dataloader
+
+The training specs now register a Mosaic-aware validator by default. The validator calls `build_mosaic_validation_dataloader`, which mirrors the training dataloader but consumes the `[mosaic_dataloader.dataset.val]` configuration. By default it uses the validation batch size from the job config, does not drop the last batch, and honours `subset_num_samples` to ensure that evaluation is reproducible even when the validation dataset is much larger than the portion you want to sample each run.
+
+To extend the default configuration you can add more stream groups under `[[mosaic_dataloader.dataset.val.streams]]`—the same structure as the training split. Streams inherit `root_remote` and `root_local`, allowing you to keep remotes identical between train and validation while pointing to a different local cache.
+
+### TorchFT Considerations
+
+TorchFT introduces semi-synchronous behaviour: different replica groups can temporarily run with different membership before resynchronising. Because workers might be unsynchronised for a few steps, validation needs to operate on a fixed-size slice of the dataset to avoid hanging on ranks that have already exhausted the stream. The Mosaic validator achieves this by respecting `subset_num_samples` (or `epoch_size` if you set it directly) and by using the streaming dataset's checkpointable state. When a replica rejoins after a recovery it continues from the correct offset, so every rank evaluates the same logical subset even if their wall-clock start times differ.
+
+When combining this with TorchFT make sure your validation cadence (`validation.freq`) is coarser than the semi-synchronous windows emitted by TorchFT and that the subset size covers the number of evaluation steps you plan to take. This ensures that resumed workers do not overrun the validation subset and keeps validation metrics comparable across replica groups.
 
 *   **`[mosaic_tokenizer]`**:
     *   This section configures the tokenizer to be used with the Mosaic dataloader. You can specify the tokenizer name (e.g., from HuggingFace) and any additional keyword arguments.
