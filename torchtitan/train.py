@@ -227,8 +227,7 @@ class Trainer(torch.distributed.checkpoint.stateful.Stateful):
         if parallel_dims.pp_enabled:
             if not self.train_spec.pipelining_fn:
                 raise RuntimeError(
-                    f"Pipeline Parallel is enabled but {self.train_spec.name} "
-                    f"does not support pipelining"
+                    f"Pipeline Parallel is enabled but {self.train_spec.name} does not support pipelining"
                 )
 
             # apply both PT-D Pipeline Parallel and SPMD-style PT-D techniques
@@ -548,7 +547,16 @@ class Trainer(torch.distributed.checkpoint.stateful.Stateful):
     def train(self):
         job_config = self.job_config
 
-        self.checkpointer.load(step=job_config.checkpoint.load_step)
+        logger.info(f"[RESUME DEBUG] Before checkpoint load: self.step = {self.step}")
+        logger.info(
+            f"[RESUME DEBUG] Checkpoint config: load_step={job_config.checkpoint.load_step}, folder={job_config.checkpoint.folder}"
+        )
+
+        loaded = self.checkpointer.load(step=job_config.checkpoint.load_step)
+
+        logger.info(
+            f"[RESUME DEBUG] After checkpoint load: loaded={loaded}, self.step = {self.step}"
+        )
         logger.info(f"Training starts at step {self.step + 1}")
 
         leaf_folder = (
@@ -637,8 +645,15 @@ class Trainer(torch.distributed.checkpoint.stateful.Stateful):
         return {"step": self.step, "ntokens_seen": self.ntokens_seen}
 
     def load_state_dict(self, state_dict: dict[str, Any]):
+        logger.info(f"[RESUME DEBUG] Trainer.load_state_dict called with: {state_dict}")
+        logger.info(
+            f"[RESUME DEBUG] Before load: self.step = {self.step}, self.ntokens_seen = {self.ntokens_seen}"
+        )
         self.step = state_dict["step"]
         self.ntokens_seen = state_dict["ntokens_seen"]
+        logger.info(
+            f"[RESUME DEBUG] After load: self.step = {self.step}, self.ntokens_seen = {self.ntokens_seen}"
+        )
 
     def close(self) -> None:
         if self.checkpointer:

@@ -9,11 +9,13 @@
 from __future__ import annotations
 
 import json
+import threading
 from collections import deque
 from pathlib import Path
 from typing import Any, TYPE_CHECKING
 
 from composer.loggers import RemoteUploaderDownloader
+from composer.loggers.remote_uploader_downloader import _upload_worker
 
 from torchtitan.tools.logging import logger
 
@@ -34,6 +36,11 @@ __all__ = [
 
 MANIFEST_FILENAME = "s3_manifest.json"
 LATEST_FILENAME = "s3_latest.txt"
+
+# Constants for validation
+RESUME_FORMAT_PARTS_COUNT = 2
+STEP_PREFIX = "step-"
+MAX_FILES_TO_DISPLAY = 20
 
 
 def download_file_from_s3(
@@ -68,7 +75,6 @@ def upload_file_to_s3(
 def create_remote_up_down(  # noqa: PLR0913
     bucket_name: str,
     prefix: str,
-    run_uuid: str | None,
     num_attempts: int,
     client_config: dict[str, Any],
     *,
@@ -78,7 +84,7 @@ def create_remote_up_down(  # noqa: PLR0913
 ) -> RemoteUploaderDownloader:
     """Create a RemoteUploaderDownloader configured for S3."""
     bucket_uri = f"s3://{bucket_name}"
-    remote_up_down = RemoteUploaderDownloader(
+    return RemoteUploaderDownloader(
         bucket_uri=bucket_uri,
         backend_kwargs={
             "bucket": bucket_name,
@@ -97,8 +103,6 @@ def create_remote_up_down(  # noqa: PLR0913
         use_procs=use_procs,
         num_attempts=num_attempts,
     )
-    remote_up_down.init(run_name=run_uuid)
-    return remote_up_down
 
 
 class S3CheckpointManager:
@@ -117,65 +121,159 @@ class S3CheckpointManager:
         self.remote_up_down = create_remote_up_down(
             bucket_name=config.bucket,
             prefix=config.prefix,
-            run_uuid=config.run_uuid,
             num_attempts=config.num_attempts,
             client_config=config.client_config,
             num_concurrent_uploads=config.num_concurrent_uploads,
             upload_staging_folder=config.upload_staging_folder,
             use_procs=config.use_procs,
         )
+        # Set the run name for the RemoteUploaderDownloader
+        # This is normally set in init() but we're using it standalone
+        self.remote_up_down._run_name = config.run_uuid
 
         self._pending_steps: deque[tuple[int, Path]] = deque()
         self._uploaded_steps: set[int] = set()
         self._latest_uploaded_step: int | None = None
         self._closed = False
 
-    @property
-    def checkpointer(self) -> CheckpointManager:
-        return self._checkpointer
-
-    def __getattr__(self, name: str) -> Any:
-        if hasattr(self._checkpointer, name):
-            return getattr(self._checkpointer, name)
-        raise AttributeError(
-            f"'{type(self).__name__}' proxy: '{type(self._checkpointer).__name__}' object "
-            f"has no attribute '{name}'"
+        # Install tracking
         self._missing_directory_steps: set[int] = set()
         self._not_ready_steps: set[int] = set()
         self._installed = False
         self._orig_save = checkpointer.save
         self._orig_maybe_wait = checkpointer.maybe_wait_for_staging
 
+    @property
+    def checkpointer(self) -> CheckpointManager:
+        """Get the underlying CheckpointManager instance."""
+        return self._checkpointer
+
+    def __getattr__(self, name: str) -> Any:
+        """Proxy attribute access to the underlying CheckpointManager."""
+        if hasattr(self._checkpointer, name):
+            return getattr(self._checkpointer, name)
+        msg = f"'{type(self).__name__}' proxy: '{type(self._checkpointer).__name__}' object has no attribute '{name}'"
+        raise AttributeError(msg)
+
     def install(self) -> None:
         """Hook into the wrapped :class:`CheckpointManager`."""
         if self._installed:
             return
-        self.checkpointer.save = self._save  # type: ignore[assignment]
+        self._installed = True
+
+        # Initialize the RemoteUploaderDownloader workers
+        self._start_remote_workers()
+
+        self.checkpointer.save = self.save  # type: ignore[assignment]
         self.checkpointer.maybe_wait_for_staging = (  # type: ignore[assignment]
-            self._maybe_wait_for_staging
+            self.maybe_wait_for_staging
         )
 
+    def _start_remote_workers(self) -> None:
+        """Start the RemoteUploaderDownloader background workers."""
+        rud = self.remote_up_down
+
+        if rud._worker_flag is not None:
+            return  # Already initialized
+
+        rud._worker_flag = rud._finished_cls()
+
+        # Create the enqueue thread
+        rud._enqueue_thread_flag = rud._finished_cls()
+        rud._enqueue_thread = threading.Thread(target=rud._enqueue_uploads, daemon=True)
+        rud._enqueue_thread.start()
+
+        # Start the upload workers
+        for _ in range(rud._num_concurrent_uploads):
+            worker = rud._proc_class(
+                target=_upload_worker,
+                kwargs={
+                    "file_queue": rud._file_upload_queue,
+                    "is_finished": rud._worker_flag,
+                    "remote_backend_name": rud.remote_backend_name,
+                    "backend_kwargs": rud.backend_kwargs,
+                    "num_attempts": rud.num_attempts,
+                    "completed_queue": rud._completed_queue,
+                    "exception_queue": rud._exception_queue,
+                },
+                daemon=True,
+            )
+            worker.start()
+            rud._workers.append(worker)
+
+        logger.info("Started %d S3 upload workers", rud._num_concurrent_uploads)
+
     def __del__(self) -> None:
+        """Clean up resources on object destruction."""
         self.close()
 
-    def download_if_needed(self, requested_step: int) -> None:
-        """Optionally download a checkpoint from S3 before training starts."""
+    def download_if_needed(self) -> None:
+        """Optionally download a checkpoint from S3 before training starts.
+
+        If resume_from_run_step is set, downloads from that specific run/step.
+        Otherwise, looks for the latest checkpoint in the current run.
+        """
         if not self.config.download_on_start:
+            logger.info("S3 download skipped: download_on_start=False")
             return
 
         local_latest = self._find_local_latest_step()
+        logger.info(
+            "Checking for local checkpoints in: %s (found step: %s)",
+            self.checkpointer.folder,
+            local_latest if local_latest != -1 else "none",
+        )
         if local_latest != -1:
+            logger.info(
+                "Skipping S3 download: local checkpoint found at step %s", local_latest
+            )
             return
 
-        step = requested_step
-        if step == -1:
+        # Determine what to download
+        if self.config.resume_from_run_step:
+            # Parse format: "{run_uuid}/step-{N}"
+            try:
+                parts = self.config.resume_from_run_step.split("/")
+                if len(parts) != RESUME_FORMAT_PARTS_COUNT or not parts[1].startswith(
+                    STEP_PREFIX
+                ):
+                    self._raise_invalid_resume_format()
+                run_uuid = parts[0]
+                step_str = parts[1][len(STEP_PREFIX) :]  # Remove "step-" prefix
+                step = int(step_str)
+                remote_path = f"torchtitan/{run_uuid}"
+
+                logger.info(
+                    "Resuming from run step: %s (downloading from: s3://%s/%s/step-%d)",
+                    self.config.resume_from_run_step,
+                    self.config.bucket,
+                    remote_path,
+                    step,
+                )
+            except (ValueError, IndexError) as e:
+                logger.exception(
+                    "Failed to parse resume_from_run_step: %s",
+                    self.config.resume_from_run_step,
+                )
+                self._raise_invalid_resume_format(e)
+        else:
+            # Look for latest in current run
+            remote_path = self.remote_root
             step = self._read_remote_latest_step() or -1
-        if step == -1:
-            logger.info("No remote checkpoint available for download.")
-            return
+
+            logger.info(
+                "Continuing current run: %s (looking for latest in: s3://%s/%s)",
+                self.config.run_uuid,
+                self.config.bucket,
+                remote_path,
+            )
+
+            if step == -1:
+                logger.info("No remote checkpoint available for download.")
+                return
 
         try:
-            self._download_step(step)
+            self._download_step(step, remote_path=remote_path)
             logger.info("Downloaded checkpoint step %s from S3.", step)
         except Exception:
             logger.exception("Failed to download checkpoint step %s from S3.", step)
@@ -188,35 +286,21 @@ class S3CheckpointManager:
         try:
             self._wait_for_staging_with_logging()
             self._process_pending(flush=True)
-            if hasattr(self.remote_up_down, "close"):
-                try:
-                    self.remote_up_down.close()
-                except Exception:  # noqa: BLE001
-                    logger.exception("Failed to close RemoteUploaderDownloader.")
+            # Note: RemoteUploaderDownloader cleanup is handled by Composer internally
             self._checkpointer.close()
         finally:
             self._closed = True
 
     def _wait_for_staging_with_logging(self) -> None:
         try:
-            self._checkpointer.maybe_wait_for_staging()
+            self._orig_maybe_wait()
         except Exception:  # noqa: BLE001
             logger.exception(
                 "Failed while waiting for staged checkpoints before upload."
             )
         if self._installed:
-            try:
-                self._orig_maybe_wait()
-            except Exception:  # noqa: BLE001
-                logger.exception(
-                    "Failed while waiting for staged checkpoints before upload."
-                )
             self._process_pending(flush=True)
-        if hasattr(self.remote_up_down, "close"):
-            try:
-                self.remote_up_down.close()
-            except Exception:  # noqa: BLE001
-                logger.exception("Failed to close RemoteUploaderDownloader.")
+        # Note: RemoteUploaderDownloader cleanup is handled by Composer internally
 
     def _resolve_remote_root(self) -> str:
         root = self.config.remote_checkpoint_folder or self.job_config.checkpoint.folder
@@ -225,16 +309,41 @@ class S3CheckpointManager:
     def _checkpoint_dir(self, step: int) -> Path:
         return Path(self.checkpointer.folder) / f"step-{step}"
 
-    def _remote_key(self, relative_path: Path) -> str:
+    def _raise_invalid_resume_format(self, cause: Exception | None = None) -> None:
+        """Raise a ValueError for invalid resume_from_run_step format.
+
+        Args:
+            cause: Optional exception that caused this error
+        """
+        msg = (
+            f"Invalid resume_from_run_step format: '{self.config.resume_from_run_step}'. "
+            "Expected format: '{{run_uuid}}/step-{{N}}' (e.g., '16M-baseline-20251011-122516/step-10')"
+        )
+        if cause:
+            raise ValueError(msg) from cause
+        raise ValueError(msg)
+
+    def _remote_key(self, relative_path: Path, remote_root: str | None = None) -> str:
+        """Get the remote S3 key.
+
+        Args:
+            relative_path: Path relative to the checkpoint folder
+            remote_root: Optional override for the remote root. If not provided, uses self.remote_root
+        """
         relative_key = relative_path.as_posix()
-        if self.remote_root:
-            return f"{self.remote_root}/{relative_key}"
+        root = remote_root if remote_root is not None else self.remote_root
+        if root:
+            return f"{root}/{relative_key}"
         return relative_key
 
-    def save(
-        self, curr_step: int, last_step: bool = False
-    ) -> None:  # noqa: FBT001, FBT002
-        self._checkpointer.save(curr_step, last_step=last_step)
+    def save(self, curr_step: int, *, last_step: bool = False) -> None:
+        """Save checkpoint and queue for S3 upload.
+
+        Args:
+            curr_step: Current training step
+            last_step: Whether this is the final checkpoint
+        """
+        self._orig_save(curr_step, last_step=last_step)
         checkpoint_dir = self._checkpoint_dir(curr_step)
         if not checkpoint_dir.exists():
             logger.warning(
@@ -246,7 +355,7 @@ class S3CheckpointManager:
         self._pending_steps.append((curr_step, checkpoint_dir))
         if last_step:
             try:
-                self._checkpointer.maybe_wait_for_staging()
+                self._orig_maybe_wait()
             except Exception:  # noqa: BLE001
                 logger.exception(
                     "Failed while waiting for staged checkpoints before final upload."
@@ -254,7 +363,8 @@ class S3CheckpointManager:
             self._process_pending(flush=True)
 
     def maybe_wait_for_staging(self) -> None:
-        self._checkpointer.maybe_wait_for_staging()
+        """Wait for staged checkpoints and process pending uploads."""
+        self._orig_maybe_wait()
         self._process_pending()
 
     def _process_pending(self, flush: bool = False) -> None:  # noqa: FBT001, FBT002
@@ -266,16 +376,14 @@ class S3CheckpointManager:
             if not directory.exists():
                 if flush:
                     logger.error(
-                        "Checkpoint directory %s for step %s does not exist and will not "
-                        "be uploaded during flush.",
+                        "Checkpoint directory %s for step %s does not exist and will not be uploaded during flush.",
                         directory,
                         step,
                     )
                 else:
                     if step not in self._missing_directory_steps:
                         logger.warning(
-                            "Checkpoint directory %s for step %s is not available yet; "
-                            "retrying staging before upload.",
+                            "Checkpoint directory %s for step %s is not available yet; retrying staging before upload.",
                             directory,
                             step,
                         )
@@ -286,16 +394,14 @@ class S3CheckpointManager:
             if not self._is_directory_ready_for_upload(directory):
                 if flush:
                     logger.error(
-                        "Checkpoint directory %s for step %s is not ready for upload "
-                        "during flush and will be skipped.",
+                        "Checkpoint directory %s for step %s is not ready for upload during flush and will be skipped.",
                         directory,
                         step,
                     )
                 else:
                     if step not in self._not_ready_steps:
                         logger.info(
-                            "Checkpoint directory %s for step %s is still being written; "
-                            "deferring upload.",
+                            "Checkpoint directory %s for step %s is still being written; deferring upload.",
                             directory,
                             step,
                         )
@@ -329,16 +435,22 @@ class S3CheckpointManager:
         manifest_path.write_text(json.dumps(manifest_content))
 
         upload_targets = [*files, manifest_path]
+        uploaded_paths = []
         for file_path in upload_targets:
             relative = file_path.relative_to(Path(self.checkpointer.folder))
             remote_key = self._remote_key(relative)
             upload_file_to_s3(self.remote_up_down, remote_key, file_path)
+            # Log the full S3 path
+            s3_uri = f"s3://{self.config.bucket}/{remote_key}"
+            uploaded_paths.append(s3_uri)
+            logger.info("Uploaded: %s -> %s", file_path, s3_uri)
 
         self._uploaded_steps.add(step)
         if self._latest_uploaded_step is None or step > self._latest_uploaded_step:
             self._latest_uploaded_step = step
             self._write_latest_marker(step)
         logger.info("Uploaded checkpoint step %s to S3 (%s files).", step, len(files))
+        logger.info("All uploaded files for step %s: %s", step, uploaded_paths)
 
     def _iter_checkpoint_files(self, directory: Path) -> Iterable[Path]:
         for path in directory.rglob("*"):
@@ -349,7 +461,14 @@ class S3CheckpointManager:
         marker_path = Path(self.checkpointer.folder) / LATEST_FILENAME
         marker_path.write_text(f"{step}\n")
         remote_key = self._remote_key(Path(LATEST_FILENAME))
+        s3_uri = f"s3://{self.config.bucket}/{remote_key}"
         upload_file_to_s3(self.remote_up_down, remote_key, marker_path)
+        logger.info(
+            "Uploaded latest marker: %s -> %s (points to step %s)",
+            marker_path,
+            s3_uri,
+            step,
+        )
 
     def _find_local_latest_step(self) -> int:
         try:
@@ -357,13 +476,18 @@ class S3CheckpointManager:
         except Exception:  # noqa: BLE001
             return -1
 
-    def _read_remote_latest_step(self) -> int | None:
+    def _read_remote_latest_step(self, remote_root: str | None = None) -> int | None:
+        """Read the latest checkpoint step from S3.
+
+        Args:
+            remote_root: Optional override for the remote root. If not provided, uses self.remote_root
+        """
         marker_path = Path(self.checkpointer.folder) / LATEST_FILENAME
         try:
             marker_path.parent.mkdir(parents=True, exist_ok=True)
             download_file_from_s3(
                 self.remote_up_down,
-                self._remote_key(Path(LATEST_FILENAME)),
+                self._remote_key(Path(LATEST_FILENAME), remote_root=remote_root),
                 marker_path,
             )
         except Exception:  # noqa: BLE001
@@ -374,27 +498,77 @@ class S3CheckpointManager:
             logger.warning("Invalid latest checkpoint marker downloaded from S3.")
             return None
 
-    def _download_step(self, step: int) -> None:
+    def _download_step(self, step: int, remote_path: str) -> None:
+        """Download a specific checkpoint step from S3.
+
+        Args:
+            step: The checkpoint step number to download
+            remote_path: The remote S3 path prefix (e.g., "torchtitan/16M-baseline-20251011-122516")
+        """
         checkpoint_dir = self._checkpoint_dir(step)
+        logger.info("Downloading checkpoint step %s to: %s", step, checkpoint_dir)
         checkpoint_dir.mkdir(parents=True, exist_ok=True)
         manifest_path = checkpoint_dir / MANIFEST_FILENAME
+
+        remote_manifest_key = self._remote_key(
+            Path(f"step-{step}") / MANIFEST_FILENAME, remote_root=remote_path
+        )
+        logger.info(
+            "Downloading manifest from S3: s3://%s/%s/%s",
+            self.config.bucket,
+            self.config.prefix,
+            remote_manifest_key,
+        )
         download_file_from_s3(
             self.remote_up_down,
-            self._remote_key(Path(f"step-{step}") / MANIFEST_FILENAME),
+            remote_manifest_key,
             manifest_path,
         )
         manifest_entries = json.loads(manifest_path.read_text())
+        logger.info("Manifest contains %d files to download", len(manifest_entries))
+
         for relative in manifest_entries:
             relative_path = Path(relative)
             local_path = checkpoint_dir / relative_path
             local_path.parent.mkdir(parents=True, exist_ok=True)
             download_file_from_s3(
                 self.remote_up_down,
-                self._remote_key(Path(f"step-{step}") / relative_path),
+                self._remote_key(
+                    Path(f"step-{step}") / relative_path, remote_root=remote_path
+                ),
                 local_path,
             )
+        logger.info(
+            "Successfully downloaded all %d files for step %s",
+            len(manifest_entries),
+            step,
+        )
+
+        # Verify the checkpoint directory structure
+        metadata_file = checkpoint_dir / ".metadata"
+        if metadata_file.exists():
+            logger.info("✓ Checkpoint metadata file exists: %s", metadata_file)
+        else:
+            logger.error("✗ Checkpoint metadata file MISSING: %s", metadata_file)
+
+        # List all downloaded files for verification
+        all_files = list(checkpoint_dir.rglob("*"))
+        logger.info(
+            "Downloaded checkpoint contains %d total paths (files + directories)",
+            len(all_files),
+        )
+        logger.info("Checkpoint directory structure:")
+        for path in sorted(all_files)[:MAX_FILES_TO_DISPLAY]:
+            logger.info("  - %s", path.relative_to(checkpoint_dir))
+        if len(all_files) > MAX_FILES_TO_DISPLAY:
+            logger.info("  ... and %d more", len(all_files) - MAX_FILES_TO_DISPLAY)
+
         self._latest_uploaded_step = max(self._latest_uploaded_step or -1, step)
         self._write_latest_marker(step)
+        logger.info(
+            "✓ Checkpoint download complete for step %s. Native checkpointer should now load it.",
+            step,
+        )
 
 
 def setup_s3_checkpointing(
@@ -407,7 +581,7 @@ def setup_s3_checkpointing(
     config = job_config.s3_checkpoint
     if not config.enable:
         return None
-    if not config.bucket or not config.prefix:
+    if not config.bucket or config.prefix is None:
         logger.warning(
             "S3 checkpointing is enabled but bucket or prefix is not provided; skipping."
         )

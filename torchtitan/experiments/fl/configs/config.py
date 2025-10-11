@@ -166,6 +166,17 @@ class S3CheckpointingConfig:
             "help": "Download a checkpoint from S3 before training when no local checkpoints are present."
         },
     )
+    resume_from_run_step: str | None = field(
+        default=None,
+        metadata={
+            "help": (
+                "Resume training from a specific run and step. "
+                "Format: '{run_uuid}/step-{N}' (e.g., '16M-baseline-20251011-122516/step-10'). "
+                "If not set, will look for the latest checkpoint in the current run. "
+                "This completely separates the resumption path from the current run's upload path."
+            )
+        },
+    )
 
 
 @dataclass

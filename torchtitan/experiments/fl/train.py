@@ -31,7 +31,10 @@ import torch
 
 from torchtitan.config import ConfigManager
 from torchtitan.experiments.fl.components import build_metrics_processor
-from torchtitan.experiments.fl.configs.config import MosaicJobConfig
+from torchtitan.experiments.fl.configs.config import (
+    MosaicJobConfig,
+    S3CheckpointingConfig,
+)
 from torchtitan.experiments.fl.dataloader.dataloader import build_mosaic_dataloader
 from torchtitan.experiments.fl.dataloader.tokenizer import build_mosaic_tokenizer
 from torchtitan.experiments.fl.s3_checkpoint import (
@@ -59,6 +62,27 @@ def main() -> None:  # noqa: C901, PLR0912, PLR0915
     # custom MosaicJobConfig dataclass.
     config_manager = ConfigManager(MosaicJobConfig)
     job_config = config_manager.parse_args()
+
+    # Convert s3_checkpoint dict to dataclass if needed (tyro may leave it as dict)
+    if isinstance(job_config.s3_checkpoint, dict):
+        job_config.s3_checkpoint = S3CheckpointingConfig(**job_config.s3_checkpoint)
+
+    # Apply RUN_UUID from environment if provided
+    run_uuid = os.getenv("RUN_UUID")
+    if run_uuid:
+        job_config.s3_checkpoint.run_uuid = run_uuid
+        if not job_config.s3_checkpoint.remote_checkpoint_folder:
+            job_config.s3_checkpoint.remote_checkpoint_folder = f"torchtitan/{run_uuid}"
+        # Update dump folder to include run_uuid
+        job_config.job.dump_folder = f"./outputs/{run_uuid}"
+        logger.info(f"Using RUN_UUID: {run_uuid}")
+
+    # Apply RESUME_FROM_RUN_STEP from environment if provided
+    # Format: "{run_uuid}/step-{N}" (e.g., "16M-baseline-20251011-122516/step-10")
+    resume_from_run_step = os.getenv("RESUME_FROM_RUN_STEP")
+    if resume_from_run_step:
+        job_config.s3_checkpoint.resume_from_run_step = resume_from_run_step  # type: ignore[attr-defined]
+        logger.info(f"Will resume training from run step: {resume_from_run_step}")
 
     # If the user has requested a specific mosaic spec (e.g. "mosaic_llama3"),
     # it will have been registered already and get_train_spec will find it.
@@ -115,17 +139,35 @@ def main() -> None:  # noqa: C901, PLR0912, PLR0915
         s3_checkpointing_active = (
             job_config.s3_checkpoint.enable
             and bool(job_config.s3_checkpoint.bucket)
-            and bool(job_config.s3_checkpoint.prefix)
+            and job_config.s3_checkpoint.prefix is not None  # Empty string "" is valid!
+        )
+
+        logger.info(
+            f"[S3 DEBUG] S3 setup: active={s3_checkpointing_active}, "
+            f"is_checkpoint_writer={is_checkpoint_writer}, "
+            f"download_on_start={job_config.s3_checkpoint.download_on_start}, "
+            f"bucket={job_config.s3_checkpoint.bucket}, "
+            f"prefix={job_config.s3_checkpoint.prefix}"
         )
 
         if s3_checkpointing_active:
             if is_checkpoint_writer:
+                logger.info(
+                    "[S3 DEBUG] Creating S3 manager as checkpoint writer (with install=True)"
+                )
                 s3_manager = setup_s3_checkpointing(checkpointer, job_config)
                 download_manager = s3_manager
+                logger.info(
+                    f"[S3 DEBUG] s3_manager={s3_manager}, download_manager={download_manager}"
+                )
             elif job_config.s3_checkpoint.download_on_start:
+                logger.info(
+                    "[S3 DEBUG] Creating download-only S3 manager (with install=False)"
+                )
                 download_manager = setup_s3_checkpointing(
                     checkpointer, job_config, install=False
                 )
+                logger.info(f"[S3 DEBUG] download_manager={download_manager}")
 
         # Override WandB run name to include rank if save_for_all_ranks is enabled
         if job_config.metrics.save_for_all_ranks and job_config.metrics.enable_wandb:
@@ -139,8 +181,7 @@ def main() -> None:  # noqa: C901, PLR0912, PLR0915
                     wandb.run.name = new_name
                     wandb.run.save()
                     logger.info(
-                        f"Updated WandB run name from '{original_name}' to '{new_name}' "
-                        f"for rank {rank}"
+                        f"Updated WandB run name from '{original_name}' to '{new_name}' for rank {rank}"
                     )
             except ImportError:
                 logger.warning("wandb not available, skipping run name update")
@@ -157,15 +198,22 @@ def main() -> None:  # noqa: C901, PLR0912, PLR0915
             trainer.checkpointer.save(curr_step=0, last_step=True)
             logger.info("Created seed checkpoint")
         else:
+            logger.info(
+                f"[S3 DEBUG] download_manager={download_manager}, s3_checkpointing_active={s3_checkpointing_active}"
+            )
             if download_manager:
-                download_manager.download_if_needed(job_config.checkpoint.load_step)
+                logger.info("[S3 DEBUG] Calling download_manager.download_if_needed()")
+                download_manager.download_if_needed()  # type: ignore[attr-defined]
+                logger.info("[S3 DEBUG] download_if_needed() completed")
+            else:
+                logger.warning(
+                    "[S3 DEBUG] download_manager is None! S3 download will not occur."
+                )
             if s3_checkpointing_active and torch.distributed.is_initialized():
                 torch.distributed.barrier()
             trainer.train()
     finally:
-        for manager in {
-            m for m in (s3_manager, download_manager) if m is not None
-        }:
+        for manager in {m for m in (s3_manager, download_manager) if m is not None}:
             manager.close()
         if trainer:
             trainer.close()
