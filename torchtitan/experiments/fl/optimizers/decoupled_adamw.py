@@ -22,6 +22,8 @@ import torch.distributed.distributed_c10d as c10d
 from torch.distributed.tensor import DTensor
 from torch.optim import AdamW
 
+from ._decoupled_decay import _compute_decay_factor
+
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable
 
@@ -197,7 +199,7 @@ class DecoupledAdamW(AdamW):
             # Perform step weight decay
             if weight_decay != 0:
                 if decouple:
-                    decay_factor = (lr / initial_lr) if initial_lr else 1.0
+                    decay_factor = _compute_decay_factor(lr, initial_lr)
                     param.mul_(1 - decay_factor * weight_decay)
                 else:
                     param.mul_(1 - lr * weight_decay)
@@ -439,18 +441,14 @@ class DecoupledAdamW(AdamW):
             # NOTE: This is inverting the AdamW update step to get the actual
             # update step. The original implementation was wrong
             if weight_decay != 0 and decouple:
-                decay_factor = (lr / initial_lr) if initial_lr else 1.0
+                decay_factor = _compute_decay_factor(lr, initial_lr)
                 scaling_factor = (decay_factor * weight_decay) / (
                     1 - decay_factor * weight_decay
                 )
                 # Apply decoupled weight decay adjustment to the parameter update.
-                # This formula implements the decoupled weight decay as described in
-                # "Decoupled Weight Decay Regularization" (Loshchilov & Hutter, 2017).
-                # The scaling_factor adjusts the update to account for the decoupling of
-                # weight decay from the learning rate, ensuring the correct parameter update:
-                #   param = param - step_tensor - scaling_factor * (param + step_tensor)
-                # which is equivalent to:
-                #   step_tensor.mul_(1 + scaling_factor).add_(param, alpha=scaling_factor)
+                # This mirrors the formulation from "Decoupled Weight Decay Regularization"
+                # (Loshchilov & Hutter, 2017) by scaling both the update and parameter by
+                # `scaling_factor` before they are combined.
                 step_tensor.mul_(1 + scaling_factor).add_(param, alpha=scaling_factor)
             for metric in self.metric_functions:
                 optimizer_metrics[f"{metric}/{name}"] = self.metric_functions[metric](

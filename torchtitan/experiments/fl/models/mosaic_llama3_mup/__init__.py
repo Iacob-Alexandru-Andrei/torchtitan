@@ -15,7 +15,7 @@ from torchtitan.components.optimizer import OptimizersContainer
 from torchtitan.config import Optimizer as OptimizerConfig
 from torchtitan.distributed import ParallelDims
 from torchtitan.experiments.fl.components import build_metrics_processor
-
+from torchtitan.experiments.fl.configs.optimizers import MosaicOptimizerConfig
 from torchtitan.experiments.fl.dataloader.dataloader import build_mosaic_dataloader
 from torchtitan.experiments.fl.dataloader.tokenizer import build_mosaic_tokenizer
 from torchtitan.experiments.fl.models.llama3_mup.train_configs import (
@@ -25,13 +25,12 @@ from torchtitan.experiments.fl.optimizer_builder import build_mosaic_optimizers
 from torchtitan.protocols.train_spec import TokenizerBuilder, TrainSpec
 
 if TYPE_CHECKING:
-    from torchtitan.experiments.fl.configs.optimizers import MosaicOptimizerConfig
     from torchtitan.experiments.fl.models.llama3_mup.model.mup_model import Transformer
 
 
 def build_mosaic_mup_optimizers(
     model_parts: list[nn.Module],
-    optimizer_config: OptimizerConfig,
+    optimizer_config: OptimizerConfig | dict[str, Any],
     parallel_dims: ParallelDims,
     ft_manager: FTManager | None = None,
 ) -> OptimizersContainer:
@@ -42,15 +41,18 @@ def build_mosaic_mup_optimizers(
 
     Args:
         model_parts: List of model parts to optimize.
-        optimizer_config: Optimizer configuration.
+        optimizer_config: Optimizer configuration (or dict to be converted).
         parallel_dims: Parallel dimensions for distributed training.
         ft_manager: Optional fault tolerance manager.
 
     Returns:
         OptimizersContainer: Container with optimizers for each model part.
     """
-    # Cast to Transformer to access MuP-specific methods
+    # Convert dict to MosaicOptimizerConfig if needed
+    if isinstance(optimizer_config, dict):
+        optimizer_config = MosaicOptimizerConfig(**optimizer_config)
 
+    # Cast to Transformer to access MuP-specific methods
     model = cast("Transformer", model_parts[0])
 
     # Construct the initial kwargs dict from the config object.
