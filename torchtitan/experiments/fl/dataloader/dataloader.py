@@ -45,7 +45,9 @@ def _is_uri(path: str | None) -> bool:
 
 
 def _join_remote_path(root: str | None, path: str | None) -> str | None:
-    if path is None or _is_uri(path) or root is None or _is_uri(path):
+    if path is None or _is_uri(path):
+        return path
+    if root is None:
         return path
     if _is_uri(root):
         return f"{root.rstrip('/')}/{path.lstrip('/')}"
@@ -388,7 +390,24 @@ def build_mosaic_validation_dataloader(
     job_config: MosaicJobConfig,
     infinite: bool = False,  # noqa: ARG001 - kept for compatibility
 ) -> MosaicParallelAwareDataloader:
-    """Build a Mosaic dataloader for the validation split."""
+    """
+    Build a Mosaic dataloader for the validation split.
+
+    Parameters
+    ----------
+    dp_world_size : int
+        Data parallel world size.
+    dp_rank : int
+        Data parallel rank.
+    tokenizer : BaseTokenizer
+        Tokenizer instance.
+    job_config : MosaicJobConfig
+        Job configuration.
+    infinite : bool, optional
+        Unused parameter kept for compatibility with previous versions of the API.
+        It may be removed in a future release; downstream callers should not rely
+        on it.
+    """
 
     return _build_mosaic_dataloader(
         job_config=job_config,

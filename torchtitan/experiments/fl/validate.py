@@ -15,13 +15,12 @@ from torch.distributed.pipelining.schedules import _PipelineSchedule
 from torchtitan.components.loss import LossFunction
 from torchtitan.components.metrics import MetricsProcessor
 from torchtitan.components.tokenizer import BaseTokenizer
-from torchtitan.components.validate import BaseValidator, Validator
+from torchtitan.components.validate import Validator
 from torchtitan.distributed import ParallelDims
 from torchtitan.experiments.fl.configs.config import MosaicJobConfig
 from torchtitan.experiments.fl.dataloader.dataloader import (
     build_mosaic_validation_dataloader,
 )
-from torchtitan.tools.logging import logger
 
 
 class MosaicValidator(Validator):
@@ -42,27 +41,26 @@ class MosaicValidator(Validator):
         pp_has_first_stage: bool | None = None,
         pp_has_last_stage: bool | None = None,
     ) -> None:
-        BaseValidator.__init__(self, job_config)
-        self.parallel_dims = parallel_dims
-        self.loss_fn = loss_fn
+        super().__init__(
+            job_config=job_config,
+            dp_world_size=dp_world_size,
+            dp_rank=dp_rank,
+            tokenizer=tokenizer,
+            parallel_dims=parallel_dims,
+            loss_fn=loss_fn,
+            validation_context=validation_context,
+            maybe_enable_amp=maybe_enable_amp,
+            metrics_processor=metrics_processor,
+            pp_schedule=pp_schedule,
+            pp_has_first_stage=pp_has_first_stage,
+            pp_has_last_stage=pp_has_last_stage,
+        )
         self.validation_dataloader = build_mosaic_validation_dataloader(
             job_config=job_config,
             dp_world_size=dp_world_size,
             dp_rank=dp_rank,
             tokenizer=tokenizer,
         )
-        self.validation_context = validation_context
-        self.maybe_enable_amp = maybe_enable_amp
-        self.metrics_processor = metrics_processor
-        self.pp_schedule = pp_schedule
-        self.pp_has_first_stage = pp_has_first_stage
-        self.pp_has_last_stage = pp_has_last_stage
-
-        if self.job_config.validation.steps == -1:
-            logger.warning(
-                "Setting validation steps to -1 might cause hangs because of "
-                "unequal sample counts across ranks when dataset is exhausted."
-            )
 
 
 def build_mosaic_validator(
