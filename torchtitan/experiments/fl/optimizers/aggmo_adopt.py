@@ -7,18 +7,17 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, cast
+from typing import Any, cast, TYPE_CHECKING
 
 import torch
 from torch import Tensor
 from torch.optim.optimizer import (
+    _device_dtype_check_for_fused,
     _disable_dynamo_if_unsupported,
     _get_capturable_supported_devices,
     _get_scalar_dtype,
     _get_value,
     _use_grad_for_differentiable,
-    _view_as_real,
-    _device_dtype_check_for_fused,
     ParamsT,
 )
 from torch.types import Number  # noqa: TC002
@@ -26,8 +25,8 @@ from torch.types import Number  # noqa: TC002
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable, Sequence
 
-from ._decoupled_decay import compute_decoupled_weight_decay_factor
-from .qhadopt import QHADOPT, _default_clip_lambda
+from ._decoupled_decay import _compute_decay_factor
+from .qhadopt import _default_clip_lambda, QHADOPT
 
 
 _WEIGHT_SUM_TOL = 1e-8
@@ -53,29 +52,20 @@ def _sum_weights(moment_specs: Iterable[tuple[float, str]]) -> float:
     return sum(weight for weight, _ in moment_specs)
 
 
-def _compute_decay_factor(
-    lr: float | Tensor,
-    initial_lr: float | Tensor | None,
-) -> float | Tensor:
-    if initial_lr is None:
-        return 1.0
-    if isinstance(initial_lr, Tensor):
-        if cast("Tensor", (initial_lr == 0)).any().item():
-            return 1.0
-        return lr / initial_lr
-    if initial_lr == 0.0:
-        return 1.0
-    return lr / initial_lr
-
-
 class AggMoAdopt(QHADOPT):
-    """QHADOPT optimizer supporting an arbitrary number of first moment buffers."""
+    """QHADOPT optimizer supporting an arbitrary number of first moment buffers.
+
+    Args:
+        betas: Tuple of beta values where all elements except the last correspond to beta1_i
+               for each momentum buffer (indexed by vs), and the last element is beta2.
+               Length should be len(vs) + 1.
+    """
 
     def __init__(  # noqa: PLR0913
         self,
         params: ParamsT,
         lr: float | Tensor = 1e-3,
-        betas: tuple[float, float] = (0.999, 0.9999),
+        betas: tuple[float, ...] = (0.999, 0.9999),
         vs: tuple[float, ...] = (0.9,),
         eps: float = 1e-6,
         clip_lambda: (
@@ -91,10 +81,11 @@ class AggMoAdopt(QHADOPT):
         fused: bool | None = None,
     ) -> None:
         self._validate_vs_tuple(vs)
+        self._validate_betas_tuple(betas, vs)
         super().__init__(
             params,
             lr=lr,
-            betas=betas,
+            betas=betas,  # type: ignore[arg-type]
             vs=vs,
             eps=eps,
             clip_lambda=clip_lambda,
@@ -107,6 +98,7 @@ class AggMoAdopt(QHADOPT):
             fused=fused,
         )
         self._validate_param_groups()
+        self._setup_metric_functions(vs)
 
     def _validate_vs_tuple(self, vs: Sequence[float]) -> None:
         moment_specs = _build_moment_specs(vs)
@@ -115,10 +107,66 @@ class AggMoAdopt(QHADOPT):
             msg = f"Sum of vs coefficients must be <= 1. Got {total}."
             raise ValueError(msg)
 
+    def _validate_betas_tuple(
+        self, betas: Sequence[float], vs: Sequence[float]
+    ) -> None:
+        moment_specs = _build_moment_specs(vs)
+        num_moments = len(moment_specs)
+        if len(betas) != num_moments + 1:
+            msg = (
+                f"Length of betas must be len(vs non-zero moments) + 1. "
+                f"Got {len(betas)} betas for {num_moments} momentum buffers."
+            )
+            raise ValueError(msg)
+
     def _validate_param_groups(self) -> None:
         for group in self.param_groups:
             group_vs = cast("Sequence[float]", group["vs"])
+            group_betas = cast("Sequence[float]", group["betas"])
             self._validate_vs_tuple(group_vs)
+            self._validate_betas_tuple(group_betas, group_vs)
+
+    def _setup_metric_functions(self, vs: Sequence[float]) -> None:
+        """Setup metric functions for all momentum buffers dynamically."""
+        moment_specs = _build_moment_specs(vs)
+
+        # Create metrics for each first moment buffer
+        self.metric_functions = {}
+        for _, name in moment_specs:
+            self.metric_functions[
+                f"l2_norm/{name}"
+            ] = lambda _param, optim_state, _step_tensor, key=name: torch.linalg.vector_norm(
+                optim_state[key],
+            )
+
+        # Add metric for second moment (exp_avg_sq)
+        self.metric_functions[
+            "l2_norm/exp_avg_sq"
+        ] = lambda _param, optim_state, _step_tensor: torch.linalg.vector_norm(
+            optim_state["exp_avg_sq"],
+        )
+        self.metric_functions[
+            "min/exp_avg_sq"
+        ] = lambda _param, optim_state, _step_tensor: torch.min(
+            optim_state["exp_avg_sq"]
+        )
+        self.metric_functions[
+            "max/exp_avg_sq"
+        ] = lambda _param, optim_state, _step_tensor: torch.max(
+            optim_state["exp_avg_sq"]
+        )
+
+        # Keep param and update metrics
+        self.metric_functions[
+            "l2_norm/param"
+        ] = lambda param, _optim_state, _step_tensor: torch.linalg.vector_norm(
+            param.data
+        )
+        self.metric_functions[
+            "l2_norm/update"
+        ] = lambda _param, _optim_state, step_tensor: torch.linalg.vector_norm(
+            step_tensor
+        )
 
     def _prepare_param_state(
         self,
@@ -185,7 +233,9 @@ class AggMoAdopt(QHADOPT):
                 loss = closure()
 
         for group in self.param_groups:
-            beta1, beta2 = cast("tuple[float, float]", group["betas"])
+            betas = cast("Sequence[float]", group["betas"])
+            beta1s = betas[:-1]  # All but the last are beta1_i values
+            beta2 = betas[-1]  # Last is beta2
             moment_specs = _build_moment_specs(cast("Sequence[float]", group["vs"]))
             grad_coeff = 1.0 - _sum_weights(moment_specs)
             if grad_coeff < -_WEIGHT_SUM_TOL:
@@ -232,7 +282,7 @@ class AggMoAdopt(QHADOPT):
                 initial_lr=group["initial_lr"],
                 decouple=group["decouple"],
                 clip_lambda=self.clip_lambda,
-                beta1=beta1,
+                beta1s=beta1s,
                 beta2=beta2,
                 vs=[weight for weight, _ in moment_specs],
                 lr=group["lr"],
@@ -260,7 +310,6 @@ class AggMoAdopt(QHADOPT):
         weight_decay = self.param_groups[0]["weight_decay"]
         initial_lr = self.param_groups[0]["initial_lr"]
         decouple = self.param_groups[0]["decouple"]
-        beta1, beta2 = self.param_groups[0]["betas"]
         moment_specs = _build_moment_specs(
             cast("Sequence[float]", self.param_groups[0]["vs"])
         )
@@ -287,7 +336,7 @@ class AggMoAdopt(QHADOPT):
             step_tensor = qh_update * lr
 
             if weight_decay != 0 and decouple:
-                decay_factor = compute_decoupled_weight_decay_factor(lr, initial_lr)
+                decay_factor = _compute_decay_factor(lr, initial_lr)
                 scaling_factor = (decay_factor * weight_decay) / (
                     1 - decay_factor * weight_decay
                 )
@@ -317,7 +366,7 @@ def _single_tensor_aggmo_qhadopt(  # noqa: C901, PLR0913
     initial_lr: float | Tensor | None,
     decouple: bool,
     clip_lambda: Callable[[Number | Tensor | Any], float] | None,
-    beta1: float,
+    beta1s: Sequence[float],
     beta2: float,
     vs: Sequence[float],
     lr: float | Tensor,
@@ -356,10 +405,10 @@ def _single_tensor_aggmo_qhadopt(  # noqa: C901, PLR0913
             grad = grad.add(param, alpha=weight_decay)
 
         if torch.is_complex(param):
-            grad = _view_as_real(grad)
-            exp_avg_sq = _view_as_real(exp_avg_sq)
-            param = _view_as_real(param)  # noqa: PLW2901
-            buffers = [_view_as_real(buf) for buf in buffers]
+            grad = torch.view_as_real(grad)
+            exp_avg_sq = torch.view_as_real(exp_avg_sq)
+            param = torch.view_as_real(param)  # noqa: PLW2901
+            buffers = [torch.view_as_real(buf) for buf in buffers]
 
         if step == 0:
             exp_avg_sq.addcmul_(grad, grad)
@@ -367,7 +416,7 @@ def _single_tensor_aggmo_qhadopt(  # noqa: C901, PLR0913
             continue
 
         if weight_decay != 0 and decouple:
-            decay_factor = compute_decoupled_weight_decay_factor(lr, initial_lr)
+            decay_factor = _compute_decay_factor(lr, initial_lr)
             param.mul_(1 - decay_factor * weight_decay)
 
         denom = torch.clamp(exp_avg_sq.sqrt(), eps)
@@ -376,8 +425,9 @@ def _single_tensor_aggmo_qhadopt(  # noqa: C901, PLR0913
             clip = clip_lambda(step)
             normed_grad.clamp_(-clip, clip)
 
-        for buf in buffers:
-            buf.lerp_(normed_grad, 1 - beta1)
+        # Update each momentum buffer with its own beta1_i
+        for buf, beta1_i in zip(buffers, beta1s, strict=True):
+            buf.lerp_(normed_grad, 1 - beta1_i)
 
         update = normed_grad.mul(grad_coeff)
         for (weight, _), buf in zip(moment_specs, buffers, strict=True):
@@ -405,7 +455,7 @@ def aggmo_qhadopt(  # noqa: PLR0913, D103
     grad_scale: Tensor | None = None,
     found_inf: Tensor | None = None,
     has_complex: bool = False,
-    beta1: float,
+    beta1s: Sequence[float],
     beta2: float,
     vs: Sequence[float],
     lr: float | Tensor,
@@ -432,7 +482,7 @@ def aggmo_qhadopt(  # noqa: PLR0913, D103
         initial_lr=initial_lr,
         decouple=decouple,
         clip_lambda=clip_lambda,
-        beta1=beta1,
+        beta1s=beta1s,
         beta2=beta2,
         vs=vs,
         lr=lr,

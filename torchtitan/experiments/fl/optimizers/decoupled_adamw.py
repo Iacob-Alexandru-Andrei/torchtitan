@@ -22,7 +22,8 @@ import torch.distributed.distributed_c10d as c10d
 from torch.distributed.tensor import DTensor
 from torch.optim import AdamW
 
-from ._decoupled_decay import compute_decoupled_weight_decay_factor
+from ._decoupled_decay import _compute_decay_factor
+
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable
 
@@ -198,7 +199,7 @@ class DecoupledAdamW(AdamW):
             # Perform step weight decay
             if weight_decay != 0:
                 if decouple:
-                    decay_factor = compute_decoupled_weight_decay_factor(lr, initial_lr)
+                    decay_factor = _compute_decay_factor(lr, initial_lr)
                     param.mul_(1 - decay_factor * weight_decay)
                 else:
                     param.mul_(1 - lr * weight_decay)
@@ -440,7 +441,7 @@ class DecoupledAdamW(AdamW):
             # NOTE: This is inverting the AdamW update step to get the actual
             # update step. The original implementation was wrong
             if weight_decay != 0 and decouple:
-                decay_factor = compute_decoupled_weight_decay_factor(lr, initial_lr)
+                decay_factor = _compute_decay_factor(lr, initial_lr)
                 scaling_factor = (decay_factor * weight_decay) / (
                     1 - decay_factor * weight_decay
                 )

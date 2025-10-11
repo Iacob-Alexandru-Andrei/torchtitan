@@ -12,6 +12,94 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from torchtitan.config import JobConfig
+from torchtitan.experiments.fl.configs.optimizers import MosaicOptimizerConfig
+
+
+@dataclass
+class OptimizerMonitorConfig:
+    """Configuration for optimizer monitoring."""
+
+    interval: int = field(
+        default=10,
+        metadata={
+            "help": "Interval (in steps) for the optimizer monitor to log metrics. "
+            "Set to 0 to disable optimizer monitoring."
+        },
+    )
+
+    only_global: bool = field(
+        default=True,
+        metadata={
+            "help": "If True, only log global aggregated metrics. If False, log per-parameter metrics as well."
+        },
+    )
+
+    log_metrics: bool = field(
+        default=True,
+        metadata={
+            "help": "If True, log detailed optimizer metrics (moments, updates, etc.). "
+            "If False, only log gradient norms."
+        },
+    )
+
+    gradient_accumulation_steps: int = field(
+        default=1,
+        metadata={"help": "Number of gradient accumulation steps."},
+    )
+
+    enabled_metrics: set[str] | None = field(
+        default=None,
+        metadata={"help": "Set of enabled metrics. If None, all metrics are enabled."},
+    )
+
+
+@dataclass
+class ActivationMonitorConfig:
+    """Configuration for activation monitoring."""
+
+    enabled: bool = field(
+        default=False,
+        metadata={"help": "Enable logging of full-model activation statistics."},
+    )
+
+    interval: int = field(
+        default=25,
+        metadata={
+            "help": "Training step interval for activation monitoring. Set to 0 to disable."
+        },
+    )
+
+    ignore_module_types: tuple[str, ...] = field(
+        default_factory=tuple,
+        metadata={
+            "help": "Optional substrings of module qualified names to skip when collecting activations."
+        },
+    )
+
+    gradient_accumulation_steps: int = field(
+        default=1,
+        metadata={"help": "Number of gradient accumulation steps."},
+    )
+
+    enabled_metrics: set[str] | None = field(
+        default=None,
+        metadata={"help": "Set of enabled metrics. If None, all metrics are enabled."},
+    )
+
+
+@dataclass
+class MetricsConfig:
+    """Configuration for all metrics and monitoring."""
+
+    optimizer_monitor: OptimizerMonitorConfig = field(
+        default_factory=OptimizerMonitorConfig,
+        metadata={"help": "Configuration for optimizer monitoring."},
+    )
+
+    activation_monitor: ActivationMonitorConfig = field(
+        default_factory=ActivationMonitorConfig,
+        metadata={"help": "Configuration for activation monitoring."},
+    )
 
 
 @dataclass
@@ -20,6 +108,14 @@ class MosaicJobConfig(JobConfig):
 
     It inherits from the base `JobConfig` and adds Mosaic-specific sections.
     """
+
+    # Override optimizer field to use MosaicOptimizerConfig
+    optimizer: MosaicOptimizerConfig = field(  # type: ignore[assignment]
+        default_factory=MosaicOptimizerConfig,
+        metadata={
+            "help": "Optimizer configuration with extended options for Mosaic optimizers (vs, betas)."
+        },
+    )
 
     # python-explicit-any
     mosaic_dataloader: dict[str, Any] = field(
@@ -38,46 +134,9 @@ class MosaicJobConfig(JobConfig):
         },
     )
 
-    optimizer_monitor_interval: int = field(
-        default=10,
+    fl_metrics: MetricsConfig = field(
+        default_factory=MetricsConfig,
         metadata={
-            "help": "Interval (in steps) for the optimizer monitor to log metrics. "
-            "Set to 0 to disable optimizer monitoring."
-        },
-    )
-
-    optimizer_monitor_only_global: bool = field(
-        default=True,
-        metadata={
-            "help": "If True, only log global aggregated metrics. If False, log per-parameter metrics as well."
-        },
-    )
-
-    optimizer_monitor_log_metrics: bool = field(
-        default=True,
-        metadata={
-            "help": "If True, log detailed optimizer metrics (moments, updates, etc.). "
-            "If False, only log gradient norms."
-        },
-    )
-
-    activation_monitor_enabled: bool = field(
-        default=False,
-        metadata={
-            "help": "Enable logging of full-model activation statistics."
-        },
-    )
-
-    activation_monitor_interval: int = field(
-        default=25,
-        metadata={
-            "help": "Training step interval for activation monitoring. Set to 0 to disable."
-        },
-    )
-
-    activation_monitor_ignore_module_types: tuple[str, ...] = field(
-        default_factory=tuple,
-        metadata={
-            "help": "Optional substrings of module qualified names to skip when collecting activations."
+            "help": "Configuration for FL-specific metrics and monitoring (optimizer and activation monitors)."
         },
     )

@@ -23,13 +23,11 @@ from torch.optim.optimizer import (
     _get_scalar_dtype,
     _get_value,
     _use_grad_for_differentiable,
-    _view_as_real,
     Optimizer,
     ParamsT,
 )
 
-
-from ._decoupled_decay import compute_decoupled_weight_decay_factor
+from ._decoupled_decay import _compute_decay_factor
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -492,7 +490,7 @@ class QHAdamW(Optimizer):
 
             # Apply weight decay adjustment if decoupled
             if weight_decay != 0 and decouple:
-                decay_factor = compute_decoupled_weight_decay_factor(lr, initial_lr)
+                decay_factor = _compute_decay_factor(lr, initial_lr)
                 scaling_factor = (decay_factor * weight_decay) / (
                     1 - decay_factor * weight_decay
                 )
@@ -572,7 +570,7 @@ def _single_tensor_qhadamw(  # noqa: PLR0913
             param_data = param
 
         if weight_decay != 0 and decouple:
-            decay_factor = compute_decoupled_weight_decay_factor(lr, initial_lr)
+            decay_factor = _compute_decay_factor(lr, initial_lr)
             param_data.mul_(1.0 - decay_factor * weight_decay)
 
         exp_avg.mul_(beta1).add_(grad, alpha=1 - beta1)
@@ -600,7 +598,9 @@ def _single_tensor_qhadamw(  # noqa: PLR0913
             denom = (exp_avg_sq.sqrt() / bc2_sqrt).add_(eps)
 
         m_hat = exp_avg / bias_correction1
-        qh_numerator = grad.lerp(m_hat, v1)
+        # Compute lerp manually to avoid DTensor dispatch issues with scalar v1
+        # Equivalent to: grad.lerp(m_hat, v1)
+        qh_numerator = grad * (1.0 - v1) + m_hat * v1
         param_data.addcdiv_(qh_numerator, denom, value=-_get_value(lr))
 
 
@@ -711,7 +711,9 @@ def _multi_tensor_qhadamw(  # noqa: C901, PLR0913, PLR0912, PLR0915
             ]
             if amsgrad:
                 args_to_view.append(device_max_exp_avg_sqs)
-            _view_as_real(*args_to_view)
+            for j, t in enumerate(args_to_view):
+                for i in range(len(t)):
+                    args_to_view[j][i] = torch.view_as_real(t[i])
 
         if maximize:
             device_grads = torch._foreach_neg(device_grads)
@@ -731,7 +733,7 @@ def _multi_tensor_qhadamw(  # noqa: C901, PLR0913, PLR0912, PLR0915
                 )
 
         if weight_decay != 0 and decouple:
-            decay_factor = compute_decoupled_weight_decay_factor(lr, initial_lr)
+            decay_factor = _compute_decay_factor(lr, initial_lr)
 
             weight_decay_term = (
                 decay_factor * weight_decay
@@ -772,7 +774,10 @@ def _multi_tensor_qhadamw(  # noqa: C901, PLR0913, PLR0912, PLR0915
         torch._foreach_add_(exp_avg_sq_sqrt, eps)
 
         m_hats = torch._foreach_div(device_exp_avgs, bias_correction1)
-        qh_numerators = torch._foreach_lerp(device_grads, m_hats, v1)
+        # Compute lerp manually to avoid DTensor dispatch issues with scalar v1
+        # Equivalent to: lerp(device_grads, m_hats, v1)
+        qh_numerators = torch._foreach_mul(device_grads, 1.0 - v1)
+        torch._foreach_add_(qh_numerators, m_hats, alpha=v1)
 
         if capturable:
             torch._foreach_addcdiv_(

@@ -16,6 +16,11 @@ import torch
 
 from torchtitan.components.metrics import MetricsProcessor
 from torchtitan.distributed import utils as dist_utils
+from torchtitan.experiments.fl.configs.config import (
+    ActivationMonitorConfig,
+    MetricsConfig,
+    OptimizerMonitorConfig,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -623,12 +628,32 @@ class FLMetricsProcessor(MetricsProcessor):
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
-        # Get the optimizer monitor parameters from config with defaults
-        interval = getattr(self.job_config, "optimizer_monitor_interval", 10)
-        only_global = getattr(self.job_config, "optimizer_monitor_only_global", True)
-        log_optimizer_metrics = getattr(
-            self.job_config, "optimizer_monitor_log_metrics", True
-        )
+
+        # Get metrics config from fl_metrics field
+        fl_metrics_raw = self.job_config.fl_metrics  # type: ignore[attr-defined]
+
+        # Convert dict to dataclass if needed
+        if isinstance(fl_metrics_raw, dict):
+            optimizer_monitor_dict = fl_metrics_raw.get("optimizer_monitor", {})
+            activation_monitor_dict = fl_metrics_raw.get("activation_monitor", {})
+
+            optimizer_config = OptimizerMonitorConfig(**optimizer_monitor_dict)
+            activation_config = ActivationMonitorConfig(**activation_monitor_dict)
+            fl_metrics_config = MetricsConfig(
+                optimizer_monitor=optimizer_config, activation_monitor=activation_config
+            )
+        else:
+            fl_metrics_config = fl_metrics_raw
+
+        optimizer_config = fl_metrics_config.optimizer_monitor
+        interval = optimizer_config.interval
+        only_global = optimizer_config.only_global
+        log_optimizer_metrics = optimizer_config.log_metrics
+
+        activation_config = fl_metrics_config.activation_monitor
+        activation_enabled = activation_config.enabled
+        activation_interval = activation_config.interval
+        ignore_types = activation_config.ignore_module_types
 
         self.optimizer_monitor = OptimizerMonitor(
             interval=interval,
@@ -636,41 +661,12 @@ class FLMetricsProcessor(MetricsProcessor):
             log_optimizer_metrics=log_optimizer_metrics,
         )
 
-        activation_enabled = getattr(
-            self.job_config, "activation_monitor_enabled", False
-        )
         if activation_enabled:
-            activation_interval = getattr(
-                self.job_config, "activation_monitor_interval", 25
-            )
-            ignore_types = getattr(
-                self.job_config,
-                "activation_monitor_ignore_module_types",
-                (),
-            )
-            if ignore_types is None:
-                ignore_types = ()
-            grad_accum_steps = getattr(
-                getattr(self.job_config, "training", None),
-                "gradient_accumulation_steps",
-                1,
-            )
-
-            # Get enabled metrics from config, or use None for defaults
-            enabled_metrics_list = getattr(
-                self.job_config,
-                "activation_monitor_enabled_metrics",
-                None,
-            )
-            enabled_metrics = (
-                set(enabled_metrics_list) if enabled_metrics_list is not None else None
-            )
-
             self.activation_monitor: ActivationMonitor | None = ActivationMonitor(
                 interval=activation_interval,
-                ignore_module_types=ignore_types,
-                gradient_accumulation_steps=grad_accum_steps,
-                enabled_metrics=enabled_metrics,
+                ignore_module_types=ignore_types if ignore_types else (),
+                gradient_accumulation_steps=activation_config.gradient_accumulation_steps,
+                enabled_metrics=activation_config.enabled_metrics,
             )
         else:
             self.activation_monitor = None

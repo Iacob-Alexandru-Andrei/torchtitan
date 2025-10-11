@@ -17,12 +17,19 @@ from torchtitan.components.optimizer import (
 )
 from torchtitan.distributed import ParallelDims
 from torchtitan.experiments.fl.configs.optimizers import MosaicOptimizerConfig
-from torchtitan.experiments.fl.optimizers import ADOPT, DecoupledAdamW, QHAdamW, QHADOPT
+from torchtitan.experiments.fl.optimizers import (
+    ADOPT,
+    AggMoAdamW,
+    AggMoAdopt,
+    DecoupledAdamW,
+    QHAdamW,
+    QHADOPT,
+)
 
 
 def build_mosaic_optimizers(  # noqa: C901
     model_parts: list[torch.nn.Module],
-    optimizer_config: MosaicOptimizerConfig,
+    optimizer_config: MosaicOptimizerConfig | dict[str, Any],
     parallel_dims: ParallelDims,
     ft_manager: FTManager | None = None,
     param_groups: list[dict[str, Any]] | None = None,
@@ -31,12 +38,16 @@ def build_mosaic_optimizers(  # noqa: C901
 
     Args:
         model_parts: List of model parts to optimize.
-        optimizer_config: Configuration for the optimizer.
+        optimizer_config: Configuration for the optimizer (or dict to be converted).
         parallel_dims: Parallel dimensions information.
         ft_manager: Optional FTManager for using TorchFT.
         param_groups: Optional parameter groups for the optimizer.
 
     """
+    # Convert dict to MosaicOptimizerConfig if needed
+    if isinstance(optimizer_config, dict):
+        optimizer_config = MosaicOptimizerConfig(**optimizer_config)
+
     optim_in_bwd = optimizer_config.early_step_in_backward
     if optim_in_bwd:
         if parallel_dims.ep_enabled:
@@ -62,15 +73,6 @@ def build_mosaic_optimizers(  # noqa: C901
     fused = optim_implementation == "fused"
     foreach = optim_implementation == "foreach"
 
-    optimizer_kwargs: dict[str, Any] = {
-        "lr": lr,
-        "betas": (beta1, beta2),
-        "eps": eps,
-        "weight_decay": weight_decay,
-        "fused": fused,
-        "foreach": foreach,
-    }
-
     optimizer_classes = {
         "Adam": torch.optim.Adam,
         "AdamW": torch.optim.AdamW,
@@ -78,17 +80,35 @@ def build_mosaic_optimizers(  # noqa: C901
         "QHADOPT": QHADOPT,
         "QHAdamW": QHAdamW,
         "DecoupledAdamW": DecoupledAdamW,
+        "AggMoAdopt": AggMoAdopt,
+        "AggMoAdamW": AggMoAdamW,
     }
     if name not in optimizer_classes:
         msg = f"Optimizer {name} not added."
         raise NotImplementedError(msg)
     optimizer_cls = optimizer_classes[name]
 
-    if name in ["QHADOPT", "QHAdamW"]:
+    # For AggMo optimizers, use get_betas_tuple() to construct proper betas
+    betas = (
+        optimizer_config.get_betas_tuple()
+        if name in ["AggMoAdopt", "AggMoAdamW"]
+        else (beta1, beta2)
+    )
+
+    optimizer_kwargs: dict[str, Any] = {
+        "lr": lr,
+        "betas": betas,
+        "eps": eps,
+        "weight_decay": weight_decay,
+        "fused": fused,
+        "foreach": foreach,
+    }
+
+    if name in ["QHADOPT", "QHAdamW", "AggMoAdopt", "AggMoAdamW"]:
         optimizer_kwargs["vs"] = optimizer_config.vs
-    if name in ["ADOPT", "QHADOPT"]:
+    if name in ["ADOPT", "QHADOPT", "AggMoAdopt"]:
         optimizer_kwargs["clip_lambda"] = None
-    if name == "DecoupledAdamW":
+    if name in ["DecoupledAdamW", "AggMoAdopt", "AggMoAdamW"]:
         optimizer_kwargs["decouple"] = getattr(optimizer_config, "decouple", True)
 
     if optim_in_bwd:

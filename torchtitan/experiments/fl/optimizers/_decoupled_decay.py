@@ -1,3 +1,9 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+# All rights reserved.
+#
+# This source code is licensed under the BSD-style license found in the
+# LICENSE file in the root directory of this source tree.
+
 """Shared helpers for decoupled weight decay handling."""
 
 from __future__ import annotations
@@ -6,7 +12,7 @@ import torch
 from torch import Tensor
 
 
-def compute_decoupled_weight_decay_factor(
+def _compute_decay_factor(
     lr: float | Tensor, initial_lr: float | Tensor | None
 ) -> float | Tensor:
     """Return the scaling factor used for decoupled weight decay.
@@ -29,5 +35,4 @@ def compute_decoupled_weight_decay_factor(
     return lr / initial_lr
 
 
-__all__ = ["compute_decoupled_weight_decay_factor"]
-
+__all__ = ["_compute_decay_factor"]
