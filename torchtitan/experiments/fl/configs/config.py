@@ -11,6 +11,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
+from torchtitan.components.ft.config import FaultTolerance as FTFaultTolerance
+
 from torchtitan.config import JobConfig
 from torchtitan.experiments.fl.configs.optimizers import MosaicOptimizerConfig
 
@@ -29,7 +31,9 @@ class OptimizerMonitorConfig:
 
     only_global: bool = field(
         default=True,
-        metadata={"help": "If True, only log global aggregated metrics. If False, log per-parameter metrics as well."},
+        metadata={
+            "help": "If True, only log global aggregated metrics. If False, log per-parameter metrics as well."
+        },
     )
 
     log_metrics: bool = field(
@@ -62,12 +66,16 @@ class ActivationMonitorConfig:
 
     interval: int = field(
         default=25,
-        metadata={"help": "Training step interval for activation monitoring. Set to 0 to disable."},
+        metadata={
+            "help": "Training step interval for activation monitoring. Set to 0 to disable."
+        },
     )
 
     ignore_module_types: tuple[str, ...] = field(
         default_factory=tuple,
-        metadata={"help": "Optional substrings of module qualified names to skip when collecting activations."},
+        metadata={
+            "help": "Optional substrings of module qualified names to skip when collecting activations."
+        },
     )
 
     gradient_accumulation_steps: int = field(
@@ -97,6 +105,47 @@ class MetricsConfig:
 
 
 @dataclass
+class UnigramMetricConfig:
+    """Configuration for unigram cross entropy metrics."""
+
+    enable: bool = field(
+        default=False,
+        metadata={
+            "help": "Enable unigram cross entropy metrics backed by 1_gram.json frequency files."
+        },
+    )
+    download_missing: bool = field(
+        default=True,
+        metadata={
+            "help": "Download missing 1_gram.json files from remote storage when not present locally."
+        },
+    )
+    allow_failures: bool = field(
+        default=False,
+        metadata={
+            "help": "Allow missing unigram files without raising if download fails."
+        },
+    )
+    ignore_index: int = field(
+        default=-100,
+        metadata={
+            "help": "Label value that should be ignored when accumulating unigram metrics."
+        },
+    )
+    num_attempts: int = field(
+        default=3,
+        metadata={"help": "Number of attempts when downloading missing unigram files."},
+    )
+    # python-explicit-any
+    client_config: dict[str, Any] = field(
+        default_factory=dict,
+        metadata={
+            "help": "Optional boto client configuration used when fetching unigram files from S3."
+        },
+    )
+
+
+@dataclass
 class S3CheckpointingConfig:
     """Configuration for syncing checkpoints with S3."""
 
@@ -114,7 +163,9 @@ class S3CheckpointingConfig:
     )
     run_uuid: str | None = field(
         default=None,
-        metadata={"help": "Optional unique identifier appended to remote checkpoint paths."},
+        metadata={
+            "help": "Optional unique identifier appended to remote checkpoint paths."
+        },
     )
     num_attempts: int = field(
         default=3,
@@ -125,7 +176,9 @@ class S3CheckpointingConfig:
     # python-explicit-any
     client_config: dict[str, Any] = field(
         default_factory=dict,
-        metadata={"help": "Optional boto client configuration forwarded to the RemoteUploaderDownloader backend."},
+        metadata={
+            "help": "Optional boto client configuration forwarded to the RemoteUploaderDownloader backend."
+        },
     )
     num_concurrent_uploads: int = field(
         default=1,
@@ -139,7 +192,9 @@ class S3CheckpointingConfig:
     )
     use_procs: bool = field(
         default=True,
-        metadata={"help": "Whether to use multiprocessing workers inside the remote uploader/downloader."},
+        metadata={
+            "help": "Whether to use multiprocessing workers inside the remote uploader/downloader."
+        },
     )
     remote_checkpoint_folder: str | None = field(
         default=None,
@@ -150,7 +205,9 @@ class S3CheckpointingConfig:
     )
     download_on_start: bool = field(
         default=True,
-        metadata={"help": "Download a checkpoint from S3 before training when no local checkpoints are present."},
+        metadata={
+            "help": "Download a checkpoint from S3 before training when no local checkpoints are present."
+        },
     )
     resume_from_run_step: str | None = field(
         default=None,
@@ -175,7 +232,9 @@ class MosaicJobConfig(JobConfig):
     # Override optimizer field to use MosaicOptimizerConfig
     optimizer: MosaicOptimizerConfig = field(  # type: ignore[assignment]
         default_factory=MosaicOptimizerConfig,
-        metadata={"help": "Optimizer configuration with extended options for Mosaic optimizers (vs, betas)."},
+        metadata={
+            "help": "Optimizer configuration with extended options for Mosaic optimizers (vs, betas)."
+        },
     )
 
     # python-explicit-any
@@ -201,10 +260,27 @@ class MosaicJobConfig(JobConfig):
 
     fl_metrics: MetricsConfig = field(
         default_factory=MetricsConfig,
-        metadata={"help": "Configuration for FL-specific metrics and monitoring (optimizer and activation monitors)."},
+        metadata={
+            "help": "Configuration for FL-specific metrics and monitoring (optimizer and activation monitors)."
+        },
+    )
+    unigram_metric: UnigramMetricConfig = field(
+        default_factory=UnigramMetricConfig,
+        metadata={
+            "help": "Configuration for unigram cross entropy metrics derived from Mosaic stream frequency files."
+        },
     )
 
     s3_checkpoint: S3CheckpointingConfig = field(
         default_factory=S3CheckpointingConfig,
-        metadata={"help": "Configuration for synchronizing checkpoints with S3 storage."},
+        metadata={
+            "help": "Configuration for synchronizing checkpoints with S3 storage."
+        },
+    )
+
+    fault_tolerance: FTFaultTolerance = field(
+        default_factory=FTFaultTolerance,
+        metadata={
+            "help": "Fault tolerance configuration with TorchFT-specific options."
+        },
     )

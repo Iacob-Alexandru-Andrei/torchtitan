@@ -28,10 +28,18 @@ hf_assets_path = "./tests/assets/tokenizer"
 
 [optimizer]
 name = "ADOPT"
-lr = 1e-4
+lr = 4e-4
 eps = 1e-8
 betas = [0.9,0.99]
+vs = [0.98]
 implementation = "foreach"
+
+# [optimizer.desloc]
+# enabled = true
+# param_sync_every = 32
+# optimizer_sync_every = [64,128]
+# backup_device = "cpu"
+# pin_memory = true
 
 [fl_metrics.optimizer_monitor]
 interval = 1
@@ -52,7 +60,7 @@ min_lr_factor = 0.0
 local_batch_size = 8
 seq_len = 2048
 max_norm = 1.0  # grad norm clipping
-steps = 20
+steps = 512
 dataset = "c4_test"  # supported datasets: c4_test (2K), c4 (177M)
 
 # Mosaic-specific configurations are now at the root level
@@ -80,8 +88,7 @@ batching_method = "random"
 split = "train"
 root_remote = "s3://smollm-corpus/shared"
 root_local = "/nfs-share/datasets/photon/dataset_cache/smollm-corpus-shared"
-sampling_groups_mode = "concatenate"  # set to "concatenate" to merge all sampling groups, grouped to separate
-
+sampling_groups_mode = "grouped"  # set to "concatenate" to merge all sampling groups
 
 [mosaic_dataloader.dataset.train.streams.client_streams.stream_0]
 local = "fineweb_edu_dedup/client_0"
@@ -106,7 +113,7 @@ split = "train"
 root_remote = "s3://smollm-corpus/shared"
 root_local = "/nfs-share/datasets/photon/dataset_cache/smollm-corpus-shared-val"
 subset_num_samples = 512
-sampling_groups_mode = "concatenate"
+sampling_groups_mode = "grouped"
 
 [mosaic_dataloader.dataset.val.streams.client_streams.stream_0]
 local = "fineweb_edu_dedup/client_0"
@@ -123,6 +130,7 @@ streams = ["stream_0"]
 
 [mosaic_dataloader.dataset.val.sampling_groups.group_1]
 streams = ["stream_1"]
+
 
 [mosaic_tokenizer]
 name = "HuggingFaceTB/SmolLM-1.7B"
@@ -167,6 +175,15 @@ enable_fsdp_float8_all_gather = false
 precompute_float8_dynamic_scale_for_fsdp = false
 filter_fqns = ["output"]
 
+[fault_tolerance]
+enable = true
+process_group = "nccl"
+process_group_timeout_ms = 10000
+replica_id = 0
+group_size = 2
+min_replica_size = 2
+sync_steps = 32
+semi_sync_method = "local_sgd"  # Options: "diloco", "local_sgd", or comment out for async quorum
 
 [validation]
 enable = false
@@ -174,10 +191,9 @@ dataset = "c4_validation"
 freq = 5
 steps = 32
 
-
 [unigram_metric]
 enable = true
 download_missing = true
-allow_failures = false
+allow_failures = true
 ignore_index = -100
-num_attempts = 1
+num_attempts = 3

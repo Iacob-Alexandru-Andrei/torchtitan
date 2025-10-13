@@ -33,6 +33,12 @@ from torchtitan.tools.profiling import (
     maybe_enable_profiling,
 )
 
+try:
+    from torchtitan.experiments.fl.metrics import update_unigram_metrics
+except ImportError:  # pragma: no cover - optional dependency
+    def update_unigram_metrics(labels: torch.Tensor) -> None:  # type: ignore[arg-type]
+        return
+
 
 class Trainer(torch.distributed.checkpoint.stateful.Stateful):
     # core configs
@@ -133,9 +139,7 @@ class Trainer(torch.distributed.checkpoint.stateful.Stateful):
 
         # build tokenizer and dataloader
         self.tokenizer = (
-            self.train_spec.build_tokenizer_fn(job_config)
-            if self.train_spec.build_tokenizer_fn is not None
-            else None
+            self.train_spec.build_tokenizer_fn(job_config) if self.train_spec.build_tokenizer_fn is not None else None
         )
 
         self.dataloader = self.train_spec.build_dataloader_fn(
@@ -151,9 +155,7 @@ class Trainer(torch.distributed.checkpoint.stateful.Stateful):
         model_args.update_from_config(job_config)
         self.model_args = model_args
 
-        logger.info(
-            f"Building {self.train_spec.name} {job_config.model.flavor} with {model_args}"
-        )
+        logger.info(f"Building {self.train_spec.name} {job_config.model.flavor} with {model_args}")
         with (
             torch.device("meta"),
             utils.set_default_dtype(TORCH_DTYPE_MAP[job_config.training.dtype]),
@@ -170,9 +172,7 @@ class Trainer(torch.distributed.checkpoint.stateful.Stateful):
             if self.train_spec.build_metrics_processor_fn is None
             else self.train_spec.build_metrics_processor_fn
         )
-        self.metrics_processor = build_metrics_processor_fn(
-            job_config, parallel_dims, model_args
-        )
+        self.metrics_processor = build_metrics_processor_fn(job_config, parallel_dims, model_args)
         color = self.metrics_processor.color
 
         # calculate model size and flops per token
@@ -206,22 +206,16 @@ class Trainer(torch.distributed.checkpoint.stateful.Stateful):
             # step.
             global_batch_size = job_config.training.local_batch_size * dp_degree
         assert global_batch_size > 0
-        assert (
-            global_batch_size % (job_config.training.local_batch_size * dp_degree) == 0
-        ), (
+        assert global_batch_size % (job_config.training.local_batch_size * dp_degree) == 0, (
             f"global batch size must be multiple of local batch size times "
             f"data-parallel degree ({global_batch_size} "
             f"% ({job_config.training.local_batch_size} * {dp_degree}) != 0)"
         )
 
         # calculate gradient accumulation steps
-        self.gradient_accumulation_steps = global_batch_size // (
-            job_config.training.local_batch_size * dp_degree
-        )
+        self.gradient_accumulation_steps = global_batch_size // (job_config.training.local_batch_size * dp_degree)
         assert self.gradient_accumulation_steps > 0
-        self.loss_fn = rescale_accumulated_loss(
-            self.loss_fn, self.gradient_accumulation_steps
-        )
+        self.loss_fn = rescale_accumulated_loss(self.loss_fn, self.gradient_accumulation_steps)
 
         # apply parallelisms and initialization
         if parallel_dims.pp_enabled:
@@ -292,9 +286,7 @@ class Trainer(torch.distributed.checkpoint.stateful.Stateful):
         # e.g. calculate float8 dynamic amax/scale for all-parameter for FSDP2
         # where it issues a single all-reduce for all parameters at once for better performance
         self.optimizers.register_step_post_hook(
-            lambda *args, **kwargs: model_converters.post_optimizer_hook(
-                self.model_parts
-            )
+            lambda *args, **kwargs: model_converters.post_optimizer_hook(self.model_parts)
         )
         self.metrics_processor.optimizers = self.optimizers
         self.metrics_processor.model_parts = self.model_parts
@@ -312,9 +304,7 @@ class Trainer(torch.distributed.checkpoint.stateful.Stateful):
             states={"train_state": self},
             checkpoint_config=job_config.checkpoint,
             sd_adapter=(
-                self.train_spec.state_dict_adapter(
-                    model_args, job_config.model.hf_assets_path
-                )
+                self.train_spec.state_dict_adapter(model_args, job_config.model.hf_assets_path)
                 if self.train_spec.state_dict_adapter
                 else None
             ),
@@ -322,9 +312,7 @@ class Trainer(torch.distributed.checkpoint.stateful.Stateful):
             ft_manager=self.ft_manager,
         )
 
-        loss_parallel_enabled = (
-            parallel_dims.tp_enabled and not parallelism_config.disable_loss_parallel
-        )
+        loss_parallel_enabled = parallel_dims.tp_enabled and not parallelism_config.disable_loss_parallel
         self.train_context = dist_utils.get_train_context(
             loss_parallel_enabled,
             parallelism_config.enable_compiled_autograd,
@@ -394,9 +382,7 @@ class Trainer(torch.distributed.checkpoint.stateful.Stateful):
             ntokens_batch = labels.numel()
             self.ntokens_seen += ntokens_batch
             self.metrics_processor.ntokens_since_last_log += ntokens_batch
-            self.metrics_processor.data_loading_times.append(
-                time.perf_counter() - data_load_start
-            )
+            self.metrics_processor.data_loading_times.append(time.perf_counter() - data_load_start)
 
             # Move tensors to the appropriate device
             for k, v in input_dict.items():
@@ -406,9 +392,7 @@ class Trainer(torch.distributed.checkpoint.stateful.Stateful):
 
             yield input_dict, labels
 
-    def forward_backward_step(
-        self, input_dict: dict[str, torch.Tensor], labels: torch.Tensor
-    ) -> torch.Tensor:
+    def forward_backward_step(self, input_dict: dict[str, torch.Tensor], labels: torch.Tensor) -> torch.Tensor:
         model_parts = self.model_parts
         parallel_dims = self.parallel_dims
 
@@ -435,9 +419,7 @@ class Trainer(torch.distributed.checkpoint.stateful.Stateful):
         if parallel_dims.pp_enabled:
             # Pipeline Parallel forward / backward inside step() call
             with self.train_context(optional_context_parallel_ctx):
-                targets, losses = (
-                    (labels, []) if self.pp_has_last_stage else (None, None)
-                )
+                targets, losses = (labels, []) if self.pp_has_last_stage else (None, None)
                 if self.pp_has_first_stage:
                     self.pp_schedule.step(
                         inputs,
@@ -447,9 +429,7 @@ class Trainer(torch.distributed.checkpoint.stateful.Stateful):
                         input_batch=inputs,
                     )
                 else:
-                    self.pp_schedule.step(
-                        target=targets, losses=losses, input_batch=inputs
-                    )
+                    self.pp_schedule.step(target=targets, losses=losses, input_batch=inputs)
 
             # accumulate losses across pipeline microbatches
             # TODO: PP+FSDP unexpectedly puts the loss back to the CPU
@@ -474,9 +454,7 @@ class Trainer(torch.distributed.checkpoint.stateful.Stateful):
 
         return loss
 
-    def train_step(
-        self, data_iterator: Iterable[tuple[dict[str, torch.Tensor], torch.Tensor]]
-    ):
+    def train_step(self, data_iterator: Iterable[tuple[dict[str, torch.Tensor], torch.Tensor]]):
         self.optimizers.zero_grad()
         # Save the current step learning rate for logging
         lr = self.lr_schedulers.schedulers[0].get_last_lr()[0]
@@ -490,6 +468,7 @@ class Trainer(torch.distributed.checkpoint.stateful.Stateful):
         # entire step will not be executed.
         for _microbatch in range(self.gradient_accumulation_steps):
             input_dict, labels = next(data_iterator)
+            update_unigram_metrics(labels)
             loss = self.forward_backward_step(input_dict, labels)
             accumulated_losses.append(loss.detach())
 
@@ -497,9 +476,7 @@ class Trainer(torch.distributed.checkpoint.stateful.Stateful):
             [p for m in self.model_parts for p in m.parameters()],
             self.job_config.training.max_norm,
             foreach=True,
-            pp_mesh=(
-                parallel_dims.world_mesh["pp"] if parallel_dims.pp_enabled else None
-            ),
+            pp_mesh=(parallel_dims.world_mesh["pp"] if parallel_dims.pp_enabled else None),
             ep_enabled=parallel_dims.ep_enabled,
         )
         self.checkpointer.maybe_wait_for_staging()
@@ -513,6 +490,8 @@ class Trainer(torch.distributed.checkpoint.stateful.Stateful):
         if not self.metrics_processor.should_log(self.step):
             return
 
+        local_loss = loss.detach().item()
+
         if parallel_dims.dp_cp_enabled:
             loss = loss.detach()
             ft_pg = self.ft_manager.loss_sync_pg
@@ -520,9 +499,7 @@ class Trainer(torch.distributed.checkpoint.stateful.Stateful):
                 dist_utils.dist_mean(loss, parallel_dims.world_mesh["dp_cp"], ft_pg),
                 dist_utils.dist_max(loss, parallel_dims.world_mesh["dp_cp"], ft_pg),
                 dist_utils.dist_sum(
-                    torch.tensor(
-                        self.ntokens_seen, dtype=torch.int64, device=self.device
-                    ),
+                    torch.tensor(self.ntokens_seen, dtype=torch.int64, device=self.device),
                     parallel_dims.world_mesh["dp_cp"],
                     ft_pg,
                 ),
@@ -534,6 +511,7 @@ class Trainer(torch.distributed.checkpoint.stateful.Stateful):
         extra_metrics = {
             "n_tokens_seen": global_ntokens_seen,
             "lr": lr,
+            "local_loss": local_loss,
         }
         self.metrics_processor.log(
             self.step,
@@ -554,16 +532,10 @@ class Trainer(torch.distributed.checkpoint.stateful.Stateful):
 
         loaded = self.checkpointer.load(step=job_config.checkpoint.load_step)
 
-        logger.info(
-            f"[RESUME DEBUG] After checkpoint load: loaded={loaded}, self.step = {self.step}"
-        )
+        logger.info(f"[RESUME DEBUG] After checkpoint load: loaded={loaded}, self.step = {self.step}")
         logger.info(f"Training starts at step {self.step + 1}")
 
-        leaf_folder = (
-            ""
-            if not self.ft_manager.enabled
-            else f"replica_{self.ft_manager.replica_id}"
-        )
+        leaf_folder = "" if not self.ft_manager.enabled else f"replica_{self.ft_manager.replica_id}"
         with (
             maybe_enable_profiling(
                 job_config.profiling,
@@ -581,17 +553,9 @@ class Trainer(torch.distributed.checkpoint.stateful.Stateful):
                 job_config.fault_tolerance,
                 ft_manager=self.ft_manager,
                 model=self.model_parts[0],
-                n_layers=(
-                    self.model_args.n_layers
-                    if hasattr(self.model_args, "n_layers")
-                    else 0
-                ),
+                n_layers=(self.model_args.n_layers if hasattr(self.model_args, "n_layers") else 0),
                 optimizer=self.optimizers,
-                fragment_fn=(
-                    self.train_spec.fragment_fn
-                    if hasattr(self.train_spec, "fragment_fn")
-                    else None
-                ),
+                fragment_fn=(self.train_spec.fragment_fn if hasattr(self.train_spec, "fragment_fn") else None),
             ),
         ):
             data_iterator = self.batch_generator(self.dataloader)
@@ -604,15 +568,10 @@ class Trainer(torch.distributed.checkpoint.stateful.Stateful):
                     logger.warning("Ran out of data; last step was canceled.")
                     break
 
-                self.checkpointer.save(
-                    self.step, last_step=(self.step == job_config.training.steps)
-                )
+                self.checkpointer.save(self.step, last_step=(self.step == job_config.training.steps))
 
                 # Run validation if validator is available
-                if (
-                    self.job_config.validation.enable
-                    and self.validator.should_validate(self.step)
-                ):
+                if self.job_config.validation.enable and self.validator.should_validate(self.step):
                     with self.loss_fn.no_rescale():
                         self.validator.validate(self.model_parts, self.step)
 
@@ -626,9 +585,7 @@ class Trainer(torch.distributed.checkpoint.stateful.Stateful):
                 # (assuming lazy init and compilation are finished)
                 if self.step == 1:
                     dist_utils.set_pg_timeouts(
-                        timeout=timedelta(
-                            seconds=job_config.comm.train_timeout_seconds
-                        ),
+                        timeout=timedelta(seconds=job_config.comm.train_timeout_seconds),
                         world_mesh=self.parallel_dims.world_mesh,
                     )
 
@@ -646,14 +603,10 @@ class Trainer(torch.distributed.checkpoint.stateful.Stateful):
 
     def load_state_dict(self, state_dict: dict[str, Any]):
         logger.info(f"[RESUME DEBUG] Trainer.load_state_dict called with: {state_dict}")
-        logger.info(
-            f"[RESUME DEBUG] Before load: self.step = {self.step}, self.ntokens_seen = {self.ntokens_seen}"
-        )
+        logger.info(f"[RESUME DEBUG] Before load: self.step = {self.step}, self.ntokens_seen = {self.ntokens_seen}")
         self.step = state_dict["step"]
         self.ntokens_seen = state_dict["ntokens_seen"]
-        logger.info(
-            f"[RESUME DEBUG] After load: self.step = {self.step}, self.ntokens_seen = {self.ntokens_seen}"
-        )
+        logger.info(f"[RESUME DEBUG] After load: self.step = {self.step}, self.ntokens_seen = {self.ntokens_seen}")
 
     def close(self) -> None:
         if self.checkpointer:
@@ -672,12 +625,10 @@ if __name__ == "__main__":
         trainer = Trainer(config)
 
         if config.checkpoint.create_seed_checkpoint:
-            assert (
-                int(os.environ["WORLD_SIZE"]) == 1
-            ), "Must create seed checkpoint using a single device, to disable sharding."
-            assert (
-                config.checkpoint.enable
-            ), "Must enable checkpointing when creating a seed checkpoint."
+            assert int(os.environ["WORLD_SIZE"]) == 1, (
+                "Must create seed checkpoint using a single device, to disable sharding."
+            )
+            assert config.checkpoint.enable, "Must enable checkpointing when creating a seed checkpoint."
             trainer.checkpointer.save(curr_step=0, last_step=True)
             logger.info("Created seed checkpoint")
         else:

@@ -48,7 +48,7 @@ You are analyzing a codebase dependency graph optimized for AI understanding. Th
 ---
 
 # CODE_GRAPH
-NODES:36 EDGES:16
+NODES:38 EDGES:19
 
 ## DIRECTORY_TREE
 ROOT: torchtitan/experiments/fl/dataloader/
@@ -56,14 +56,14 @@ ROOT: torchtitan/experiments/fl/dataloader/
 ## ARCHITECTURAL_CLUSTERS
 
 ### UTILITY_LAYER
-NODES:36 CALL_DEPTH:5
+NODES:38 CALL_DEPTH:5
 
-dataloader.py→[_extract_streams((dataset_cfg: dict[str,Any]))→{_join_local_path,_join_remote_path,_flatten_stream_configs},_join_remote_path((root: str | None,path: str | None))→{_is_uri,_is_uri},_build_mosaic_dataloader((*,job_config: MosaicJobConfig,tokenizer: BaseTokenizer,dp_world_size: int,dp_rank: int,split: str,default_drop_last: bool,))[HOT]→{_extract_streams,_select_dataset_config},build_mosaic_dataloader((*,dp_world_size: int,dp_rank: int,tokenizer: BaseTokenizer,job_config: MosaicJobConfig,))[HOT]→{_build_mosaic_dataloader},build_mosaic_validation_dataloader((*,dp_world_size: int,dp_rank: int,tokenizer: BaseTokenizer,job_config: MosaicJobConfig,infinite: bool = False,# noqa: ARG001 - kept for compatibility))[HOT]→{_build_mosaic_dataloader},_is_uri((path: str | None)),_join_local_path((root: str | None,path: str | None)),_flatten_stream_configs((streams_cfg: Any)),_select_dataset_config((dataset_cfg: Mapping[str,Any] | None,split: str)),__init__((self,*args: Any,**kwargs: Any))[CTOR,DUNDER],__getitem__((self,idx: int))[DUNDER],state_dict((self,num_samples: int | None = None,from_beginning: bool = True)),load_state_dict((self,obj: dict[str,Any])),__init__((self,dataset: StatefulStreamingTextDataset,dp_rank: int,dp_world_size: int,batch_size: int,collate_fn: Callable | None = None,num_workers: int = 0,prefetch_factor: int | None = 2,pin_memory: bool = True,persistent_workers: bool = True,drop_last: bool = True,))[CTOR,DUNDER],state_dict((self)),load_state_dict((self,state_dict: dict[str,Any])),titan_collate_fn((batch: list[Any]))] tokenizer.py→[build_mosaic_tokenizer((job_config: MosaicJobConfig,))[HOT]] 
+dataloader.py→[_extract_streams((dataset_cfg: dict[str,Any]))→{_join_local_path,_join_remote_path,_collect_group_stream_entries,_normalize_sampling_groups,_flatten_stream_configs},_join_remote_path((root: str | None,path: str | None))→{_is_uri,_is_uri},_build_mosaic_dataloader((*,job_config: MosaicJobConfig,tokenizer: BaseTokenizer,dp_world_size: int,dp_rank: int,split: str,default_drop_last: bool,))[HOT]→{_extract_streams,_select_dataset_config},_collect_group_stream_entries((group: Mapping[str,Any]))→{_flatten_stream_configs},build_mosaic_dataloader((*,dp_world_size: int,dp_rank: int,tokenizer: BaseTokenizer,job_config: MosaicJobConfig,))[HOT]→{_build_mosaic_dataloader},build_mosaic_validation_dataloader((*,dp_world_size: int,dp_rank: int,tokenizer: BaseTokenizer,job_config: MosaicJobConfig,infinite: bool = False,# noqa: ARG001 - kept for compatibility))[HOT]→{_build_mosaic_dataloader},_is_uri((path: str | None)),_join_local_path((root: str | None,path: str | None)),_flatten_stream_configs((streams_cfg: Any)),_normalize_sampling_groups((config: Any)),_select_dataset_config((dataset_cfg: Mapping[str,Any] | None,split: str)),__init__((self,*args: Any,**kwargs: Any))[CTOR,DUNDER],__getitem__((self,idx: int))[DUNDER],state_dict((self,num_samples: int | None = None,from_beginning: bool = True)),load_state_dict((self,obj: dict[str,Any])),__init__((self,dataset: StatefulStreamingTextDataset,dp_rank: int,dp_world_size: int,batch_size: int,collate_fn: Callable | None = None,num_workers: int = 0,prefetch_factor: int | None = 2,pin_memory: bool = True,persistent_workers: bool = True,drop_last: bool = True,))[CTOR,DUNDER],state_dict((self)),load_state_dict((self,state_dict: dict[str,Any])),titan_collate_fn((batch: list[Any]))] tokenizer.py→[build_mosaic_tokenizer((job_config: MosaicJobConfig,))[HOT]] 
 
 ## DEPENDENCY_PATTERNS
 
 ### EDGE_PATTERNS
-Call: 9 edges
+Call: 12 edges
 Contains: 7 edges
 
 ### CROSS_CLUSTER_FLOW

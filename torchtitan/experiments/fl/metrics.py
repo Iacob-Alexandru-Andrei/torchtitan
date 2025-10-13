@@ -8,11 +8,13 @@
 from __future__ import annotations
 
 import math
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from enum import Enum
 from typing import Any, TYPE_CHECKING
 
 import torch
+from torch import Tensor
+from torchmetrics import Metric
 
 from torchtitan.components.metrics import MetricsProcessor
 from torchtitan.distributed import utils as dist_utils
@@ -36,6 +38,133 @@ class AggregationType(Enum):
     L2_NORM = "l2_norm"
     MIN = "min"
     MAX = "max"
+
+
+class PureUnigramCrossEntropy(Metric):
+    """TorchMetric that computes unigram cross entropy for LM targets.
+
+    This metric accumulates the per-token cross entropy between the provided
+    targets and a pre-computed unigram distribution. Ignored indices are
+    excluded from both the loss and item count.
+    """
+
+    full_state_update = False
+
+    def __init__(
+        self,
+        unigram_probabilities: Tensor,
+        ignore_index: int = -100,
+        *,
+        dist_sync_on_step: bool = False,
+    ) -> None:
+        super().__init__(dist_sync_on_step=dist_sync_on_step)
+
+        if unigram_probabilities.dim() != 1:
+            msg = "unigram_probabilities must be a 1D tensor."
+            raise ValueError(msg)
+
+        if torch.any(unigram_probabilities < 0):
+            msg = "unigram_probabilities must contain non-negative values."
+            raise ValueError(msg)
+
+        if not torch.any(unigram_probabilities > 0):
+            msg = "unigram_probabilities must include at least one positive value."
+            raise ValueError(msg)
+
+        prob_dtype = unigram_probabilities.dtype if unigram_probabilities.is_floating_point() else torch.float32
+        self.ignore_index = ignore_index
+        # Store as buffer so it moves with the metric across devices.
+        self.register_buffer(
+            "unigram_probabilities",
+            unigram_probabilities.clone().detach().to(dtype=prob_dtype),
+        )
+        self.add_state(
+            "sum_loss",
+            default=torch.tensor(0.0, dtype=prob_dtype),
+            dist_reduce_fx="sum",
+        )
+        self.add_state(
+            "total_items",
+            default=torch.tensor(0, dtype=torch.long),
+            dist_reduce_fx="sum",
+        )
+
+    def update(self, output: Mapping | Tensor, target: Tensor) -> None:  # noqa: ARG002
+        """Update the metric state with a batch of targets."""
+        target = target.view(-1).to(torch.long)
+
+        valid_mask = target != self.ignore_index
+        if not torch.any(valid_mask):
+            return
+
+        target_filtered = target[valid_mask]
+        vocab_size = self.unigram_probabilities.shape[0]
+        in_vocab_mask = (target_filtered >= 0) & (target_filtered < vocab_size)
+        if not torch.any(in_vocab_mask):
+            return
+
+        # Use the unigram probabilities corresponding to the valid targets.
+        unigram_probs = self.unigram_probabilities
+        if unigram_probs.device != target.device:
+            unigram_probs = unigram_probs.to(target.device)
+
+        target_in_vocab = target_filtered[in_vocab_mask]
+        selected_probs = unigram_probs[target_in_vocab]
+        eps = torch.finfo(selected_probs.dtype).tiny
+        losses = -torch.log(selected_probs.clamp_min(eps))
+
+        loss_sum = losses.sum().to(self.sum_loss.device)
+        self.sum_loss += loss_sum
+
+        items = int(in_vocab_mask.sum().item())
+        self.total_items += items
+
+    def compute(self) -> Tensor:
+        """Return the average unigram cross entropy across all updates."""
+        if int(self.total_items.item()) == 0:
+            return self.sum_loss.new_zeros(())
+        total_items = self.total_items.to(self.sum_loss.dtype)
+        return self.sum_loss / total_items
+
+
+_UNIGRAM_METRICS: list[PureUnigramCrossEntropy] = []
+
+
+def add_unigram_metric(metric: PureUnigramCrossEntropy) -> None:
+    """Track a unigram cross-entropy metric for logging."""
+    _UNIGRAM_METRICS.append(metric)
+
+
+def collect_unigram_metrics(*, reset: bool = True) -> tuple[float, int]:
+    """Return the local summed loss and token count for unigram metrics."""
+    total_loss = 0.0
+    total_items = 0
+
+    for metric in _UNIGRAM_METRICS:
+        items = int(metric.total_items.item())
+        if items == 0:
+            continue
+        loss_value = float(metric.sum_loss.item())
+        total_loss += loss_value
+        total_items += items
+        if reset:
+            metric.sum_loss.zero_()
+            metric.total_items.zero_()
+
+    return total_loss, total_items
+
+
+def reset_unigram_metrics() -> None:
+    for metric in _UNIGRAM_METRICS:
+        metric.sum_loss.zero_()
+        metric.total_items.zero_()
+
+
+def update_unigram_metrics(labels: Tensor) -> None:
+    if not _UNIGRAM_METRICS:
+        return
+    for metric in _UNIGRAM_METRICS:
+        metric.update({}, labels)
 
 
 def compute_skewness(value: torch.Tensor) -> torch.Tensor:
@@ -97,9 +226,7 @@ class ActivationMonitor:
         enabled_metrics: set[str] | None = None,
     ) -> None:
         self.interval = interval
-        self.ignore_module_types = (
-            tuple(ignore_module_types) if ignore_module_types is not None else None
-        )
+        self.ignore_module_types = tuple(ignore_module_types) if ignore_module_types is not None else None
         self.gradient_accumulation_steps = max(1, gradient_accumulation_steps)
 
         # Default enabled metrics - only the essential ones
@@ -169,9 +296,7 @@ class ActivationMonitor:
             return
 
         self._module_names = {module: name for name, module in model.named_modules()}
-        self._pre_handle = model.register_forward_pre_hook(
-            self._forward_pre_hook, with_kwargs=True
-        )
+        self._pre_handle = model.register_forward_pre_hook(self._forward_pre_hook, with_kwargs=True)
         model.apply(self._register_forward_hook)
         self._registered = True
 
@@ -199,9 +324,7 @@ class ActivationMonitor:
         module_name = self._module_names.get(module, "")
         if self.ignore_module_types is not None:
             lowered_name = module_name.lower()
-            if any(
-                ignore.lower() in lowered_name for ignore in self.ignore_module_types
-            ):
+            if any(ignore.lower() in lowered_name for ignore in self.ignore_module_types):
                 return
 
         self._recursively_add_metrics("_input", inputs)
@@ -243,9 +366,7 @@ class ActivationMonitor:
             if self._is_metric_enabled(l2_key):
                 current_l2 = self._metrics.get(l2_key, 0.0)
                 if isinstance(current_l2, float):
-                    self._metrics[l2_key] = current_l2 + float(
-                        torch.sum(tensor**2).item()
-                    )
+                    self._metrics[l2_key] = current_l2 + float(torch.sum(tensor**2).item())
 
             avg_key = f"activations/average/full_model{suffix}"
             # Check if any average metrics are enabled (max, min, or median)
@@ -374,9 +495,7 @@ class ActivationMonitor:
                 if self._is_metric_enabled(min_metric_key):
                     prepared[min_metric_key] = float(tensor_values.min().item())
 
-                median_metric_key = (
-                    f"activations/{metric_name}/median/full_model{suffix}"
-                )
+                median_metric_key = f"activations/{metric_name}/median/full_model{suffix}"
                 if self._is_metric_enabled(median_metric_key):
                     prepared[median_metric_key] = values
 
@@ -405,9 +524,7 @@ class ActivationMonitor:
                     sorted_values = sorted(value)
                     n = len(sorted_values)
                     if n % 2 == 0:
-                        reduced[key] = (
-                            sorted_values[n // 2 - 1] + sorted_values[n // 2]
-                        ) / 2
+                        reduced[key] = (sorted_values[n // 2 - 1] + sorted_values[n // 2]) / 2
                     else:
                         reduced[key] = sorted_values[n // 2]
                 else:
@@ -542,9 +659,7 @@ class OptimizerMonitor:
                 optimizer_metrics = pre_reduce_metrics(optimizer_metrics)
 
             # Reduce metrics across all ranks using TorchTitan's distributed utilities
-            optimizer_metrics = self._reduce_metrics_across_ranks(
-                optimizer_metrics, mesh
-            )
+            optimizer_metrics = self._reduce_metrics_across_ranks(optimizer_metrics, mesh)
 
         # Dynamically aggregate all metric names found in optimizer_metrics
         agg_type_values = {agg_type.value for agg_type in AggregationType}
@@ -611,15 +726,10 @@ class OptimizerMonitor:
 
         # If only_global is set, remove all non-global metrics
         if self.only_global:
-            optimizer_metrics = {
-                k: v for k, v in optimizer_metrics.items() if k.endswith("/global")
-            }
+            optimizer_metrics = {k: v for k, v in optimizer_metrics.items() if k.endswith("/global")}
 
         # Convert any remaining tensors to floats (shouldn't be any after reduction, but just in case)
-        optimizer_metrics = {
-            k: v.item() if isinstance(v, torch.Tensor) else v
-            for k, v in optimizer_metrics.items()
-        }
+        optimizer_metrics = {k: v.item() if isinstance(v, torch.Tensor) else v for k, v in optimizer_metrics.items()}
         logger.log(optimizer_metrics, step)
 
 
@@ -639,9 +749,7 @@ class FLMetricsProcessor(MetricsProcessor):
 
             optimizer_config = OptimizerMonitorConfig(**optimizer_monitor_dict)
             activation_config = ActivationMonitorConfig(**activation_monitor_dict)
-            fl_metrics_config = MetricsConfig(
-                optimizer_monitor=optimizer_config, activation_monitor=activation_config
-            )
+            fl_metrics_config = MetricsConfig(optimizer_monitor=optimizer_config, activation_monitor=activation_config)
         else:
             fl_metrics_config = fl_metrics_raw
 
@@ -651,7 +759,7 @@ class FLMetricsProcessor(MetricsProcessor):
         log_optimizer_metrics = optimizer_config.log_metrics
 
         activation_config = fl_metrics_config.activation_monitor
-        activation_enabled = activation_config.enabled
+        activation_enabled = activation_config.enabled or (activation_config.interval > 0)
         activation_interval = activation_config.interval
         ignore_types = activation_config.ignore_module_types
 
@@ -685,6 +793,38 @@ class FLMetricsProcessor(MetricsProcessor):
             return True
         return base_decision
 
+    def _build_unigram_payload(self, mesh: DeviceMesh | None) -> dict[str, float]:
+        local_loss, local_items = collect_unigram_metrics(reset=False)
+        if local_items == 0:
+            reset_unigram_metrics()
+            return {"pure_unigram_cross_entropy": 0.0}
+
+        device = torch.device("cpu")
+        if self.model_parts:
+            try:
+                device = next(self.model_parts[0].parameters()).device
+            except StopIteration:
+                pass
+
+        loss_tensor = torch.tensor(float(local_loss), device=device, dtype=torch.float64)
+        items_tensor = torch.tensor(float(local_items), device=device, dtype=torch.float64)
+
+        if mesh is not None:
+            loss_tensor = dist_utils.dist_sum(loss_tensor, mesh)
+            items_tensor = dist_utils.dist_sum(items_tensor, mesh)
+
+        global_loss = float(loss_tensor)
+        global_items = float(items_tensor)
+        reset_unigram_metrics()
+
+        if global_items <= 0:
+            return {"pure_unigram_cross_entropy": 0.0}
+
+        return {
+            "pure_unigram_cross_entropy": global_loss / global_items,
+            "pure_unigram_cross_entropy/token_count": global_items,
+        }
+
     def log(
         self,
         step: int,
@@ -703,20 +843,31 @@ class FLMetricsProcessor(MetricsProcessor):
             extra_metrics: Any additional metrics to log.
 
         """
-        super().log(step, global_avg_loss, global_max_loss, grad_norm, extra_metrics)
+        mesh = self.parallel_dims.world_mesh["dp_cp"] if self.parallel_dims.dp_cp_enabled else None
+        unigram_payload = self._build_unigram_payload(mesh)
+        combined_metrics = dict(extra_metrics) if extra_metrics else {}
+        if unigram_payload:
+            combined_metrics.update(unigram_payload)
 
-        mesh = (
-            self.parallel_dims.world_mesh["dp_cp"]
-            if self.parallel_dims.dp_cp_enabled
-            else None
+        super().log(
+            step,
+            global_avg_loss,
+            global_max_loss,
+            grad_norm,
+            extra_metrics=combined_metrics or None,
         )
 
         if self.model_parts and self.optimizers:
-            self.optimizer_monitor.batch_end(
-                step, self.model_parts[0], self.optimizers, self.logger, mesh
-            )
+            self.optimizer_monitor.batch_end(step, self.model_parts[0], self.optimizers, self.logger, mesh)
 
         if self.activation_monitor and self.model_parts:
             if not self.activation_monitor.is_registered:
                 self.activation_monitor.register(self.model_parts[0])
             self.activation_monitor.finalize(step, self.logger, mesh)
+
+    def log_validation(self, loss: float, step: int) -> None:
+        super().log_validation(loss, step)
+        mesh = self.parallel_dims.world_mesh["dp_cp"] if self.parallel_dims.dp_cp_enabled else None
+        unigram_payload = self._build_unigram_payload(mesh)
+        if unigram_payload:
+            self.logger.log(unigram_payload, step)

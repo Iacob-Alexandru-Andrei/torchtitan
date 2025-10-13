@@ -350,8 +350,7 @@ def pipeline_module_split(
             num_stages,
         )
         logger.info(
-            f"PP rank {pp_rank} is building stage_idx {stage_idx} "
-            f"with modules {module_names}"
+            f"PP rank {pp_rank} is building stage_idx {stage_idx} with modules {module_names}"
         )
         stages.append(stage)
         models.append(model_chunk)

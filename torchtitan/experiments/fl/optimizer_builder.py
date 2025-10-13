@@ -52,11 +52,9 @@ def build_mosaic_optimizers(  # noqa: C901, PLR0912
     if isinstance(optimizer_config, dict):
         optimizer_config = MosaicOptimizerConfig(**optimizer_config)
 
-    desloc_config: DesLocConfig | None = (
-        DesLocConfig(**config)
-        if (config := getattr(optimizer_config, "desloc", None)) is not None
-        else None
-    )
+    desloc_config = getattr(optimizer_config, "desloc", None)
+    if isinstance(desloc_config, dict):
+        desloc_config = DesLocConfig(**desloc_config)
 
     desloc_enabled = bool(getattr(desloc_config, "enabled", False))
 
@@ -72,6 +70,9 @@ def build_mosaic_optimizers(  # noqa: C901, PLR0912
             msg = "TorchFT is not supported with optimizers in backward."
             raise NotImplementedError(msg)
 
+    if desloc_enabled and not (ft_manager and ft_manager.enabled):
+        msg = "DES-LOC requires TorchFT to be enabled. Set fault_tolerance.enable to true."
+        raise ValueError(msg)
     if desloc_enabled and not (ft_manager and ft_manager.enabled):
         msg = "DES-LOC requires TorchFT to be enabled. Set fault_tolerance.enable to true."
         raise ValueError(msg)

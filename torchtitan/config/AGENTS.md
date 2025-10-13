@@ -48,7 +48,7 @@ You are analyzing a codebase dependency graph optimized for AI understanding. Th
 ---
 
 # CODE_GRAPH
-NODES:20 EDGES:6
+NODES:21 EDGES:6
 
 ## DIRECTORY_TREE
 ROOT: torchtitan/config/
@@ -56,7 +56,7 @@ ROOT: torchtitan/config/
 ## ARCHITECTURAL_CLUSTERS
 
 ### UTILITY_LAYER
-NODES:20 CALL_DEPTH:1
+NODES:21 CALL_DEPTH:1
 
 __init__.py→[] job_config.py→[] manager.py→[__init__((self,config_cls: Type[JobConfig] = JobConfig))[CTOR,DUNDER],parse_args((self,args: list[str] = sys.argv[1:])),_maybe_load_toml((self,args: list[str])),_maybe_add_custom_args((self,args: list[str],toml_values: dict[str,Any] | None)),_dict_to_dataclass((self,cls,data: dict[str,Any])),_validate_config((self))] 
 
