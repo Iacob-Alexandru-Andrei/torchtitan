@@ -9,7 +9,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Literal
 
 from torchtitan.components.ft.config import FaultTolerance as FTFaultTolerance
 
@@ -133,6 +133,62 @@ class VSMonitorConfig:
     interval: int = field(
         default=0,
         metadata={"help": "Training step interval for v parameter logging."},
+    )
+
+
+@dataclass
+class FLLRSchedulerConfig:
+    """Warmup-stable-decay scheduler with optional mid-training switch."""
+
+    warmup_steps: int = field(
+        default=200,
+        metadata={
+            "help": "Number of warmup steps before the learning rate reaches its base value."
+        },
+    )
+
+    decay_ratio: float | None = field(
+        default=None,
+        metadata={
+            "help": (
+                "Portion of total steps allocated to decay (Warmup-Stable-Decay). "
+                "Matches the semantics of the core WSD scheduler."
+            )
+        },
+    )
+
+    decay_type: Literal["linear", "sqrt", "cosine"] = field(
+        default="linear",
+        metadata={
+            "help": "Decay shape applied after the stable region: linear, sqrt, or cosine."
+        },
+    )
+
+    min_lr_factor: float = field(
+        default=0.0,
+        metadata={
+            "help": "Minimum multiplier applied to the base learning rate during decay."
+        },
+    )
+
+    switch_step: int | None = field(
+        default=None,
+        metadata={
+            "help": (
+                "1-based training step at which to apply `switch_scale`. "
+                "If unset, no additional scaling is applied."
+            )
+        },
+    )
+
+    switch_scale: float = field(
+        default=1.0,
+        metadata={
+            "help": (
+                "Multiplicative factor applied to the learning rate once `switch_step` is reached. "
+                "Use 1.0 to disable."
+            )
+        },
     )
 
 
@@ -353,6 +409,16 @@ class MosaicJobConfig(JobConfig):
         default_factory=MosaicOptimizerConfig,
         metadata={
             "help": "Optimizer configuration with extended options for Mosaic optimizers (vs, betas)."
+        },
+    )
+
+    lr_scheduler: FLLRSchedulerConfig = field(  # type: ignore[assignment]
+        default_factory=FLLRSchedulerConfig,
+        metadata={
+            "help": (
+                "Learning rate scheduler configuration with optional mid-training scaling. "
+                "Extends the core WSD scheduler with switch semantics."
+            )
         },
     )
 

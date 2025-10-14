@@ -67,6 +67,8 @@ warmup_steps = 50  # lr scheduler warm up, normally 20% of the train steps
 decay_ratio = 0.8  # lr scheduler decay ratio, 80% of the train steps
 decay_type = "linear"
 min_lr_factor = 0.0
+switch_step = 100
+switch_scale = 0.8
 
 [training]
 local_batch_size = 2
