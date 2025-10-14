@@ -33,8 +33,8 @@ from torchtitan.experiments.fl.dataloader.tokenizer import build_mosaic_tokenize
 from torchtitan.experiments.fl.ft_override import enable_desloc_only_ft
 from torchtitan.experiments.fl.models.utils import ensure_mosaic_spec
 from torchtitan.experiments.fl.s3_checkpoint import (
-    S3CheckpointManager,
-    setup_s3_checkpointing,
+    S3CheckpointWrapper,
+    get_s3_checkpoint_wrapper_factory,
 )
 from torchtitan.tools.logging import init_logger, logger
 from torchtitan.train import Trainer
@@ -85,8 +85,8 @@ def main() -> None:  # noqa: C901, PLR0912, PLR0915
 
     # Launch the trainer
     trainer: Trainer | None = None
-    s3_manager: S3CheckpointManager | None = None
-    download_manager: S3CheckpointManager | None = None
+    s3_manager: S3CheckpointWrapper | None = None
+    download_manager: S3CheckpointWrapper | None = None
     try:
         enable_desloc_only_ft(job_config)
         trainer = Trainer(job_config)
@@ -124,16 +124,24 @@ def main() -> None:  # noqa: C901, PLR0912, PLR0915
             f"prefix={job_config.s3_checkpoint.prefix}"
         )
 
-        if s3_checkpointing_active:
+        wrapper_factory = (
+            get_s3_checkpoint_wrapper_factory(job_config)
+            if s3_checkpointing_active
+            else None
+        )
+
+        if s3_checkpointing_active and wrapper_factory is not None:
             if is_checkpoint_writer:
                 logger.info(
                     "[S3 DEBUG] Creating S3 manager as checkpoint writer (with install=True)"
                 )
-                s3_manager = setup_s3_checkpointing(checkpointer, job_config)
-                if s3_manager is not None:
-                    trainer.checkpointer = s3_manager  # type: ignore[assignment]
-                    download_manager = s3_manager
-                    checkpointer = trainer.checkpointer
+                s3_manager = wrapper_factory(
+                    checkpointer,
+                    enable_uploads=True,
+                )
+                s3_manager.attach_to_trainer(trainer)
+                download_manager = s3_manager
+                checkpointer = trainer.checkpointer
                 logger.info(
                     f"[S3 DEBUG] s3_manager={s3_manager}, download_manager={download_manager}"
                 )
@@ -141,8 +149,9 @@ def main() -> None:  # noqa: C901, PLR0912, PLR0915
                 logger.info(
                     "[S3 DEBUG] Creating download-only S3 manager (with install=False)"
                 )
-                download_manager = setup_s3_checkpointing(
-                    checkpointer, job_config, install=False
+                download_manager = wrapper_factory(
+                    checkpointer,
+                    enable_uploads=False,
                 )
                 logger.info(f"[S3 DEBUG] download_manager={download_manager}")
 
