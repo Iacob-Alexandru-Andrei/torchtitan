@@ -10,13 +10,13 @@ from __future__ import annotations
 from typing import Any
 
 import torch
+from torch.optim import Optimizer
 
 from torchtitan.components.ft import FTManager
 from torchtitan.components.optimizer import (
+    FTOptimizersContainer,
     OptimizersContainer,
-    build_optimizers,
-    register_optimizer_class,
-    register_optimizer_container,
+    OptimizersInBackwardContainer,
 )
 from torchtitan.distributed import ParallelDims
 from torchtitan.experiments.fl.configs.optimizers import (
@@ -33,61 +33,31 @@ from torchtitan.experiments.fl.optimizers import (
     QHADOPT,
 )
 
-_REGISTRATION_DONE = False
+_BASE_OPTIMIZER_CLASSES: dict[str, type[Optimizer]] = {
+    "Adam": torch.optim.Adam,
+    "AdamW": torch.optim.AdamW,
+}
+
+_MOSAIC_OPTIMIZER_CLASSES: dict[str, type[Optimizer]] = {
+    "ADOPT": ADOPT,
+    "QHADOPT": QHADOPT,
+    "QHAdamW": QHAdamW,
+    "DecoupledAdamW": DecoupledAdamW,
+    "AggMoAdopt": AggMoAdopt,
+    "AggMoAdamW": AggMoAdamW,
+}
+
+_ALL_OPTIMIZER_CLASSES: dict[str, type[Optimizer]] = {
+    **_BASE_OPTIMIZER_CLASSES,
+    **_MOSAIC_OPTIMIZER_CLASSES,
+}
 
 
-def _ensure_optimizer_registration() -> None:
-    global _REGISTRATION_DONE
-    if _REGISTRATION_DONE:
-        return
-
-    register_optimizer_class("ADOPT", ADOPT, exist_ok=True)
-    register_optimizer_class("QHADOPT", QHADOPT, exist_ok=True)
-    register_optimizer_class("QHAdamW", QHAdamW, exist_ok=True)
-    register_optimizer_class("DecoupledAdamW", DecoupledAdamW, exist_ok=True)
-    register_optimizer_class("AggMoAdopt", AggMoAdopt, exist_ok=True)
-    register_optimizer_class("AggMoAdamW", AggMoAdamW, exist_ok=True)
-
-    def _desloc_enabled(optimizer_config: MosaicOptimizerConfig, context: Any) -> bool:
-        desloc = getattr(optimizer_config, "desloc", None)
-        return bool(getattr(desloc, "enabled", False))
-
-    def _build_desloc_container(
-        optimizer_config: MosaicOptimizerConfig, context: Any
-    ) -> OptimizersContainer:
-        desloc_cfg = optimizer_config.desloc
-        if isinstance(desloc_cfg, dict):  # pragma: no cover - defensive conversion
-            desloc_cfg = DesLocConfig(**desloc_cfg)
-            optimizer_config.desloc = desloc_cfg
-
-        if optimizer_config.early_step_in_backward:
-            raise NotImplementedError(
-                "DES-LOC does not support optimizers in backward. "
-                "Disable early_step_in_backward to enable DES-LOC."
-            )
-
-        ft_manager = context.ft_manager
-        if ft_manager is None or not ft_manager.enabled:
-            msg = (
-                "DES-LOC requires TorchFT to be enabled. Set fault_tolerance.enable to true."
-            )
-            raise ValueError(msg)
-
-        return DesLocFTOptimizersContainer(
-            context.model_parts,
-            context.optimizer_cls,
-            context.optimizer_kwargs,
-            ft_manager.manager,
-            desloc_cfg,
-            use_ft_optimizer=ft_manager.use_async_quorum,
-            param_groups=context.param_groups,
-        )
-
-    register_optimizer_container(
-        _desloc_enabled, _build_desloc_container, priority=100
-    )
-
-    _REGISTRATION_DONE = True
+def _resolve_optimizer_class(name: str) -> type[Optimizer]:
+    try:
+        return _ALL_OPTIMIZER_CLASSES[name]
+    except KeyError as exc:  # pragma: no cover - validated in configuration tests
+        raise NotImplementedError(f"Optimizer {name!r} is not registered for FL experiments.") from exc
 
 
 def _normalize_mosaic_optimizer_config(
@@ -116,6 +86,125 @@ def _normalize_mosaic_optimizer_config(
     return config, extra_kwargs
 
 
+def _build_optimizer_kwargs(
+    config: MosaicOptimizerConfig, extra_kwargs: dict[str, Any]
+) -> dict[str, Any]:
+    optim_implementation = config.implementation
+    assert optim_implementation in {"fused", "foreach", "for-loop"}
+
+    optimizer_kwargs: dict[str, Any] = {
+        "lr": config.lr,
+        "betas": (config.beta1, config.beta2),
+        "eps": config.eps,
+        "weight_decay": config.weight_decay,
+        "fused": optim_implementation == "fused",
+        "foreach": optim_implementation == "foreach",
+    }
+    optimizer_kwargs.update(extra_kwargs)
+    return optimizer_kwargs
+
+
+def _build_desloc_container(
+    *,
+    model_parts: list[torch.nn.Module],
+    optimizer_cls: type[Optimizer],
+    optimizer_kwargs: dict[str, Any],
+    desloc_cfg: DesLocConfig,
+    parallel_dims: ParallelDims,
+    ft_manager: FTManager,
+    param_groups: list[dict[str, Any]] | None,
+) -> OptimizersContainer:
+    if parallel_dims.ep_enabled:
+        raise NotImplementedError("DES-LOC is not supported with Expert Parallel.")
+    if parallel_dims.pp_enabled:
+        raise NotImplementedError("DES-LOC is not supported with Pipeline Parallel.")
+
+    return DesLocFTOptimizersContainer(
+        model_parts,
+        optimizer_cls,
+        optimizer_kwargs,
+        ft_manager.manager,
+        desloc_cfg,
+        use_ft_optimizer=ft_manager.use_async_quorum,
+        param_groups=param_groups,
+    )
+
+
+def _build_optimizer_container(
+    *,
+    model_parts: list[torch.nn.Module],
+    optimizer_cls: type[Optimizer],
+    optimizer_kwargs: dict[str, Any],
+    config: MosaicOptimizerConfig,
+    parallel_dims: ParallelDims,
+    ft_manager: FTManager | None,
+    param_groups: list[dict[str, Any]] | None,
+) -> OptimizersContainer:
+    optim_in_bwd = config.early_step_in_backward
+
+    if optim_in_bwd:
+        if parallel_dims.ep_enabled:
+            raise NotImplementedError(
+                "Optimizers in backward is not supported with Expert Parallel."
+            )
+        if parallel_dims.pp_enabled:
+            raise NotImplementedError(
+                "Optimizers in backward is not supported with Pipeline Parallel."
+            )
+        if ft_manager and ft_manager.enabled:
+            raise NotImplementedError(
+                "TorchFT is not supported with optimizers in backward."
+            )
+
+    desloc_cfg = config.desloc
+    if desloc_cfg.enabled:
+        if optim_in_bwd:
+            raise NotImplementedError(
+                "DES-LOC does not support optimizers in backward. Disable early_step_in_backward."
+            )
+        if ft_manager is None or not ft_manager.enabled:
+            msg = (
+                "DES-LOC requires TorchFT to be enabled. Set fault_tolerance.enable to true."
+            )
+            raise ValueError(msg)
+        # If the configuration was loaded from a file or passed as a dictionary,
+        # desloc_cfg may still be a dict. Convert it to ensure type consistency.
+        if isinstance(desloc_cfg, dict):  # pragma: no cover - defensive conversion
+            desloc_cfg = DesLocConfig(**desloc_cfg)
+            config.desloc = desloc_cfg
+        return _build_desloc_container(
+            model_parts=model_parts,
+            optimizer_cls=optimizer_cls,
+            optimizer_kwargs=optimizer_kwargs,
+            desloc_cfg=desloc_cfg,
+            parallel_dims=parallel_dims,
+            ft_manager=ft_manager,
+            param_groups=param_groups,
+        )
+
+    if optim_in_bwd:
+        return OptimizersInBackwardContainer(
+            model_parts, optimizer_cls, optimizer_kwargs
+        )
+
+    if ft_manager and ft_manager.enabled:
+        return FTOptimizersContainer(
+            model_parts,
+            optimizer_cls,
+            optimizer_kwargs,
+            ft_manager.manager,
+            use_ft_optimizer=ft_manager.use_async_quorum,
+            param_groups=param_groups,
+        )
+
+    return OptimizersContainer(
+        model_parts,
+        optimizer_cls,
+        optimizer_kwargs,
+        param_groups=param_groups,
+    )
+
+
 def build_mosaic_optimizers(
     model_parts: list[torch.nn.Module],
     optimizer_config: MosaicOptimizerConfig | dict[str, Any],
@@ -123,16 +212,20 @@ def build_mosaic_optimizers(
     ft_manager: FTManager | None = None,
     param_groups: list[dict[str, Any]] | None = None,
 ) -> OptimizersContainer:
-    """Build optimizers via the shared ``torchtitan.components.optimizer`` path."""
+    """Build optimizers for Mosaic jobs without modifying core TorchTitan components."""
 
-    _ensure_optimizer_registration()
-    normalized_config, extra_kwargs = _normalize_mosaic_optimizer_config(optimizer_config)
+    normalized_config, extra_kwargs = _normalize_mosaic_optimizer_config(
+        optimizer_config
+    )
+    optimizer_cls = _resolve_optimizer_class(normalized_config.name)
+    optimizer_kwargs = _build_optimizer_kwargs(normalized_config, extra_kwargs)
 
-    return build_optimizers(
+    return _build_optimizer_container(
         model_parts=model_parts,
-        optimizer_config=normalized_config,
+        optimizer_cls=optimizer_cls,
+        optimizer_kwargs=optimizer_kwargs,
+        config=normalized_config,
         parallel_dims=parallel_dims,
         ft_manager=ft_manager,
         param_groups=param_groups,
-        extra_optimizer_kwargs=extra_kwargs,
     )
