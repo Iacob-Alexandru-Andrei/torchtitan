@@ -5,30 +5,49 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 
-"""DES-LOC specific configuration helpers for TorchFT management."""
+"""DES-LOC configuration helpers for integrating with TorchFT."""
 
 from __future__ import annotations
 
+from contextlib import contextmanager
+from typing import Iterator
+
+from torchtitan.components.ft import has_torchft
 from torchtitan.tools.logging import logger
 
-__all__ = ["enable_desloc_only_ft"]
+__all__ = ["configure_desloc"]
 
 
-def enable_desloc_only_ft(job_config) -> None:
-    """Ensure DES-LOC leverages TorchFT's semi-sync infrastructure."""
+@contextmanager
+def configure_desloc(job_config: object) -> Iterator[None]:
+    """Validate and install DES-LOC integrations prior to trainer creation."""
+
     desloc_cfg = getattr(job_config.optimizer, "desloc", None)
     if not getattr(desloc_cfg, "enabled", False):
+        yield
         return
 
-    current_method = job_config.fault_tolerance.semi_sync_method
-    if current_method is None:
-        job_config.fault_tolerance.semi_sync_method = "desloc"
+    if desloc_cfg.param_sync_every <= 0:
+        msg = "desloc.param_sync_every must be a positive integer."
+        raise ValueError(msg)
+
+    if not has_torchft:
+        raise RuntimeError("DES-LOC support requires the torchft package to be installed.")
+
+    fault_tolerance = getattr(job_config, "fault_tolerance", None)
+    if fault_tolerance is None or not getattr(fault_tolerance, "enable", False):
+        raise ValueError("DES-LOC requires fault_tolerance.enable to be True.")
+
+    method = fault_tolerance.semi_sync_method
+    if method is None:
         logger.info(
             "DES-LOC enabled; defaulting fault_tolerance.semi_sync_method to 'desloc'."
         )
-    elif current_method.lower() != "desloc":
-        logger.warning(
-            "DES-LOC is enabled but fault_tolerance.semi_sync_method is set to '%s'. "
-            "Proceeding without overriding; ensure this is intended.",
-            current_method,
+    elif method.lower() != "desloc":
+        raise ValueError(
+            "DES-LOC requires fault_tolerance.semi_sync_method to be 'desloc'."
         )
+
+    fault_tolerance.semi_sync_method = "desloc"
+
+    yield

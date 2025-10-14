@@ -129,7 +129,8 @@ def maybe_semi_sync_training(
         logger.info(
             f"using fragment function to split model: {fragment_fn is not None}"
         )
-        if semi_sync_method.lower() == "diloco":
+        method = semi_sync_method.lower()
+        if method == "diloco":
             if fragment_fn:
                 model_parts = fragment_fn(model, ft_config, n_layers)
             else:
@@ -163,7 +164,7 @@ def maybe_semi_sync_training(
                 fragment_sync_delay=ft_config.fragment_sync_delay,
                 fragment_update_alpha=ft_config.fragment_update_alpha,
             )
-        elif semi_sync_method.lower() == "local_sgd":
+        elif method == "local_sgd":
             sync_steps = getattr(ft_config, "sync_steps", None)
             if sync_steps is None:
                 logger.warning(
@@ -179,7 +180,7 @@ def maybe_semi_sync_training(
                 optimizer=optimizer,
                 sync_every=sync_steps,
             )
-        elif semi_sync_method.lower() == "desloc":
+        elif method == "desloc":
             try:
                 from torchtitan.experiments.fl.desloc import desloc_semi_sync_context
             except ImportError:  # pragma: no cover - optional dependency path

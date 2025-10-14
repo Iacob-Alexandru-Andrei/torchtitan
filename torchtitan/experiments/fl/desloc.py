@@ -10,7 +10,7 @@ from __future__ import annotations
 import logging
 from contextlib import contextmanager
 from datetime import timedelta
-from typing import Any, TYPE_CHECKING
+from typing import Any, TYPE_CHECKING, Iterator
 
 import torch
 from torch import nn
@@ -27,6 +27,7 @@ if TYPE_CHECKING:
     from collections.abc import Iterable
 
     from torch.optim import Optimizer
+    from torchtitan.components.ft.manager import FTManager
 
 logger = logging.getLogger(__name__)
 
@@ -449,7 +450,7 @@ class DesLocFTOptimizersContainer(FTOptimizersContainer):
     def __init__(
         self,
         model_parts: list[nn.Module],
-        optimizer_cls: type[Optimizer],
+        optimizer_cls: type[torch.optim.Optimizer],
         optimizer_kwargs: dict[str, Any],
         ft_manager: Any,
         desloc_config: DesLocConfig,
@@ -461,7 +462,6 @@ class DesLocFTOptimizersContainer(FTOptimizersContainer):
             msg = "desloc.param_sync_every must be a positive integer."
             raise ValueError(msg)
 
-        self._desloc_config = desloc_config
         super().__init__(
             model_parts,
             optimizer_cls,
@@ -491,25 +491,20 @@ class DesLocFTOptimizersContainer(FTOptimizersContainer):
             )
             self._desloc_controllers.append(controller)
 
-    def zero_grad(self, *args, **kwargs) -> None:
-        """Defer to base zero_grad behavior; DES-LOC starts quorum during sync."""
-        super().zero_grad(*args, **kwargs)
-
-    def step(self, *args, **kwargs) -> None:
-        """Apply local optimizer updates; DES-LOC handles commit rollback separately."""
-        super().step(*args, **kwargs)
-
     def close_desloc(self) -> None:
         """Detach any registered DES-LOC hooks from the wrapped optimizers."""
+
         for controller in self._desloc_controllers:
             controller.close()
         self._desloc_controllers.clear()
 
 
 @contextmanager
-def desloc_semi_sync_context(ft_manager: Any, optimizer: torch.optim.Optimizer) -> None:
+def desloc_semi_sync_context(
+    ft_manager: "FTManager", optimizer: torch.optim.Optimizer
+) -> Iterator[None]:
     """Context manager wiring DES-LOC into TorchFT semi-sync execution."""
-    # DES-LOC controllers are managed by the optimizer container; no extra setup needed here.
+
     try:
         yield
     finally:

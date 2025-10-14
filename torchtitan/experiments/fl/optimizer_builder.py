@@ -85,6 +85,56 @@ def _normalize_mosaic_optimizer_config(
 
     return config, extra_kwargs
 
+    optim_in_bwd = optimizer_config.early_step_in_backward
+    if optim_in_bwd:
+        if parallel_dims.ep_enabled:
+            msg = "Optimizers in backward is not supported with Expert Parallel."
+            raise NotImplementedError(msg)
+        if parallel_dims.pp_enabled:
+            msg = "Optimizers in backward is not supported with Pipeline Parallel."
+            raise NotImplementedError(msg)
+        if ft_manager and ft_manager.enabled:
+            msg = "TorchFT is not supported with optimizers in backward."
+            raise NotImplementedError(msg)
+
+    if desloc_enabled and not (ft_manager and ft_manager.enabled):
+        msg = "DES-LOC requires TorchFT to be enabled. Set fault_tolerance.enable to true."
+        raise ValueError(msg)
+
+    name = optimizer_config.name
+    lr = optimizer_config.lr
+    beta1 = optimizer_config.beta1
+    beta2 = optimizer_config.beta2
+    eps = optimizer_config.eps
+    weight_decay = optimizer_config.weight_decay
+
+    optim_implementation = optimizer_config.implementation
+    assert optim_implementation in ["fused", "foreach", "for-loop"]
+
+    fused = optim_implementation == "fused"
+    foreach = optim_implementation == "foreach"
+
+    optimizer_classes = {
+        "Adam": torch.optim.Adam,
+        "AdamW": torch.optim.AdamW,
+        "ADOPT": ADOPT,
+        "QHADOPT": QHADOPT,
+        "QHAdamW": QHAdamW,
+        "DecoupledAdamW": DecoupledAdamW,
+        "AggMoAdopt": AggMoAdopt,
+        "AggMoAdamW": AggMoAdamW,
+    }
+    if name not in optimizer_classes:
+        msg = f"Optimizer {name} not added."
+        raise NotImplementedError(msg)
+    optimizer_cls = optimizer_classes[name]
+
+    # For AggMo optimizers, use get_betas_tuple() to construct proper betas
+    betas = (
+        optimizer_config.get_betas_tuple()
+        if name in ["AggMoAdopt", "AggMoAdamW"]
+        else (beta1, beta2)
+    )
 
 def _build_optimizer_kwargs(
     config: MosaicOptimizerConfig, extra_kwargs: dict[str, Any]
@@ -182,6 +232,15 @@ def _build_optimizer_container(
             param_groups=param_groups,
         )
 
+    if desloc_enabled and ft_manager and desloc_config is not None:
+        return DesLocFTOptimizersContainer(
+            model_parts,
+            optimizer_cls,
+            optimizer_kwargs,
+            ft_manager.manager,
+            desloc_config,
+            use_ft_optimizer=ft_manager.use_async_quorum,
+            param_groups=param_groups,
     if optim_in_bwd:
         return OptimizersInBackwardContainer(
             model_parts, optimizer_cls, optimizer_kwargs
