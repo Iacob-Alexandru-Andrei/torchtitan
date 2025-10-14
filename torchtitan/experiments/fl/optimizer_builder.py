@@ -57,11 +57,13 @@ def _resolve_optimizer_class(name: str) -> type[Optimizer]:
     try:
         return _ALL_OPTIMIZER_CLASSES[name]
     except KeyError as exc:  # pragma: no cover - validated in configuration tests
-        raise NotImplementedError(f"Optimizer {name!r} is not registered for FL experiments.") from exc
+        raise NotImplementedError(
+            f"Optimizer {name!r} is not registered for FL experiments."
+        ) from exc
 
 
 def _normalize_mosaic_optimizer_config(
-    optimizer_config: MosaicOptimizerConfig | dict[str, Any]
+    optimizer_config: MosaicOptimizerConfig | dict[str, Any],
 ) -> tuple[MosaicOptimizerConfig, dict[str, Any]]:
     if isinstance(optimizer_config, dict):
         config = MosaicOptimizerConfig(**optimizer_config)
@@ -135,6 +137,7 @@ def _normalize_mosaic_optimizer_config(
         if name in ["AggMoAdopt", "AggMoAdamW"]
         else (beta1, beta2)
     )
+
 
 def _build_optimizer_kwargs(
     config: MosaicOptimizerConfig, extra_kwargs: dict[str, Any]
@@ -213,9 +216,7 @@ def _build_optimizer_container(
                 "DES-LOC does not support optimizers in backward. Disable early_step_in_backward."
             )
         if ft_manager is None or not ft_manager.enabled:
-            msg = (
-                "DES-LOC requires TorchFT to be enabled. Set fault_tolerance.enable to true."
-            )
+            msg = "DES-LOC requires TorchFT to be enabled. Set fault_tolerance.enable to true."
             raise ValueError(msg)
         # If the configuration was loaded from a file or passed as a dictionary,
         # desloc_cfg may still be a dict. Convert it to ensure type consistency.
@@ -232,15 +233,17 @@ def _build_optimizer_container(
             param_groups=param_groups,
         )
 
-    if desloc_enabled and ft_manager and desloc_config is not None:
+    if desloc_cfg is not None and desloc_cfg.enabled and ft_manager:
         return DesLocFTOptimizersContainer(
             model_parts,
             optimizer_cls,
             optimizer_kwargs,
             ft_manager.manager,
-            desloc_config,
+            desloc_cfg,
             use_ft_optimizer=ft_manager.use_async_quorum,
             param_groups=param_groups,
+        )
+
     if optim_in_bwd:
         return OptimizersInBackwardContainer(
             model_parts, optimizer_cls, optimizer_kwargs
@@ -272,7 +275,6 @@ def build_mosaic_optimizers(
     param_groups: list[dict[str, Any]] | None = None,
 ) -> OptimizersContainer:
     """Build optimizers for Mosaic jobs without modifying core TorchTitan components."""
-
     normalized_config, extra_kwargs = _normalize_mosaic_optimizer_config(
         optimizer_config
     )

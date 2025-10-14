@@ -24,6 +24,7 @@ To run this script, you can use a command like:
 from __future__ import annotations
 
 import os
+
 import torch
 
 from torchtitan.experiments.fl.components import build_metrics_processor
@@ -31,11 +32,10 @@ from torchtitan.experiments.fl.configs import MosaicConfigManager
 from torchtitan.experiments.fl.dataloader.dataloader import build_mosaic_dataloader
 from torchtitan.experiments.fl.dataloader.tokenizer import build_mosaic_tokenizer
 from torchtitan.experiments.fl.ft_override import configure_desloc
-from torchtitan.experiments.fl.ft_override import enable_desloc_only_ft
 from torchtitan.experiments.fl.models.utils import ensure_mosaic_spec
 from torchtitan.experiments.fl.s3_checkpoint import (
-    S3CheckpointWrapper,
     get_s3_checkpoint_wrapper_factory,
+    S3CheckpointWrapper,
 )
 from torchtitan.tools.logging import init_logger, logger
 from torchtitan.train import Trainer
@@ -88,45 +88,9 @@ def main() -> None:  # noqa: C901, PLR0912, PLR0915
     trainer: Trainer | None = None
     s3_manager: S3CheckpointManager | None = None
     download_manager: S3CheckpointManager | None = None
-    if (job_config.training.compile and torch.cuda.is_available()) and (
-        job_config.parallelism.pipeline_parallel_size > 1
-    ):
-        logger.warning(
-            "Pipeline parallel training does not support torch.compile"
+
     s3_manager: S3CheckpointWrapper | None = None
     download_manager: S3CheckpointWrapper | None = None
-    try:
-        enable_desloc_only_ft(job_config)
-        trainer = Trainer(job_config)
-
-        checkpointer = trainer.checkpointer
-        ft_manager = getattr(checkpointer, "ft_manager", None)
-        ft_mode = bool(getattr(ft_manager, "enabled", False))
-        if ft_mode:
-            checkpointer.enable = False
-
-        if ft_mode:
-            is_checkpoint_writer = True
-        elif ft_manager is not None:
-            is_checkpoint_writer = ft_manager.participating_rank() == 0
-            if torch.distributed.is_initialized():
-                is_checkpoint_writer = (
-                    is_checkpoint_writer and torch.distributed.get_rank() == 0
-                )
-        elif torch.distributed.is_initialized():
-            is_checkpoint_writer = torch.distributed.get_rank() == 0
-        else:
-            is_checkpoint_writer = True
-
-        s3_checkpointing_active = (
-            job_config.s3_checkpoint.enable
-            and bool(job_config.s3_checkpoint.bucket)
-            and job_config.s3_checkpoint.prefix is not None  # Empty string "" is valid!
-        )
-        job_config.training.compile = False
-
-    if job_config.training.compile:
-        torch._dynamo.config.verbose = True
 
     try:
         with configure_desloc(job_config):
@@ -154,7 +118,8 @@ def main() -> None:  # noqa: C901, PLR0912, PLR0915
             s3_checkpointing_active = (
                 job_config.s3_checkpoint.enable
                 and bool(job_config.s3_checkpoint.bucket)
-                and job_config.s3_checkpoint.prefix is not None  # Empty string "" is valid!
+                and job_config.s3_checkpoint.prefix
+                is not None  # Empty string "" is valid!
             )
 
         wrapper_factory = (
@@ -304,7 +269,10 @@ def main() -> None:  # noqa: C901, PLR0912, PLR0915
                     logger.info(f"[S3 DEBUG] download_manager={download_manager}")
 
             # Override WandB run name to include rank if save_for_all_ranks is enabled
-            if job_config.metrics.save_for_all_ranks and job_config.metrics.enable_wandb:
+            if (
+                job_config.metrics.save_for_all_ranks
+                and job_config.metrics.enable_wandb
+            ):
                 try:
                     import wandb  # noqa: PLC0415
 
@@ -355,7 +323,9 @@ def main() -> None:  # noqa: C901, PLR0912, PLR0915
                             replica_suffix = f"rep{replica_identifier}"
                         else:
                             replica_identifier = os.getpid()
-                            global_worker_id = f"pid{replica_identifier}-rank{local_rank}"
+                            global_worker_id = (
+                                f"pid{replica_identifier}-rank{local_rank}"
+                            )
                             replica_suffix = f"rep{replica_identifier}"
 
                         suffix = f"{replica_suffix}-rank{local_rank}"
@@ -364,7 +334,9 @@ def main() -> None:  # noqa: C901, PLR0912, PLR0915
                         if f"-worker{global_worker_id}" in original_name:
                             new_name = original_name
                         else:
-                            new_name = f"{original_name}-worker{global_worker_id}-{suffix}"
+                            new_name = (
+                                f"{original_name}-worker{global_worker_id}-{suffix}"
+                            )
                             wandb.run.name = new_name
                             wandb.run.save()
                             logger.info(
@@ -392,7 +364,9 @@ def main() -> None:  # noqa: C901, PLR0912, PLR0915
                     f"[S3 DEBUG] download_manager={download_manager}, s3_checkpointing_active={s3_checkpointing_active}"
                 )
                 if download_manager:
-                    logger.info("[S3 DEBUG] Calling download_manager.download_if_needed()")
+                    logger.info(
+                        "[S3 DEBUG] Calling download_manager.download_if_needed()"
+                    )
                     download_manager.download_if_needed()  # type: ignore[attr-defined]
                     logger.info("[S3 DEBUG] download_if_needed() completed")
                 else:
