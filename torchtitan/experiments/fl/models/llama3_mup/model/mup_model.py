@@ -248,46 +248,72 @@ class Transformer(nn.Module, ModelProtocol):
                 optimizer_config,
             )
 
-        emb_params = []
-        hidden_ln_params = []
-        decay_lr_depth_width_scaling = []
-        hidden_bias_params = []
-        no_decay_params = []
+        param_entries: list[tuple[str, Parameter]] = [
+            (name, param)
+            for name, param in self.named_parameters(remove_duplicate=True)
+            if param.requires_grad
+        ]
 
-        # Add embedding weight
-        emb_params.append(self.tok_embeddings.weight)
+        emb_params: list[Parameter] = []
+        hidden_ln_params: list[Parameter] = []
+        decay_lr_depth_width_scaling: list[Parameter] = []
+        hidden_bias_params: list[Parameter] = []
+        no_decay_params: list[Parameter] = []
+        remaining_params: list[tuple[str, Parameter]] = []
 
-        # Add output weight only if not tied
-        # When tied, tok_embeddings.weight and output.weight are the same object
+        embed_suffixes = ["tok_embeddings.weight"]
         if not self.model_args.tie_word_embeddings:
-            emb_params.append(self.output.weight)
+            embed_suffixes.append("output.weight")
 
-        if self.embedding_norm is not None:
-            no_decay_params.extend(p for p in self.embedding_norm.parameters())
+        hidden_ln_suffixes = ["attention_norm.weight", "ffn_norm.weight"]
+        if self.model_args.use_peri_norm:
+            hidden_ln_suffixes.extend(["post_attn_norm.weight", "post_ffn_norm.weight"])
 
-        no_decay_params.extend(p for p in self.norm.parameters())
+        no_decay_suffixes = ["embedding_norm.weight", "norm.weight"]
+        decay_weight_suffixes = [
+            "wq.weight",
+            "wk.weight",
+            "wv.weight",
+            "wo.weight",
+            "w1.weight",
+            "w2.weight",
+            "w3.weight",
+        ]
 
-        for block_module in self.layers.values():
-            # Cast to TransformerBlock to help type checker
-            block = cast("TransformerBlock", block_module)
+        for name, param in param_entries:
+            if any(name.endswith(suffix) for suffix in embed_suffixes):
+                emb_params.append(param)
+            elif any(name.endswith(suffix) for suffix in hidden_ln_suffixes):
+                hidden_ln_params.append(param)
+            elif name.endswith(".bias"):
+                hidden_bias_params.append(param)
+            elif any(name.endswith(suffix) for suffix in no_decay_suffixes):
+                no_decay_params.append(param)
+            elif any(name.endswith(suffix) for suffix in decay_weight_suffixes):
+                decay_lr_depth_width_scaling.append(param)
+            else:
+                remaining_params.append((name, param))
 
-            hidden_ln_params.extend(p for p in block.attention_norm.parameters())
-            hidden_ln_params.extend(p for p in block.ffn_norm.parameters())
-            if block.use_peri_norm:
-                hidden_ln_params.extend(p for p in block.post_attn_norm.parameters())
-                hidden_ln_params.extend(p for p in block.post_ffn_norm.parameters())
+        # Any remaining parameters fall back to weight-decay or no-decay groups based on suffix.
+        for name, param in remaining_params:
+            if name.endswith(".weight"):
+                decay_lr_depth_width_scaling.append(param)
+            else:
+                no_decay_params.append(param)
 
-            # Cast attention and feed_forward to their correct types
-            attention = cast("Attention", block.attention)
-            feed_forward = cast("FeedForward", block.feed_forward)
-
-            decay_lr_depth_width_scaling.append(attention.wq.weight)
-            decay_lr_depth_width_scaling.append(attention.wk.weight)
-            decay_lr_depth_width_scaling.append(attention.wv.weight)
-            decay_lr_depth_width_scaling.append(attention.wo.weight)
-            decay_lr_depth_width_scaling.append(feed_forward.w1.weight)
-            decay_lr_depth_width_scaling.append(feed_forward.w2.weight)
-            decay_lr_depth_width_scaling.append(feed_forward.w3.weight)
+        total_params_accounted = (
+            len(emb_params)
+            + len(hidden_ln_params)
+            + len(hidden_bias_params)
+            + len(no_decay_params)
+            + len(decay_lr_depth_width_scaling)
+        )
+        if total_params_accounted != len(param_entries):
+            msg = (
+                "MuP optimizer grouping failed to account for all parameters. "
+                f"Expected {len(param_entries)}, got {total_params_accounted}."
+            )
+            raise RuntimeError(msg)
 
         base_lr = optimizer_config["lr"]
         weight_decay = optimizer_config.get("weight_decay", 0.0)

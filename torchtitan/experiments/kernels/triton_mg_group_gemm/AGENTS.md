@@ -69,8 +69,8 @@ __init__.py→[] benchmark.py→[benchmark_model_configs(void)→{mg_grouped_gem
 ## DEPENDENCY_PATTERNS
 
 ### EDGE_PATTERNS
-Contains: 25 edges
 Call: 50 edges
+Contains: 25 edges
 
 ### CROSS_CLUSTER_FLOW
 TESTS→UTILITY_LAYER: 23

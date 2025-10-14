@@ -19,8 +19,8 @@ enable_wandb = true
 save_for_all_ranks = true
 
 [model]
-name = "mosaic_llama3"
-flavor = "debugmodel"
+name = "mosaic_llama3_mup"
+flavor = "16M"
 # test folder with tokenizer.json, for debug purpose only
 hf_assets_path = "./tests/assets/tokenizer"
 # converters = ["float8"]

@@ -49,7 +49,8 @@ decay_type = "linear"
 min_lr_factor = 0.0
 
 [training]
-local_batch_size = 8
+local_batch_size = 2
+global_batch_size = 8
 seq_len = 2048
 max_norm = 1.0  # grad norm clipping
 steps = 20
