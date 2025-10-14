@@ -20,7 +20,6 @@ from torchtitan.experiments.fl.configs.optimizers import (
     DesLocConfig,
     MosaicOptimizerConfig,
 )
-from torchtitan.experiments.fl.desloc import DesLocFTOptimizersContainer
 from torchtitan.experiments.fl.optimizers import (
     ADOPT,
     AggMoAdamW,
@@ -70,9 +69,6 @@ def build_mosaic_optimizers(  # noqa: C901, PLR0912
             msg = "TorchFT is not supported with optimizers in backward."
             raise NotImplementedError(msg)
 
-    if desloc_enabled and not (ft_manager and ft_manager.enabled):
-        msg = "DES-LOC requires TorchFT to be enabled. Set fault_tolerance.enable to true."
-        raise ValueError(msg)
     if desloc_enabled and not (ft_manager and ft_manager.enabled):
         msg = "DES-LOC requires TorchFT to be enabled. Set fault_tolerance.enable to true."
         raise ValueError(msg)
@@ -131,17 +127,6 @@ def build_mosaic_optimizers(  # noqa: C901, PLR0912
     if optim_in_bwd:
         return OptimizersInBackwardContainer(
             model_parts, optimizer_cls, optimizer_kwargs
-        )
-
-    if desloc_enabled and ft_manager is not None and desloc_config is not None:
-        return DesLocFTOptimizersContainer(
-            model_parts,
-            optimizer_cls,
-            optimizer_kwargs,
-            ft_manager.manager,
-            desloc_config,
-            use_ft_optimizer=ft_manager.use_async_quorum,
-            param_groups=param_groups,
         )
 
     if ft_manager and ft_manager.enabled:

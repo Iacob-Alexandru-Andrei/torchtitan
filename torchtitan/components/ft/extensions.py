@@ -40,7 +40,7 @@ class SemiSyncFactory(Protocol):
         *,
         ft_manager: "FTManager",
         optimizer: "Optimizer",
-    ) -> ContextManager[Any]:
+    ) -> "ContextManager[Any]":
         """Return a context manager wrapping semi-sync execution."""
 
 

@@ -21,7 +21,7 @@ __all__ = ["configure_desloc"]
 
 
 @contextmanager
-def configure_desloc(job_config) -> Iterator[None]:
+def configure_desloc(job_config: object) -> Iterator[None]:
     """Validate and install DES-LOC integrations prior to trainer creation."""
 
     desloc_cfg = getattr(job_config.optimizer, "desloc", None)

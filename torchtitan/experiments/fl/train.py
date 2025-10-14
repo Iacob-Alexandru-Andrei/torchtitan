@@ -118,6 +118,17 @@ def main() -> None:  # noqa: C901, PLR0912, PLR0915
     trainer: Trainer | None = None
     s3_manager: S3CheckpointManager | None = None
     download_manager: S3CheckpointManager | None = None
+    if (job_config.training.compile and torch.cuda.is_available()) and (
+        job_config.parallelism.pipeline_parallel_size > 1
+    ):
+        logger.warning(
+            "Pipeline parallel training does not support torch.compile"
+        )
+        job_config.training.compile = False
+
+    if job_config.training.compile:
+        torch._dynamo.config.verbose = True
+
     try:
         with configure_desloc(job_config):
             trainer = Trainer(job_config)
@@ -176,17 +187,6 @@ def main() -> None:  # noqa: C901, PLR0912, PLR0915
                         checkpointer, job_config, install=False
                     )
                     logger.info(f"[S3 DEBUG] download_manager={download_manager}")
-
-            if (job_config.training.compile and torch.cuda.is_available()) and (
-                job_config.parallelism.pipeline_parallel_size > 1
-            ):
-                logger.warning(
-                    "Pipeline parallel training does not support torch.compile"
-                )
-                job_config.training.compile = False
-
-            if job_config.training.compile:
-                torch._dynamo.config.verbose = True
 
             # Override WandB run name to include rank if save_for_all_ranks is enabled
             if job_config.metrics.save_for_all_ranks and job_config.metrics.enable_wandb:

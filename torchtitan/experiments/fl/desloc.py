@@ -30,6 +30,8 @@ if TYPE_CHECKING:
     from collections.abc import Iterable
 
     from torch.optim import Optimizer
+    from torchtitan.components.ft.manager import FTManager
+    from torchtitan.components.optimizer import FTOptimizersContainer
 
 logger = logging.getLogger(__name__)
 
@@ -447,7 +449,9 @@ class DesLocController:
 
 
 @contextmanager
-def desloc_semi_sync_context(ft_manager: Any, optimizer: torch.optim.Optimizer) -> None:
+def desloc_semi_sync_context(
+    ft_manager: "FTManager", optimizer: torch.optim.Optimizer
+) -> Iterator[None]:
     """Context manager wiring DES-LOC into TorchFT semi-sync execution."""
     try:
         yield
@@ -463,11 +467,13 @@ def desloc_semi_sync_context(ft_manager: Any, optimizer: torch.optim.Optimizer) 
 
 def _make_optimizer_extension(
     desloc_config: DesLocConfig,
-) -> Callable[[Any, Any], Callable[[], None]]:
+) -> Callable[["FTOptimizersContainer", Any], Callable[[], None]]:
     backup_device = desloc_config.resolved_backup_device()
     optimizer_sync = desloc_config.normalized_optimizer_sync()
 
-    def extension(container: Any, ft_manager: Any) -> Callable[[], None]:
+    def extension(
+        container: "FTOptimizersContainer", ft_manager: Any
+    ) -> Callable[[], None]:
         controllers: list[DesLocController] = []
         for idx, (model, optimizer) in enumerate(
             zip(container.model_parts, container.optimizers, strict=True)
