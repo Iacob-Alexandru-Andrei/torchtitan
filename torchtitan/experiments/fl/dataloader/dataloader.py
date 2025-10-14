@@ -20,7 +20,7 @@ from collections.abc import Callable, Mapping, Sequence
 from copy import deepcopy
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, TYPE_CHECKING
 from urllib.parse import urlparse
 
 import torch
@@ -35,10 +35,11 @@ try:
     from llmfoundry.data.text_data import StreamingTextDataset
     from streaming import Stream, StreamingDataset
 except ImportError as exc:  # pragma: no cover - optional dependency
-    raise RuntimeError(
+    msg = (
         "llm-foundry and streaming are required to build Mosaic dataloaders. "
         "Please install llm-foundry, mosaicml-streaming, and composer to enable this integration."
-    ) from exc
+    )
+    raise RuntimeError(msg) from exc
 
 try:
     from streaming.base.util import clean_stale_shared_memory
@@ -46,16 +47,18 @@ except ImportError:  # pragma: no cover - optional dependency
     clean_stale_shared_memory = None  # type: ignore[assignment]
 
 from torchtitan.components.dataloader import BaseDataLoader
-from torchtitan.components.tokenizer import BaseTokenizer
-from torchtitan.experiments.fl.configs.config import (
-    MosaicJobConfig,
-    UnigramMetricConfig,
-)
 from torchtitan.experiments.fl.s3_checkpoint import (
     create_remote_up_down,
     download_file_from_s3,
 )
 from torchtitan.tools.logging import logger
+
+if TYPE_CHECKING:
+    from torchtitan.components.tokenizer import BaseTokenizer
+    from torchtitan.experiments.fl.configs.config import (
+        MosaicJobConfig,
+        UnigramMetricConfig,
+    )
 
 _SHM_CLEANED: bool = False
 
@@ -181,13 +184,15 @@ def _normalize_sampling_groups(config: Any) -> list[dict[str, Any]]:
     elif isinstance(config, Sequence) and not isinstance(config, (str, bytes)):
         iterator = enumerate(config)
     else:
-        raise TypeError("sampling_groups must be a mapping or a sequence of mappings")
+        msg = "sampling_groups must be a mapping or a sequence of mappings"
+        raise TypeError(msg)
 
     for key, value in iterator:
         if value is None:
             continue
         if not isinstance(value, Mapping):
-            raise TypeError("Each sampling group entry must be a mapping")
+            msg = "Each sampling group entry must be a mapping"
+            raise TypeError(msg)
         group = deepcopy(dict(value))
         default_name = str(key) if not isinstance(key, int) else f"group_{key}"
         group["name"] = str(group.get("name") or default_name)
@@ -199,9 +204,8 @@ def _collect_group_stream_entries(group: Mapping[str, Any]) -> list[Any]:
     """Extract the raw stream entries referenced by a sampling group."""
     raw_streams = group.get("streams") or group.get("client_streams")
     if raw_streams is None:
-        raise ValueError(
-            f"Sampling group '{group.get('name')}' must define a 'streams' section"
-        )
+        msg = f"Sampling group '{group.get('name')}' must define a 'streams' section"
+        raise ValueError(msg)
 
     if isinstance(raw_streams, Mapping):
         flattened = _flatten_stream_configs(raw_streams)
@@ -210,9 +214,8 @@ def _collect_group_stream_entries(group: Mapping[str, Any]) -> list[Any]:
         return list(raw_streams)
     if isinstance(raw_streams, str):
         return [raw_streams]
-    raise TypeError(
-        "Sampling group stream entries must be mappings, sequences, or strings"
-    )
+    msg = "Sampling group stream entries must be mappings, sequences, or strings"
+    raise TypeError(msg)
 
 
 def _select_dataset_config(
@@ -271,9 +274,8 @@ def _extract_streams(dataset_cfg: dict[str, Any]) -> StreamExtractionResult:
             for index, entry in enumerate(entries):
                 if isinstance(entry, str):
                     if entry not in flattened:
-                        raise KeyError(
-                            f"Sampling group '{group.get('name')}' references unknown stream '{entry}'"
-                        )
+                        msg = f"Sampling group '{group.get('name')}' references unknown stream '{entry}'"
+                        raise KeyError(msg)
                     candidate = deepcopy(flattened[entry])
                     candidate.setdefault("name", entry)
                 elif isinstance(entry, Mapping):
@@ -294,9 +296,8 @@ def _extract_streams(dataset_cfg: dict[str, Any]) -> StreamExtractionResult:
                     elif "name" not in candidate or candidate["name"] is None:
                         candidate["name"] = f"{group.get('name')}_stream_{index}"
                 else:
-                    raise TypeError(
-                        "Sampling group stream entries must be mappings, sequences, or strings"
-                    )
+                    msg = "Sampling group stream entries must be mappings, sequences, or strings"
+                    raise TypeError(msg)
 
                 candidate.setdefault("name", f"stream_{len(aggregated)}")
                 identifier = (
@@ -564,7 +565,8 @@ def _load_stream_unigram_counts(
         with unigram_path.open("r", encoding="utf-8") as handle:
             payload = json.load(handle)
     except FileNotFoundError as exc:
-        raise RuntimeError(f"Unable to open unigram file {unigram_path}") from exc
+        msg = f"Unable to open unigram file {unigram_path}"
+        raise RuntimeError(msg) from exc
 
     counts: Counter = Counter()
     for key, value in payload.items():
@@ -573,10 +575,7 @@ def _load_stream_unigram_counts(
         except (ValueError, TypeError):
             token_id = int(ast.literal_eval(key))
 
-        if isinstance(value, (list, tuple)):
-            freq = int(value[0])
-        else:
-            freq = int(value)
+        freq = int(value[0]) if isinstance(value, (list, tuple)) else int(value)
 
         counts[token_id] += freq
 
@@ -592,7 +591,8 @@ def _normalize_mosaic_dataloader_config(
     """Normalize high-level Mosaic dataloader configuration into typed payloads."""
     mosaic_cfg = job_config.mosaic_dataloader
     if not mosaic_cfg:
-        raise ValueError("mosaic_dataloader config must be set.")
+        msg = "mosaic_dataloader config must be set."
+        raise ValueError(msg)
 
     cfg = deepcopy(mosaic_cfg)
     dataset_cfg_raw = cfg.dataset
@@ -662,9 +662,8 @@ def _select_stream_subset(
             stream_subset = streams
 
         if not stream_subset:
-            raise ValueError(
-                f"No streams resolved for Mosaic sampling group {group_index} (dp_rank={dp_rank})."
-            )
+            msg = f"No streams resolved for Mosaic sampling group {group_index} (dp_rank={dp_rank})."
+            raise ValueError(msg)
         logger.info(
             "Assigning Mosaic sampling group %s (dp_rank=%d) with %d stream(s): %s",
             "global" if group_index is None else group_index,
@@ -765,9 +764,8 @@ def _setup_unigram_metric(
                 exc,
             )
             return UnigramSetupResult(collate_fn=collate_fn, group_key=None)
-        raise RuntimeError(
-            f"Unable to construct unigram metric for {unigram_group_key}: {exc}"
-        ) from exc
+        msg = f"Unable to construct unigram metric for {unigram_group_key}: {exc}"
+        raise RuntimeError(msg) from exc
 
     if unigram_metric is not None:
         add_unigram_metric(unigram_metric)
@@ -846,7 +844,7 @@ class StatefulStreamingTextDataset(StreamingTextDataset):
         **kwargs: Keyword arguments to pass to StreamingTextDataset.
     """
 
-    def __init__(self, *args: Any, **kwargs: Any):
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
         self._num_samples_yielded = 0
 
@@ -917,7 +915,7 @@ class MosaicParallelAwareDataloader(StatefulDataLoader, BaseDataLoader):
         pin_memory: bool = True,
         persistent_workers: bool = True,
         drop_last: bool = True,
-    ):
+    ) -> None:
         self.dp_world_size = dp_world_size
         self.dp_rank = dp_rank
         self.batch_size = batch_size
@@ -977,7 +975,8 @@ def titan_collate_fn(batch: list[Any]) -> tuple[dict[str, torch.Tensor], torch.T
     elif isinstance(batch[0], torch.Tensor):
         input_ids_tensor = torch.stack(batch)
     else:
-        raise TypeError(f"Unsupported batch item type from dataset: {type(batch[0])}")
+        msg = f"Unsupported batch item type from dataset: {type(batch[0])}"
+        raise TypeError(msg)
 
     model_inputs = input_ids_tensor[:, :-1].contiguous()
     labels = input_ids_tensor[:, 1:].contiguous()
@@ -1001,7 +1000,8 @@ def _build_mosaic_dataloader(
     )
     mosaic_cfg = job_config.mosaic_dataloader
     if not mosaic_cfg.dataset:
-        raise ValueError("mosaic_dataloader config must define a dataset section.")
+        msg = "mosaic_dataloader config must define a dataset section."
+        raise ValueError(msg)
 
     dataset_cfg_raw = deepcopy(mosaic_cfg.dataset)
     dataset_cfg = _select_dataset_config(dataset_cfg_raw, split)

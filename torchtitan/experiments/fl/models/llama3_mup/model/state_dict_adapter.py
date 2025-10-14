@@ -10,8 +10,7 @@ from .mup_args import TransformerModelArgs
 
 
 class Llama3MuPStateDictAdapter(Llama3StateDictAdapter):
-    """
-    State dict adapter for Llama3 MuP model.
+    """State dict adapter for Llama3 MuP model.
 
     Inherits from the standard Llama3StateDictAdapter and extends the mapping
     to handle MuP-specific features:
@@ -54,7 +53,7 @@ class Llama3MuPStateDictAdapter(Llama3StateDictAdapter):
         self,
         model_args: TransformerModelArgs,
         hf_assets_path: str | None,
-    ):
+    ) -> None:
         # Initialize base adapter with standard Llama3 mappings
         super().__init__(model_args, hf_assets_path)
 

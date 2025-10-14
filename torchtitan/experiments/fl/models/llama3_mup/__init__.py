@@ -8,4 +8,4 @@ from .model.mup_args import TransformerModelArgs
 from .model.mup_model import Transformer
 from .train_configs import get_train_spec
 
-__all__ = ["get_train_spec", "Transformer", "TransformerModelArgs"]
+__all__ = ["Transformer", "TransformerModelArgs", "get_train_spec"]

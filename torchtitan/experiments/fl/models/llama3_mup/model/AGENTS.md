@@ -63,8 +63,8 @@ __init__.py→[] mup_args.py→[] mup_model.py→[_precompute_freqs_cis((self))[
 ## DEPENDENCY_PATTERNS
 
 ### EDGE_PATTERNS
-Contains: 11 edges
 Call: 1 edges
+Contains: 11 edges
 
 ### CROSS_CLUSTER_FLOW
 

@@ -6,7 +6,7 @@
 """Mosaic Llama3 MuP model with Mosaic streaming support."""
 
 from dataclasses import replace
-from typing import TYPE_CHECKING, Any, cast
+from typing import Any, cast, TYPE_CHECKING
 
 from torch import nn
 
@@ -17,11 +17,11 @@ from torchtitan.distributed import ParallelDims
 from torchtitan.experiments.fl.configs.optimizers import MosaicOptimizerConfig
 from torchtitan.experiments.fl.models.constants import MOSAIC_LLAMA_VOCAB_SIZE
 from torchtitan.experiments.fl.models.utils import ensure_mosaic_spec
-from torchtitan.experiments.fl.validate import build_mosaic_validator
 from torchtitan.experiments.fl.optimizer_builder import build_mosaic_optimizers
+from torchtitan.experiments.fl.validate import build_mosaic_validator
 from torchtitan.protocols.train_spec import (
-    TrainSpec,
     get_train_spec as get_registered_train_spec,
+    TrainSpec,
 )
 
 if TYPE_CHECKING:
@@ -64,10 +64,14 @@ def build_mosaic_mup_optimizers(
     }
 
     # MuP requires custom parameter groups for different learning rates.
-    param_groups_or_iter, final_optimizer_kwargs = model.get_optimizer_param_groups(initial_optimizer_kwargs)
+    param_groups_or_iter, final_optimizer_kwargs = model.get_optimizer_param_groups(
+        initial_optimizer_kwargs
+    )
 
     # Convert Iterator to None for build_optimizers (it will use model.parameters())
-    param_groups_list = param_groups_or_iter if isinstance(param_groups_or_iter, list) else None
+    param_groups_list = (
+        param_groups_or_iter if isinstance(param_groups_or_iter, list) else None
+    )
 
     # Update the config with MuP-adjusted values
     optimizer_config.eps = final_optimizer_kwargs.get("eps", optimizer_config.eps)
@@ -93,7 +97,6 @@ def _update_vocab_sizes(base_spec: TrainSpec, mosaic_spec: TrainSpec) -> TrainSp
 
 def get_train_spec() -> TrainSpec:
     """Get the training specification for Llama3 MuP with Mosaic streaming support."""
-
     spec_name = ensure_mosaic_spec(
         "llama3_mup",
         spec_name="mosaic_llama3_mup",

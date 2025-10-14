@@ -8,19 +8,23 @@
 
 from __future__ import annotations
 
-from collections.abc import Generator
+from typing import TYPE_CHECKING
 
-from torch.distributed.pipelining.schedules import _PipelineSchedule
-
-from torchtitan.components.loss import LossFunction
-from torchtitan.components.metrics import MetricsProcessor
-from torchtitan.components.tokenizer import BaseTokenizer
 from torchtitan.components.validate import Validator
-from torchtitan.distributed import ParallelDims
-from torchtitan.experiments.fl.configs.config import MosaicJobConfig
 from torchtitan.experiments.fl.dataloader.dataloader import (
     build_mosaic_validation_dataloader,
 )
+
+if TYPE_CHECKING:
+    from collections.abc import Generator
+
+    from torch.distributed.pipelining.schedules import _PipelineSchedule
+
+    from torchtitan.components.loss import LossFunction
+    from torchtitan.components.metrics import MetricsProcessor
+    from torchtitan.components.tokenizer import BaseTokenizer
+    from torchtitan.distributed import ParallelDims
+    from torchtitan.experiments.fl.configs.config import MosaicJobConfig
 
 
 class MosaicValidator(Validator):
@@ -78,7 +82,6 @@ def build_mosaic_validator(
     pp_has_last_stage: bool | None = None,
 ) -> MosaicValidator:
     """Build a validator that uses Mosaic streaming for the validation split."""
-
     return MosaicValidator(
         job_config=job_config,
         dp_world_size=dp_world_size,
@@ -95,4 +98,4 @@ def build_mosaic_validator(
     )
 
 
-__all__ = ["build_mosaic_validator", "MosaicValidator"]
+__all__ = ["MosaicValidator", "build_mosaic_validator"]

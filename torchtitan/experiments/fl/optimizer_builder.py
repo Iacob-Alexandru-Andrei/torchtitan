@@ -7,18 +7,15 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, TYPE_CHECKING
 
 import torch
-from torch.optim import Optimizer
 
-from torchtitan.components.ft import FTManager
 from torchtitan.components.optimizer import (
     FTOptimizersContainer,
     OptimizersContainer,
     OptimizersInBackwardContainer,
 )
-from torchtitan.distributed import ParallelDims
 from torchtitan.experiments.fl.configs.optimizers import (
     DesLocConfig,
     MosaicOptimizerConfig,
@@ -32,6 +29,12 @@ from torchtitan.experiments.fl.optimizers import (
     QHAdamW,
     QHADOPT,
 )
+
+if TYPE_CHECKING:
+    from torch.optim import Optimizer
+
+    from torchtitan.components.ft import FTManager
+    from torchtitan.distributed import ParallelDims
 
 _BASE_OPTIMIZER_CLASSES: dict[str, type[Optimizer]] = {
     "Adam": torch.optim.Adam,
@@ -57,18 +60,18 @@ def _resolve_optimizer_class(name: str) -> type[Optimizer]:
     try:
         return _ALL_OPTIMIZER_CLASSES[name]
     except KeyError as exc:  # pragma: no cover - validated in configuration tests
-        raise NotImplementedError(
-            f"Optimizer {name!r} is not registered for FL experiments."
-        ) from exc
+        msg = f"Optimizer {name!r} is not registered for FL experiments."
+        raise NotImplementedError(msg) from exc
 
 
 def _normalize_mosaic_optimizer_config(
     optimizer_config: MosaicOptimizerConfig | dict[str, Any],
 ) -> tuple[MosaicOptimizerConfig, dict[str, Any]]:
-    if isinstance(optimizer_config, dict):
-        config = MosaicOptimizerConfig(**optimizer_config)
-    else:
-        config = optimizer_config
+    config = (
+        MosaicOptimizerConfig(**optimizer_config)
+        if isinstance(optimizer_config, dict)
+        else optimizer_config
+    )
 
     if isinstance(config.desloc, dict):
         config.desloc = DesLocConfig(**config.desloc)
@@ -104,17 +107,11 @@ def _normalize_mosaic_optimizer_config(
         raise ValueError(msg)
 
     name = optimizer_config.name
-    lr = optimizer_config.lr
     beta1 = optimizer_config.beta1
     beta2 = optimizer_config.beta2
-    eps = optimizer_config.eps
-    weight_decay = optimizer_config.weight_decay
 
     optim_implementation = optimizer_config.implementation
     assert optim_implementation in ["fused", "foreach", "for-loop"]
-
-    fused = optim_implementation == "fused"
-    foreach = optim_implementation == "foreach"
 
     optimizer_classes = {
         "Adam": torch.optim.Adam,
@@ -129,14 +126,15 @@ def _normalize_mosaic_optimizer_config(
     if name not in optimizer_classes:
         msg = f"Optimizer {name} not added."
         raise NotImplementedError(msg)
-    optimizer_cls = optimizer_classes[name]
+    optimizer_classes[name]
 
     # For AggMo optimizers, use get_betas_tuple() to construct proper betas
-    betas = (
+    (
         optimizer_config.get_betas_tuple()
         if name in ["AggMoAdopt", "AggMoAdamW"]
         else (beta1, beta2)
     )
+    return None
 
 
 def _build_optimizer_kwargs(
@@ -168,9 +166,11 @@ def _build_desloc_container(
     param_groups: list[dict[str, Any]] | None,
 ) -> OptimizersContainer:
     if parallel_dims.ep_enabled:
-        raise NotImplementedError("DES-LOC is not supported with Expert Parallel.")
+        msg = "DES-LOC is not supported with Expert Parallel."
+        raise NotImplementedError(msg)
     if parallel_dims.pp_enabled:
-        raise NotImplementedError("DES-LOC is not supported with Pipeline Parallel.")
+        msg = "DES-LOC is not supported with Pipeline Parallel."
+        raise NotImplementedError(msg)
 
     return DesLocFTOptimizersContainer(
         model_parts,
@@ -197,24 +197,20 @@ def _build_optimizer_container(
 
     if optim_in_bwd:
         if parallel_dims.ep_enabled:
-            raise NotImplementedError(
-                "Optimizers in backward is not supported with Expert Parallel."
-            )
+            msg = "Optimizers in backward is not supported with Expert Parallel."
+            raise NotImplementedError(msg)
         if parallel_dims.pp_enabled:
-            raise NotImplementedError(
-                "Optimizers in backward is not supported with Pipeline Parallel."
-            )
+            msg = "Optimizers in backward is not supported with Pipeline Parallel."
+            raise NotImplementedError(msg)
         if ft_manager and ft_manager.enabled:
-            raise NotImplementedError(
-                "TorchFT is not supported with optimizers in backward."
-            )
+            msg = "TorchFT is not supported with optimizers in backward."
+            raise NotImplementedError(msg)
 
     desloc_cfg = config.desloc
     if desloc_cfg.enabled:
         if optim_in_bwd:
-            raise NotImplementedError(
-                "DES-LOC does not support optimizers in backward. Disable early_step_in_backward."
-            )
+            msg = "DES-LOC does not support optimizers in backward. Disable early_step_in_backward."
+            raise NotImplementedError(msg)
         if ft_manager is None or not ft_manager.enabled:
             msg = "DES-LOC requires TorchFT to be enabled. Set fault_tolerance.enable to true."
             raise ValueError(msg)

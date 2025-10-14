@@ -8,13 +8,17 @@ from __future__ import annotations
 
 import functools
 import math
-from collections.abc import Callable
+from typing import TYPE_CHECKING
 
 from torchtitan.components.lr_scheduler import LRSchedulersContainer
-from torchtitan.components.optimizer import OptimizersContainer
 
-from torchtitan.experiments.fl.configs.config import FLLRSchedulerConfig
 from torchtitan.tools.logging import logger
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+    from torchtitan.components.optimizer import OptimizersContainer
+    from torchtitan.experiments.fl.configs.config import FLLRSchedulerConfig
 
 
 def _linear_warmup_stable_decay(

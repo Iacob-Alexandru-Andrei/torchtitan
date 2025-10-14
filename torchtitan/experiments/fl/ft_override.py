@@ -10,10 +10,13 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
-from typing import Iterator
+from typing import TYPE_CHECKING
 
 from torchtitan.components.ft import has_torchft
 from torchtitan.tools.logging import logger
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
 
 __all__ = ["configure_desloc"]
 
@@ -21,7 +24,6 @@ __all__ = ["configure_desloc"]
 @contextmanager
 def configure_desloc(job_config: object) -> Iterator[None]:
     """Validate and install DES-LOC integrations prior to trainer creation."""
-
     desloc_cfg = getattr(job_config.optimizer, "desloc", None)
     if not getattr(desloc_cfg, "enabled", False):
         yield
@@ -32,11 +34,13 @@ def configure_desloc(job_config: object) -> Iterator[None]:
         raise ValueError(msg)
 
     if not has_torchft:
-        raise RuntimeError("DES-LOC support requires the torchft package to be installed.")
+        msg = "DES-LOC support requires the torchft package to be installed."
+        raise RuntimeError(msg)
 
     fault_tolerance = getattr(job_config, "fault_tolerance", None)
     if fault_tolerance is None or not getattr(fault_tolerance, "enable", False):
-        raise ValueError("DES-LOC requires fault_tolerance.enable to be True.")
+        msg = "DES-LOC requires fault_tolerance.enable to be True."
+        raise ValueError(msg)
 
     method = fault_tolerance.semi_sync_method
     if method is None:
@@ -44,9 +48,8 @@ def configure_desloc(job_config: object) -> Iterator[None]:
             "DES-LOC enabled; defaulting fault_tolerance.semi_sync_method to 'desloc'."
         )
     elif method.lower() != "desloc":
-        raise ValueError(
-            "DES-LOC requires fault_tolerance.semi_sync_method to be 'desloc'."
-        )
+        msg = "DES-LOC requires fault_tolerance.semi_sync_method to be 'desloc'."
+        raise ValueError(msg)
 
     fault_tolerance.semi_sync_method = "desloc"
 

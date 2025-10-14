@@ -7,6 +7,8 @@
 
 from __future__ import annotations
 
+import contextlib
+
 import math
 from collections.abc import Mapping, Sequence
 from enum import Enum
@@ -23,14 +25,6 @@ from torchtitan.experiments.fl.callbacks import (
     CallbackSetupContext,
     CallbackStepContext,
     CallbackValidationContext,
-)
-from torchtitan.experiments.fl.configs.config import (
-    ActivationMonitorConfig,
-    BetasMonitorConfig,
-    HyperparameterSwitchConfig,
-    LRMonitorConfig,
-    OptimizerMonitorConfig,
-    VSMonitorConfig,
 )
 
 if TYPE_CHECKING:
@@ -895,15 +889,17 @@ class VSMonitor(Callback):
                 vs = group.get("vs")
                 if vs is None:
                     continue
-                if isinstance(vs, Sequence) and not isinstance(vs, (str, bytes)):
-                    v_values = list(vs)
-                else:
-                    v_values = [vs]
+                v_values = (
+                    list(vs)
+                    if isinstance(vs, Sequence) and not isinstance(vs, (str, bytes))
+                    else [vs]
+                )
                 for v_idx, v_value in enumerate(v_values):
-                    if isinstance(v_value, torch.Tensor):
-                        v_scalar = float(v_value.detach().item())
-                    else:
-                        v_scalar = float(v_value)
+                    v_scalar = (
+                        float(v_value.detach().item())
+                        if isinstance(v_value, torch.Tensor)
+                        else float(v_value)
+                    )
                     metrics[f"v{v_idx}-{name}/group{idx}"] = v_scalar
 
         if metrics:
@@ -1130,10 +1126,8 @@ class FLMetricsProcessor(MetricsProcessor):
 
         device = torch.device("cpu")
         if self.model_parts:
-            try:
+            with contextlib.suppress(StopIteration):
                 device = next(self.model_parts[0].parameters()).device
-            except StopIteration:
-                pass
 
         loss_tensor = torch.tensor(
             float(local_loss), device=device, dtype=torch.float64

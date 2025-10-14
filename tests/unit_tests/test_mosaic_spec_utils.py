@@ -1,3 +1,9 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+# All rights reserved.
+#
+# This source code is licensed under the BSD-style license found in the
+# LICENSE file in the root directory of this source tree.
+
 from __future__ import annotations
 
 import sys
@@ -12,7 +18,6 @@ if "torchmetrics" not in sys.modules:
     class _Metric:  # pragma: no cover - stub for optional dependency
         pass
 
-
     _torchmetrics.Metric = _Metric
     sys.modules["torchmetrics"] = _torchmetrics
 
@@ -23,7 +28,6 @@ if "llmfoundry" not in sys.modules:
 
     class _StreamingTextDataset:  # pragma: no cover - stub for optional dependency
         pass
-
 
     _llmfoundry_text.StreamingTextDataset = _StreamingTextDataset
     _llmfoundry.registry = SimpleNamespace(tokenizers={})
@@ -36,10 +40,11 @@ if "llmfoundry" not in sys.modules:
 
     _llmfoundry_registry_utils = ModuleType("llmfoundry.utils.registry_utils")
 
-    def construct_from_registry(*_args: Any, **_kwargs: Any) -> Any:  # pragma: no cover - stub
+    def construct_from_registry(
+        *_args: Any, **_kwargs: Any
+    ) -> Any:  # pragma: no cover - stub
         tokenizer = SimpleNamespace(eos_token="</s>", model_max_length=0)
         return tokenizer
-
 
     _llmfoundry_registry_utils.construct_from_registry = construct_from_registry
     sys.modules["llmfoundry.utils.registry_utils"] = _llmfoundry_registry_utils
@@ -51,16 +56,13 @@ if "transformers" not in sys.modules:
         eos_token = "</s>"
         model_max_length = 0
 
-
     class _PreTrainedTokenizerFast(_PreTrainedTokenizerBase):  # pragma: no cover
         pass
-
 
     class _AutoTokenizer:  # pragma: no cover - stub
         @staticmethod
         def from_pretrained(*_args: Any, **_kwargs: Any) -> _PreTrainedTokenizerFast:
             return _PreTrainedTokenizerFast()
-
 
     _transformers.AutoTokenizer = _AutoTokenizer
     _transformers.PreTrainedTokenizerBase = _PreTrainedTokenizerBase
@@ -73,10 +75,8 @@ if "streaming" not in sys.modules:
     class _Stream:  # pragma: no cover - stub for optional dependency
         pass
 
-
     class _StreamingDataset:  # pragma: no cover - stub for optional dependency
         pass
-
 
     _streaming.Stream = _Stream
     _streaming.StreamingDataset = _StreamingDataset
@@ -88,7 +88,6 @@ if "streaming.base" not in sys.modules:
 
     def _clean_stale_shared_memory() -> None:  # pragma: no cover - stub
         return None
-
 
     _streaming_base_util.clean_stale_shared_memory = _clean_stale_shared_memory
     sys.modules["streaming.base"] = _streaming_base
@@ -104,7 +103,6 @@ if "composer" not in sys.modules:
             self.args = args
             self.kwargs = kwargs
 
-
     _composer_loggers.RemoteUploaderDownloader = _RemoteUploaderDownloader
     sys.modules["composer"] = _composer
     sys.modules["composer.loggers"] = _composer_loggers
@@ -114,30 +112,29 @@ if "composer" not in sys.modules:
     def _upload_worker(*args: Any, **kwargs: Any) -> None:  # pragma: no cover - stub
         return None
 
-
     _remote_module._upload_worker = _upload_worker
     sys.modules["composer.loggers.remote_uploader_downloader"] = _remote_module
 
 _schedules = import_module("torch.distributed.pipelining.schedules")
 if not hasattr(_schedules, "ScheduleDualPipeV"):
+
     class _ScheduleDualPipeV:  # pragma: no cover - stub for missing torch API
         ...
-
 
     _schedules.ScheduleDualPipeV = _ScheduleDualPipeV
 
 if not hasattr(_schedules, "ScheduleZBVZeroBubble"):
+
     class _ScheduleZBVZeroBubble:  # pragma: no cover - stub for missing torch API
         ...
-
 
     _schedules.ScheduleZBVZeroBubble = _ScheduleZBVZeroBubble
 
 from torchtitan.experiments.fl.models.utils import ensure_mosaic_spec
 from torchtitan.protocols import train_spec as train_spec_module
 from torchtitan.protocols.train_spec import (
-    TrainSpec,
     register_train_spec,
+    TrainSpec,
     unregister_train_spec,
 )
 
@@ -221,10 +218,7 @@ def test_ensure_mosaic_spec_is_idempotent_for_multiple_models() -> None:
         assert mosaic_spec_b.build_validator_fn is _dummy_builder
 
         base_vocab = base_spec_b.model_args["cfg"].vocab_size
-        assert (
-            mosaic_spec_b.model_args["cfg"].vocab_size
-            == base_vocab + 5
-        )
+        assert mosaic_spec_b.model_args["cfg"].vocab_size == base_vocab + 5
 
         assert (
             ensure_mosaic_spec(
@@ -288,9 +282,7 @@ def test_ensure_mosaic_spec_updates_existing_spec_with_new_overrides() -> None:
         initial_spec = train_spec_module.get_train_spec(spec_name)
         assert initial_spec.build_optimizers_fn is _dummy_builder
 
-        def _post_transform(
-            base_spec: TrainSpec, mosaic_spec: TrainSpec
-        ) -> TrainSpec:
+        def _post_transform(base_spec: TrainSpec, mosaic_spec: TrainSpec) -> TrainSpec:
             return replace(
                 mosaic_spec,
                 model_args={

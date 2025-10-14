@@ -12,11 +12,11 @@ import sys
 from torchtitan.config import ConfigManager
 
 from .config import (
+    ensure_mosaic_job_config_types,
     FLMetricsConfigEnvelope,
     MosaicDataLoaderConfig,
     MosaicJobConfig,
     MosaicTokenizerConfig,
-    ensure_mosaic_job_config_types,
 )
 
 
@@ -33,7 +33,6 @@ class MosaicConfigManager(ConfigManager):
 
 def load_mosaic_job_config(args: list[str] | None = None) -> MosaicJobConfig:
     """Parse CLI/TOML arguments into a fully-typed :class:`MosaicJobConfig`."""
-
     manager = MosaicConfigManager()
     return manager.parse_args(args or sys.argv[1:])
 

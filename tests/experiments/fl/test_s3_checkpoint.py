@@ -1,8 +1,15 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+# All rights reserved.
+#
+# This source code is licensed under the BSD-style license found in the
+# LICENSE file in the root directory of this source tree.
+
 from __future__ import annotations
 
-from pathlib import Path
 import sys
 from dataclasses import dataclass, field
+
+from pathlib import Path
 from types import ModuleType, SimpleNamespace
 
 import pytest
@@ -14,7 +21,9 @@ if str(PROJECT_ROOT) not in sys.path:  # pragma: no cover - test environment gua
 import importlib.util
 import types
 
-_S3_MODULE_PATH = PROJECT_ROOT / "torchtitan" / "experiments" / "fl" / "s3_checkpoint.py"
+_S3_MODULE_PATH = (
+    PROJECT_ROOT / "torchtitan" / "experiments" / "fl" / "s3_checkpoint.py"
+)
 _COMPOSER_MODULE = types.ModuleType("composer")
 _COMPOSER_LOGGERS_MODULE = types.ModuleType("composer.loggers")
 _COMPOSER_RUD_MODULE = types.ModuleType("composer.loggers.remote_uploader_downloader")
@@ -42,6 +51,7 @@ if _SPEC is None or _SPEC.loader is None:  # pragma: no cover - import guard
 _MODULE = importlib.util.module_from_spec(_SPEC)
 _SPEC.loader.exec_module(_MODULE)
 s3_module = _MODULE  # type: ModuleType
+
 
 class _FakeRemoteUploaderDownloader:
     def __init__(self) -> None:
@@ -144,7 +154,9 @@ def _make_job_config(base_folder: Path) -> _MosaicJobConfig:
     return job_config
 
 
-def test_wrapper_preserves_original_methods(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_wrapper_preserves_original_methods(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     base = tmp_path / "ckpt"
     base.mkdir()
     checkpointer = _DummyCheckpointer(base)
@@ -155,22 +167,23 @@ def test_wrapper_preserves_original_methods(tmp_path: Path, monkeypatch: pytest.
     config = job_config.s3_checkpoint
 
     remote = _FakeRemoteUploaderDownloader()
-    monkeypatch.setattr(s3_module, "create_remote_up_down", lambda *args, **kwargs: remote)
+    monkeypatch.setattr(
+        s3_module, "create_remote_up_down", lambda *args, **kwargs: remote
+    )
 
     started: list[bool] = []
 
     def fake_start(self: s3_module.S3CheckpointWrapper) -> None:
         started.append(True)
 
-    monkeypatch.setattr(s3_module.S3CheckpointWrapper, "_start_remote_workers", fake_start)
+    monkeypatch.setattr(
+        s3_module.S3CheckpointWrapper, "_start_remote_workers", fake_start
+    )
 
     wrapper = s3_module.S3CheckpointWrapper(checkpointer, config, job_config)
 
     assert checkpointer.save.__func__ is orig_save.__func__
-    assert (
-        checkpointer.maybe_wait_for_staging.__func__
-        is orig_wait.__func__
-    )
+    assert checkpointer.maybe_wait_for_staging.__func__ is orig_wait.__func__
     assert started, "Upload workers should start when uploads are enabled"
 
     trainer = SimpleNamespace(checkpointer=checkpointer)
@@ -188,7 +201,9 @@ def test_download_only_wrapper_has_symmetric_lifecycle(
     config = job_config.s3_checkpoint
 
     remote = _FakeRemoteUploaderDownloader()
-    monkeypatch.setattr(s3_module, "create_remote_up_down", lambda *args, **kwargs: remote)
+    monkeypatch.setattr(
+        s3_module, "create_remote_up_down", lambda *args, **kwargs: remote
+    )
 
     started: list[bool] = []
     monkeypatch.setattr(
@@ -210,7 +225,9 @@ def test_download_only_wrapper_has_symmetric_lifecycle(
     wrapper.maybe_wait_for_staging()
     wrapper.close()
 
-    assert checkpointer.wait_calls == 2  # one from maybe_wait_for_staging, one from close()
+    assert (
+        checkpointer.wait_calls == 2
+    )  # one from maybe_wait_for_staging, one from close()
     assert checkpointer.close_calls == 1
     assert remote.uploads == []
 
@@ -225,7 +242,9 @@ def test_torchft_uploads_flush_and_close_symmetrically(
     config = job_config.s3_checkpoint
 
     remote = _FakeRemoteUploaderDownloader()
-    monkeypatch.setattr(s3_module, "create_remote_up_down", lambda *args, **kwargs: remote)
+    monkeypatch.setattr(
+        s3_module, "create_remote_up_down", lambda *args, **kwargs: remote
+    )
 
     monkeypatch.setattr(
         s3_module.S3CheckpointWrapper,
@@ -247,7 +266,9 @@ def test_torchft_uploads_flush_and_close_symmetrically(
 
     wrapper = s3_module.S3CheckpointWrapper(checkpointer, config, job_config)
     wrapper.save(2)
-    assert wrapper._pending_steps, "Saving should queue uploads while TorchFT is enabled"  # noqa: SLF001
+    assert (
+        wrapper._pending_steps
+    ), "Saving should queue uploads while TorchFT is enabled"  # noqa: SLF001
 
     wrapper.close()
 
@@ -269,7 +290,9 @@ def test_setup_helper_installs_wrapper_by_default(
     config = job_config.s3_checkpoint
 
     remote = _FakeRemoteUploaderDownloader()
-    monkeypatch.setattr(s3_module, "create_remote_up_down", lambda *args, **kwargs: remote)
+    monkeypatch.setattr(
+        s3_module, "create_remote_up_down", lambda *args, **kwargs: remote
+    )
 
     started: list[bool] = []
     monkeypatch.setattr(
@@ -306,7 +329,9 @@ def test_setup_helper_respects_install_flag(
     job_config = _make_job_config(tmp_path)
 
     remote = _FakeRemoteUploaderDownloader()
-    monkeypatch.setattr(s3_module, "create_remote_up_down", lambda *args, **kwargs: remote)
+    monkeypatch.setattr(
+        s3_module, "create_remote_up_down", lambda *args, **kwargs: remote
+    )
 
     started: list[bool] = []
     monkeypatch.setattr(

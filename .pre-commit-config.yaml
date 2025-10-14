@@ -60,7 +60,7 @@ repos:
       # Run the Ruff linter
       - id: ruff
         name: ruff (fl experiments only)
-        args: [--config=ruff.toml, --fix]
+        args: [--config=ruff.toml, --fix, --unsafe-fixes]
         files: ^torchtitan/experiments/fl/
 
 -   repo: https://github.com/omnilib/ufmt

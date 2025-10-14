@@ -1,3 +1,9 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+# All rights reserved.
+#
+# This source code is licensed under the BSD-style license found in the
+# LICENSE file in the root directory of this source tree.
+
 """Utilities for working with Mosaic-enabled training specs."""
 
 from __future__ import annotations
@@ -11,14 +17,14 @@ from torchtitan.experiments.fl.dataloader.dataloader import build_mosaic_dataloa
 from torchtitan.experiments.fl.dataloader.tokenizer import build_mosaic_tokenizer
 from torchtitan.protocols.train_spec import (
     DataLoaderBuilder,
+    get_train_spec,
     MetricsProcessorBuilder,
     OptimizersBuilder,
+    register_train_spec,
     TokenizerBuilder,
     TrainSpec,
-    ValidatorBuilder,
-    get_train_spec,
-    register_train_spec,
     update_train_spec,
+    ValidatorBuilder,
 )
 from torchtitan.tools.logging import logger
 
@@ -94,7 +100,6 @@ def ensure_mosaic_spec(
     Returns:
         The name of the Mosaic-enabled train spec.
     """
-
     base_spec = get_train_spec(base_spec_name)
     mosaic_spec_name = spec_name or f"mosaic_{base_spec.name}"
 
@@ -133,4 +138,3 @@ def ensure_mosaic_spec(
 
 
 __all__ = ["ensure_mosaic_spec"]
-

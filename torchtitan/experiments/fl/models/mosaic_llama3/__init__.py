@@ -12,8 +12,8 @@ from torchtitan.experiments.fl.models.utils import ensure_mosaic_spec
 from torchtitan.experiments.fl.optimizer_builder import build_mosaic_optimizers
 from torchtitan.experiments.fl.validate import build_mosaic_validator
 from torchtitan.protocols.train_spec import (
-    TrainSpec,
     get_train_spec as get_registered_train_spec,
+    TrainSpec,
 )
 
 
@@ -27,7 +27,6 @@ def _update_vocab_sizes(base_spec: TrainSpec, mosaic_spec: TrainSpec) -> TrainSp
 
 def get_train_spec() -> TrainSpec:
     """Get the training specification for Llama3 with Mosaic streaming support."""
-
     spec_name = ensure_mosaic_spec(
         "llama3",
         spec_name="mosaic_llama3",

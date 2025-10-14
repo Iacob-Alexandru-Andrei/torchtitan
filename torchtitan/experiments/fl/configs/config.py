@@ -25,7 +25,6 @@ DEFAULT_DATASET_SPLIT_KEYS = frozenset(
 
 def _as_dict(value: Mapping[str, Any] | None) -> dict[str, Any]:
     """Create a plain ``dict`` from an arbitrary mapping value."""
-
     if value is None:
         return {}
     return dict(value)
@@ -50,16 +49,17 @@ class MosaicTokenizerConfig:
     )
 
     @classmethod
-    def from_dict(cls, data: Mapping[str, Any]) -> "MosaicTokenizerConfig":
+    def from_dict(cls, data: Mapping[str, Any]) -> MosaicTokenizerConfig:
         return cls(name=str(data.get("name", "")), kwargs=_as_dict(data.get("kwargs")))
 
     @classmethod
-    def coerce(cls, value: Any) -> "MosaicTokenizerConfig":
+    def coerce(cls, value: Any) -> MosaicTokenizerConfig:
         if isinstance(value, cls):
             return value
         if isinstance(value, Mapping):
             return cls.from_dict(value)
-        raise TypeError(f"Cannot convert {type(value)} to MosaicTokenizerConfig")
+        msg = f"Cannot convert {type(value)} to MosaicTokenizerConfig"
+        raise TypeError(msg)
 
 
 @dataclass
@@ -89,7 +89,9 @@ class MosaicDataLoaderConfig:
     )
     pin_memory: bool = field(
         default=True,
-        metadata={"help": "Pin tensors in page-locked memory for faster host→device transfers."},
+        metadata={
+            "help": "Pin tensors in page-locked memory for faster host→device transfers."
+        },
     )
     persistent_workers: bool = field(
         default=True,
@@ -111,11 +113,13 @@ class MosaicDataLoaderConfig:
     # python-explicit-any
     extras: dict[str, Any] = field(
         default_factory=dict,
-        metadata={"help": "Additional configuration keys preserved for downstream consumers."},
+        metadata={
+            "help": "Additional configuration keys preserved for downstream consumers."
+        },
     )
 
     @classmethod
-    def from_dict(cls, data: Mapping[str, Any]) -> "MosaicDataLoaderConfig":
+    def from_dict(cls, data: Mapping[str, Any]) -> MosaicDataLoaderConfig:
         known_keys = {
             "name",
             "dataset",
@@ -145,7 +149,8 @@ class MosaicDataLoaderConfig:
 
         dataset_cfg = data.get("dataset", {})
         if dataset_cfg and not isinstance(dataset_cfg, Mapping):
-            raise TypeError("mosaic_dataloader.dataset must be a mapping")
+            msg = "mosaic_dataloader.dataset must be a mapping"
+            raise TypeError(msg)
 
         drop_last = data.get("drop_last")
         drop_last_bool: bool | None
@@ -156,7 +161,9 @@ class MosaicDataLoaderConfig:
         else:
             drop_last_bool = bool(drop_last)
 
-        combined_split_overrides: dict[str, dict[str, Any]] = dict(inferred_split_overrides)
+        combined_split_overrides: dict[str, dict[str, Any]] = dict(
+            inferred_split_overrides
+        )
         combined_split_overrides.update(explicit_split_overrides)
 
         return cls(
@@ -172,12 +179,13 @@ class MosaicDataLoaderConfig:
         )
 
     @classmethod
-    def coerce(cls, value: Any) -> "MosaicDataLoaderConfig":
+    def coerce(cls, value: Any) -> MosaicDataLoaderConfig:
         if isinstance(value, cls):
             return value
         if isinstance(value, Mapping):
             return cls.from_dict(value)
-        raise TypeError(f"Cannot convert {type(value)} to MosaicDataLoaderConfig")
+        msg = f"Cannot convert {type(value)} to MosaicDataLoaderConfig"
+        raise TypeError(msg)
 
     def get_split_overrides(self, split: str) -> dict[str, Any]:
         overrides = self.split_overrides.get(split)
@@ -458,7 +466,7 @@ class FLMetricsConfigEnvelope:
     )
 
     @classmethod
-    def from_dict(cls, data: Mapping[str, Any]) -> "FLMetricsConfigEnvelope":
+    def from_dict(cls, data: Mapping[str, Any]) -> FLMetricsConfigEnvelope:
         optimizer_monitor_dict = _as_dict(data.get("optimizer_monitor"))
         activation_monitor_dict = _as_dict(data.get("activation_monitor"))
         lr_monitor_dict = _as_dict(data.get("lr_monitor"))
@@ -477,14 +485,15 @@ class FLMetricsConfigEnvelope:
         return cls(metrics=metrics)
 
     @classmethod
-    def coerce(cls, value: Any) -> "FLMetricsConfigEnvelope":
+    def coerce(cls, value: Any) -> FLMetricsConfigEnvelope:
         if isinstance(value, cls):
             return value
         if isinstance(value, MetricsConfig):
             return cls(metrics=value)
         if isinstance(value, Mapping):
             return cls.from_dict(value)
-        raise TypeError(f"Cannot convert {type(value)} to FLMetricsConfigEnvelope")
+        msg = f"Cannot convert {type(value)} to FLMetricsConfigEnvelope"
+        raise TypeError(msg)
 
     def unwrap(self) -> MetricsConfig:
         return self.metrics
@@ -632,7 +641,7 @@ class S3CheckpointingConfig:
     )
 
     @classmethod
-    def from_dict(cls, data: Mapping[str, Any]) -> "S3CheckpointingConfig":
+    def from_dict(cls, data: Mapping[str, Any]) -> S3CheckpointingConfig:
         run_uuid = data.get("run_uuid")
         remote_checkpoint_folder = data.get("remote_checkpoint_folder")
         upload_staging_folder = data.get("upload_staging_folder")
@@ -662,12 +671,13 @@ class S3CheckpointingConfig:
         )
 
     @classmethod
-    def coerce(cls, value: Any) -> "S3CheckpointingConfig":
+    def coerce(cls, value: Any) -> S3CheckpointingConfig:
         if isinstance(value, cls):
             return value
         if isinstance(value, Mapping):
             return cls.from_dict(value)
-        raise TypeError(f"Cannot convert {type(value)} to S3CheckpointingConfig")
+        msg = f"Cannot convert {type(value)} to S3CheckpointingConfig"
+        raise TypeError(msg)
 
 
 @dataclass
@@ -745,7 +755,6 @@ class MosaicJobConfig(JobConfig):
 
 def ensure_mosaic_job_config_types(job_config: MosaicJobConfig) -> MosaicJobConfig:
     """Convert legacy dict-based sections into their typed equivalents."""
-
     job_config.mosaic_dataloader = MosaicDataLoaderConfig.coerce(
         job_config.mosaic_dataloader
     )
@@ -756,4 +765,3 @@ def ensure_mosaic_job_config_types(job_config: MosaicJobConfig) -> MosaicJobConf
     job_config.s3_checkpoint = S3CheckpointingConfig.coerce(job_config.s3_checkpoint)
 
     return job_config
-

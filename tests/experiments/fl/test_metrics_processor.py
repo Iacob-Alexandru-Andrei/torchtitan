@@ -1,9 +1,16 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+# All rights reserved.
+#
+# This source code is licensed under the BSD-style license found in the
+# LICENSE file in the root directory of this source tree.
+
 from __future__ import annotations
+
+import sys
 
 from dataclasses import replace
 from importlib import util as importlib_util
 from pathlib import Path
-import sys
 
 import pytest
 
@@ -95,9 +102,7 @@ def test_optional_optimizer_monitors_toggle() -> None:
     base_cfg = MosaicJobConfig().fl_metrics
     metrics_cfg = replace(
         base_cfg,
-        betas_monitor=replace(
-            base_cfg.betas_monitor, enabled=True, interval=4
-        ),
+        betas_monitor=replace(base_cfg.betas_monitor, enabled=True, interval=4),
         vs_monitor=replace(base_cfg.vs_monitor, enabled=True, interval=3),
     )
     processor = _build_processor(metrics_cfg)
@@ -110,7 +115,12 @@ def test_optional_optimizer_monitors_toggle() -> None:
     "config,expected",
     [
         (HyperparameterSwitchConfig(enabled=True, steps=()), False),
-        (HyperparameterSwitchConfig(enabled=True, steps=(10,), new_betas=(0.9, 0.98)), True),
+        (
+            HyperparameterSwitchConfig(
+                enabled=True, steps=(10,), new_betas=(0.9, 0.98)
+            ),
+            True,
+        ),
     ],
 )
 def test_hyperparameter_switch_requires_steps(

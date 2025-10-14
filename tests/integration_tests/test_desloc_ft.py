@@ -36,7 +36,9 @@ class _DummyManager:
     def allow_state_dict_read(self) -> None:  # pragma: no cover - stub
         return None
 
-    def start_quorum(self, *, allow_heal: bool, shrink_only: bool, timeout) -> None:  # pragma: no cover - stub
+    def start_quorum(
+        self, *, allow_heal: bool, shrink_only: bool, timeout
+    ) -> None:  # pragma: no cover - stub
         return None
 
     def report_error(self, err: Exception) -> None:  # pragma: no cover - stub
@@ -117,7 +119,9 @@ configure_desloc = ft_override.configure_desloc
 def test_configure_desloc_installs_desloc_support(monkeypatch):
     monkeypatch.setattr("torchtitan.components.ft.has_torchft", True, raising=False)
     monkeypatch.setattr(ft_override, "has_torchft", True, raising=False)
-    monkeypatch.setattr("torchtitan.components.optimizer.has_torchft", True, raising=False)
+    monkeypatch.setattr(
+        "torchtitan.components.optimizer.has_torchft", True, raising=False
+    )
 
     class _DummyFTOptimizer:
         def __init__(self, _manager, _container) -> None:  # pragma: no cover - stub

@@ -6,14 +6,14 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
-
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from torch import nn
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
+    from torch import nn
     from torch.distributed.device_mesh import DeviceMesh
 
     from torchtitan.components.metrics import BaseLogger

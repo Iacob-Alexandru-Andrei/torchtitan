@@ -12,7 +12,7 @@ import json
 import threading
 from collections import deque
 from pathlib import Path
-from typing import Any, Callable, TYPE_CHECKING
+from typing import Any, TYPE_CHECKING
 
 from composer.loggers import RemoteUploaderDownloader
 from composer.loggers.remote_uploader_downloader import _upload_worker
@@ -20,7 +20,7 @@ from composer.loggers.remote_uploader_downloader import _upload_worker
 from torchtitan.tools.logging import logger
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable
+    from collections.abc import Callable, Iterable
 
     from torchtitan.components.checkpoint import CheckpointManager
 
@@ -189,20 +189,19 @@ class S3CheckpointWrapper:
 
     def attach_to_trainer(self, trainer: Any) -> None:
         """Replace ``trainer.checkpointer`` with this wrapper."""
-
-        setattr(trainer, "checkpointer", self)
+        trainer.checkpointer = self
 
     def install_onto_checkpointer(self) -> None:
         """Patch the wrapped checkpointer for legacy compatibility."""
-
         existing = getattr(self._checkpointer, "_s3_wrapper", None)
         if existing is self:
             return
         if existing is not None and existing is not self:
             logger.warning(
-                "Replacing existing S3 checkpoint wrapper on %s", type(self._checkpointer).__name__
+                "Replacing existing S3 checkpoint wrapper on %s",
+                type(self._checkpointer).__name__,
             )
-        setattr(self._checkpointer, "_s3_wrapper", self)
+        self._checkpointer._s3_wrapper = self
         self._checkpointer.save = self.save  # type: ignore[assignment]
         self._checkpointer.maybe_wait_for_staging = self.maybe_wait_for_staging  # type: ignore[assignment]
         self._checkpointer.close = self.close  # type: ignore[assignment]
@@ -646,7 +645,6 @@ def setup_s3_checkpointing(
     patched onto the provided ``checkpointer`` so existing references keep the
     S3 synchronisation behaviour.
     """
-
     factory = get_s3_checkpoint_wrapper_factory(job_config)
     if factory is None:
         return None
@@ -670,7 +668,6 @@ def get_s3_checkpoint_wrapper_factory(
         indicating whether uploads should be enabled. ``None`` is returned when
         S3 checkpointing is disabled or misconfigured.
     """
-
     config = job_config.s3_checkpoint
     if not config.enable:
         return None

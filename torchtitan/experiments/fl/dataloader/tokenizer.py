@@ -9,9 +9,11 @@
 from __future__ import annotations
 
 import os
-from typing import Any
+from typing import Any, TYPE_CHECKING
 
-from torchtitan.experiments.fl.configs.config import MosaicJobConfig
+
+if TYPE_CHECKING:
+    from torchtitan.experiments.fl.configs.config import MosaicJobConfig
 
 try:
     from llmfoundry import registry
@@ -22,10 +24,11 @@ try:
         PreTrainedTokenizerFast,  # pyright: ignore[reportPrivateImportUsage]
     )
 except ImportError as exc:
-    raise RuntimeError(
+    msg = (
         "llm-foundry is required to build Mosaic tokenizers. "
         "Please install llm-foundry to enable this integration."
-    ) from exc
+    )
+    raise RuntimeError(msg) from exc
 
 
 def build_mosaic_tokenizer(
@@ -49,7 +52,8 @@ def build_mosaic_tokenizer(
     """
     tokenizer_cfg = job_config.mosaic_tokenizer
     if not tokenizer_cfg.name:
-        raise ValueError("mosaic_tokenizer config must specify a name.")
+        msg = "mosaic_tokenizer config must specify a name."
+        raise ValueError(msg)
 
     tokenizer_name: str = tokenizer_cfg.name
     tokenizer_kwargs: dict[str, Any] = dict(tokenizer_cfg.kwargs)
@@ -79,8 +83,9 @@ def build_mosaic_tokenizer(
             tokenizer.model_max_length = tokenizer_kwargs["model_max_length"]
 
     if not hasattr(tokenizer, "eos_token") or tokenizer.eos_token is None:
+        msg = f"The tokenizer {tokenizer_name} must have an eos_token."
         raise ValueError(
-            f"The tokenizer {tokenizer_name} must have an eos_token.",
+            msg,
         )
 
     return tokenizer

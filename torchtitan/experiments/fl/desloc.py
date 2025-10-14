@@ -10,7 +10,7 @@ from __future__ import annotations
 import logging
 from contextlib import contextmanager
 from datetime import timedelta
-from typing import Any, TYPE_CHECKING, Iterator
+from typing import Any, TYPE_CHECKING
 
 import torch
 from torch import nn
@@ -21,13 +21,14 @@ except ImportError:  # pragma: no cover - DTensor is optional
     DTensor = None  # type: ignore[assignment]
 
 from torchtitan.components.optimizer import FTOptimizersContainer
-from torchtitan.experiments.fl.configs.optimizers import DesLocConfig
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable
+    from collections.abc import Iterable, Iterator
 
     from torch.optim import Optimizer
+
     from torchtitan.components.ft.manager import FTManager
+    from torchtitan.experiments.fl.configs.optimizers import DesLocConfig
 
 logger = logging.getLogger(__name__)
 
@@ -192,7 +193,7 @@ class _OptimizerStateFragment(_BaseFragment):
         self._backup_device = backup_device
         self._name_prefix = name_prefix
 
-        self._param_map = {name: p for name, p in self._model.named_parameters()}
+        self._param_map = dict(self._model.named_parameters())
         self._original_state_tensors: dict[str, torch.Tensor] = {}
         self._averaged_state_tensors: list[torch.Tensor] = []
 
@@ -493,7 +494,6 @@ class DesLocFTOptimizersContainer(FTOptimizersContainer):
 
     def close_desloc(self) -> None:
         """Detach any registered DES-LOC hooks from the wrapped optimizers."""
-
         for controller in self._desloc_controllers:
             controller.close()
         self._desloc_controllers.clear()
@@ -501,10 +501,9 @@ class DesLocFTOptimizersContainer(FTOptimizersContainer):
 
 @contextmanager
 def desloc_semi_sync_context(
-    ft_manager: "FTManager", optimizer: torch.optim.Optimizer
+    ft_manager: FTManager, optimizer: torch.optim.Optimizer
 ) -> Iterator[None]:
     """Context manager wiring DES-LOC into TorchFT semi-sync execution."""
-
     try:
         yield
     finally:

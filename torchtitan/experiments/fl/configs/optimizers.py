@@ -95,7 +95,8 @@ class MosaicOptimizerConfig(BaseOptimizer):
         if isinstance(self.desloc, dict):
             self.desloc = DesLocConfig(**self.desloc)
         if self.desloc.quorum_timeout_seconds <= 0:
-            raise ValueError("desloc.quorum_timeout_seconds must be positive")
+            msg = "desloc.quorum_timeout_seconds must be positive"
+            raise ValueError(msg)
         if self.betas is not None and len(self.betas) >= _MIN_BETAS_LENGTH:
             # If betas is provided, it always overrides beta1 and beta2
             # beta1 comes from the first element, beta2 from the last element

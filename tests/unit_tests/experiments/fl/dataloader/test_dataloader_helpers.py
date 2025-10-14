@@ -1,8 +1,14 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+# All rights reserved.
+#
+# This source code is licensed under the BSD-style license found in the
+# LICENSE file in the root directory of this source tree.
+
 from __future__ import annotations
 
 import sys
 import types
- 
+
 
 schedules_module = types.ModuleType("torch.distributed.pipelining.schedules")
 schedules_module._PipelineSchedule = type("_PipelineSchedule", (), {})
@@ -11,7 +17,9 @@ schedules_module.PipelineScheduleMulti = type("PipelineScheduleMulti", (), {})
 schedules_module.PipelineScheduleSingle = type("PipelineScheduleSingle", (), {})
 schedules_module.ScheduleDualPipeV = type("ScheduleDualPipeV", (), {})
 schedules_module.ScheduleZBVZeroBubble = type("ScheduleZBVZeroBubble", (), {})
-schedules_module.get_schedule_class = lambda *_args, **_kwargs: schedules_module._PipelineSchedule
+schedules_module.get_schedule_class = (
+    lambda *_args, **_kwargs: schedules_module._PipelineSchedule
+)
 sys.modules.setdefault("torch.distributed.pipelining.schedules", schedules_module)
 
 pipelining_module = types.ModuleType("torch.distributed.pipelining")
@@ -41,14 +49,18 @@ sys.modules.setdefault("composer.loggers", composer_loggers)
 remote_uploader_module = types.ModuleType("composer.loggers.remote_uploader_downloader")
 remote_uploader_module._upload_worker = lambda *args, **kwargs: None  # noqa: ARG005
 remote_uploader_module._download_worker = lambda *args, **kwargs: None  # noqa: ARG005
-sys.modules.setdefault("composer.loggers.remote_uploader_downloader", remote_uploader_module)
+sys.modules.setdefault(
+    "composer.loggers.remote_uploader_downloader", remote_uploader_module
+)
 
 llmfoundry_module = types.ModuleType("llmfoundry")
 llmfoundry_module.registry = types.SimpleNamespace(tokenizers={})
 sys.modules.setdefault("llmfoundry", llmfoundry_module)
 
 registry_utils_module = types.ModuleType("llmfoundry.utils.registry_utils")
-registry_utils_module.construct_from_registry = lambda *args, **kwargs: types.SimpleNamespace(eos_token="</s>")
+registry_utils_module.construct_from_registry = (
+    lambda *args, **kwargs: types.SimpleNamespace(eos_token="</s>")
+)
 sys.modules.setdefault("llmfoundry.utils.registry_utils", registry_utils_module)
 
 
@@ -105,7 +117,9 @@ class _DummyStreamingDataset:
     def __getitem__(self, idx):  # pragma: no cover - not exercised in tests
         return {"input_ids": [idx, idx + 1]}
 
-    def state_dict(self, num_samples=None, from_beginning=True):  # pragma: no cover - simple stub
+    def state_dict(
+        self, num_samples=None, from_beginning=True
+    ):  # pragma: no cover - simple stub
         return {
             "num_samples": num_samples,
             "from_beginning": from_beginning,
