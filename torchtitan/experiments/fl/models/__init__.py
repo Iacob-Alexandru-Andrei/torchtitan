@@ -28,8 +28,8 @@ register_train_spec(_get_llama3_mup_spec())
 
 
 # Register the Mosaic Llama3 spec
-register_train_spec(get_mosaic_llama3_train_spec())
+get_mosaic_llama3_train_spec()
 
 
 # Register the Mosaic Llama3 MuP spec
-register_train_spec(get_mosaic_llama3_mup_train_spec())
+get_mosaic_llama3_mup_train_spec()
