@@ -37,7 +37,7 @@ from torchtitan.experiments.fl.configs.config import (
 )
 from torchtitan.experiments.fl.dataloader.dataloader import build_mosaic_dataloader
 from torchtitan.experiments.fl.dataloader.tokenizer import build_mosaic_tokenizer
-from torchtitan.experiments.fl.ft_override import enable_desloc_only_ft
+from torchtitan.experiments.fl.ft_override import configure_desloc
 from torchtitan.experiments.fl.s3_checkpoint import (
     S3CheckpointManager,
     setup_s3_checkpointing,
@@ -119,163 +119,174 @@ def main() -> None:  # noqa: C901, PLR0912, PLR0915
     s3_manager: S3CheckpointManager | None = None
     download_manager: S3CheckpointManager | None = None
     try:
-        enable_desloc_only_ft(job_config)
-        trainer = Trainer(job_config)
+        with configure_desloc(job_config):
+            trainer = Trainer(job_config)
 
-        checkpointer = trainer.checkpointer
-        ft_manager = getattr(checkpointer, "ft_manager", None)
-        ft_mode = bool(getattr(ft_manager, "enabled", False))
-        if ft_mode:
-            checkpointer.enable = False
+            checkpointer = trainer.checkpointer
+            ft_manager = getattr(checkpointer, "ft_manager", None)
+            ft_mode = bool(getattr(ft_manager, "enabled", False))
+            if ft_mode:
+                checkpointer.enable = False
 
-        if ft_mode:
-            is_checkpoint_writer = True
-        elif ft_manager is not None:
-            is_checkpoint_writer = ft_manager.participating_rank() == 0
-            if torch.distributed.is_initialized():
-                is_checkpoint_writer = (
-                    is_checkpoint_writer and torch.distributed.get_rank() == 0
-                )
-        elif torch.distributed.is_initialized():
-            is_checkpoint_writer = torch.distributed.get_rank() == 0
-        else:
-            is_checkpoint_writer = True
-
-        s3_checkpointing_active = (
-            job_config.s3_checkpoint.enable
-            and bool(job_config.s3_checkpoint.bucket)
-            and job_config.s3_checkpoint.prefix is not None  # Empty string "" is valid!
-        )
-
-        logger.info(
-            f"[S3 DEBUG] S3 setup: active={s3_checkpointing_active}, "
-            f"is_checkpoint_writer={is_checkpoint_writer}, "
-            f"download_on_start={job_config.s3_checkpoint.download_on_start}, "
-            f"bucket={job_config.s3_checkpoint.bucket}, "
-            f"prefix={job_config.s3_checkpoint.prefix}"
-        )
-
-        if s3_checkpointing_active:
-            if is_checkpoint_writer:
-                logger.info(
-                    "[S3 DEBUG] Creating S3 manager as checkpoint writer (with install=True)"
-                )
-                s3_manager = setup_s3_checkpointing(checkpointer, job_config)
-                if s3_manager is not None:
-                    trainer.checkpointer = s3_manager  # type: ignore[assignment]
-                    download_manager = s3_manager
-                    checkpointer = trainer.checkpointer
-                logger.info(
-                    f"[S3 DEBUG] s3_manager={s3_manager}, download_manager={download_manager}"
-                )
-            elif job_config.s3_checkpoint.download_on_start:
-                logger.info(
-                    "[S3 DEBUG] Creating download-only S3 manager (with install=False)"
-                )
-                download_manager = setup_s3_checkpointing(
-                    checkpointer, job_config, install=False
-                )
-                logger.info(f"[S3 DEBUG] download_manager={download_manager}")
-
-        # Override WandB run name to include rank if save_for_all_ranks is enabled
-        if job_config.metrics.save_for_all_ranks and job_config.metrics.enable_wandb:
-            try:
-                import wandb  # noqa: PLC0415
-
-                if wandb.run is not None:
-                    if torch.distributed.is_initialized():
-                        local_rank = torch.distributed.get_rank()
-                        world_size = torch.distributed.get_world_size()
-                    else:
-                        local_rank = 0
-                        world_size = 1
-
-                    replica_identifier: int | str | None = None
-                    if ft_mode and ft_manager is not None:
-                        replica_identifier = getattr(ft_manager, "replica_id", None)
-                    if replica_identifier in (None, "", -1):
-                        replica_identifier = getattr(
-                            job_config.fault_tolerance, "replica_id", None
-                        )
-                    if replica_identifier in (None, "", -1):
-                        for env_var in (
-                            "TORCHFT_REPLICA_ID",
-                            "FAULT_TOLERANCE_REPLICA_ID",
-                            "FT_REPLICA_ID",
-                            "REPLICA_ID",
-                        ):
-                            env_value = os.getenv(env_var)
-                            if env_value:
-                                try:
-                                    replica_identifier = int(env_value)
-                                except ValueError:
-                                    replica_identifier = env_value
-                                break
-                    replica_index: int | None
-                    try:
-                        replica_index = (
-                            int(replica_identifier)
-                            if replica_identifier not in (None, "", -1)
-                            else None
-                        )
-                    except (TypeError, ValueError):
-                        replica_index = None
-
-                    if replica_index is not None:
-                        global_worker_id = replica_index * world_size + local_rank
-                        replica_suffix = f"rep{replica_index}"
-                    elif replica_identifier not in (None, "", -1):
-                        global_worker_id = f"{replica_identifier}-rank{local_rank}"
-                        replica_suffix = f"rep{replica_identifier}"
-                    else:
-                        replica_identifier = os.getpid()
-                        global_worker_id = f"pid{replica_identifier}-rank{local_rank}"
-                        replica_suffix = f"rep{replica_identifier}"
-
-                    suffix = f"{replica_suffix}-rank{local_rank}"
-
-                    original_name = wandb.run.name or "torchtitan"
-                    if f"-worker{global_worker_id}" in original_name:
-                        new_name = original_name
-                    else:
-                        new_name = f"{original_name}-worker{global_worker_id}-{suffix}"
-                        wandb.run.name = new_name
-                        wandb.run.save()
-                        logger.info(
-                            "Updated WandB run name from '%s' to '%s' (global worker id %s)",
-                            original_name,
-                            new_name,
-                            global_worker_id,
-                        )
-            except ImportError:
-                logger.warning("wandb not available, skipping run name update")
-            except Exception as e:  # noqa: BLE001
-                logger.warning(f"Failed to update WandB run name: {e}")
-
-        if job_config.checkpoint.create_seed_checkpoint:
-            assert (
-                int(os.environ["WORLD_SIZE"]) == 1
-            ), "Must create seed checkpoint using a single device, to disable sharding."
-            assert (
-                job_config.checkpoint.enable
-            ), "Must enable checkpointing when creating a seed checkpoint."
-            trainer.checkpointer.save(curr_step=0, last_step=True)
-            logger.info("Created seed checkpoint")
-        else:
-            logger.info(
-                f"[S3 DEBUG] download_manager={download_manager}, s3_checkpointing_active={s3_checkpointing_active}"
-            )
-            if download_manager:
-                logger.info("[S3 DEBUG] Calling download_manager.download_if_needed()")
-                download_manager.download_if_needed()  # type: ignore[attr-defined]
-                logger.info("[S3 DEBUG] download_if_needed() completed")
+            if ft_mode:
+                is_checkpoint_writer = True
+            elif ft_manager is not None:
+                is_checkpoint_writer = ft_manager.participating_rank() == 0
+                if torch.distributed.is_initialized():
+                    is_checkpoint_writer = (
+                        is_checkpoint_writer and torch.distributed.get_rank() == 0
+                    )
+            elif torch.distributed.is_initialized():
+                is_checkpoint_writer = torch.distributed.get_rank() == 0
             else:
+                is_checkpoint_writer = True
+
+            s3_checkpointing_active = (
+                job_config.s3_checkpoint.enable
+                and bool(job_config.s3_checkpoint.bucket)
+                and job_config.s3_checkpoint.prefix is not None  # Empty string "" is valid!
+            )
+
+            logger.info(
+                f"[S3 DEBUG] S3 setup: active={s3_checkpointing_active}, "
+                f"is_checkpoint_writer={is_checkpoint_writer}, "
+                f"download_on_start={job_config.s3_checkpoint.download_on_start}, "
+                f"bucket={job_config.s3_checkpoint.bucket}, "
+                f"prefix={job_config.s3_checkpoint.prefix}"
+            )
+
+            if s3_checkpointing_active:
+                if is_checkpoint_writer:
+                    logger.info(
+                        "[S3 DEBUG] Creating S3 manager as checkpoint writer (with install=True)"
+                    )
+                    s3_manager = setup_s3_checkpointing(checkpointer, job_config)
+                    if s3_manager is not None:
+                        trainer.checkpointer = s3_manager  # type: ignore[assignment]
+                        download_manager = s3_manager
+                        checkpointer = trainer.checkpointer
+                    logger.info(
+                        f"[S3 DEBUG] s3_manager={s3_manager}, download_manager={download_manager}"
+                    )
+                elif job_config.s3_checkpoint.download_on_start:
+                    logger.info(
+                        "[S3 DEBUG] Creating download-only S3 manager (with install=False)"
+                    )
+                    download_manager = setup_s3_checkpointing(
+                        checkpointer, job_config, install=False
+                    )
+                    logger.info(f"[S3 DEBUG] download_manager={download_manager}")
+
+            if (job_config.training.compile and torch.cuda.is_available()) and (
+                job_config.parallelism.pipeline_parallel_size > 1
+            ):
                 logger.warning(
-                    "[S3 DEBUG] download_manager is None! S3 download will not occur."
+                    "Pipeline parallel training does not support torch.compile"
                 )
-            if s3_checkpointing_active and torch.distributed.is_initialized():
-                torch.distributed.barrier()
-            trainer.train()
+                job_config.training.compile = False
+
+            if job_config.training.compile:
+                torch._dynamo.config.verbose = True
+
+            # Override WandB run name to include rank if save_for_all_ranks is enabled
+            if job_config.metrics.save_for_all_ranks and job_config.metrics.enable_wandb:
+                try:
+                    import wandb  # noqa: PLC0415
+
+                    if wandb.run is not None:
+                        if torch.distributed.is_initialized():
+                            local_rank = torch.distributed.get_rank()
+                            world_size = torch.distributed.get_world_size()
+                        else:
+                            local_rank = 0
+                            world_size = 1
+
+                        replica_identifier: int | str | None = None
+                        if ft_mode and ft_manager is not None:
+                            replica_identifier = getattr(ft_manager, "replica_id", None)
+                        if replica_identifier in (None, "", -1):
+                            replica_identifier = getattr(
+                                job_config.fault_tolerance, "replica_id", None
+                            )
+                        if replica_identifier in (None, "", -1):
+                            for env_var in (
+                                "TORCHFT_REPLICA_ID",
+                                "FAULT_TOLERANCE_REPLICA_ID",
+                                "FT_REPLICA_ID",
+                                "REPLICA_ID",
+                            ):
+                                env_value = os.getenv(env_var)
+                                if env_value:
+                                    try:
+                                        replica_identifier = int(env_value)
+                                    except ValueError:
+                                        replica_identifier = env_value
+                                    break
+                        replica_index: int | None
+                        try:
+                            replica_index = (
+                                int(replica_identifier)
+                                if replica_identifier not in (None, "", -1)
+                                else None
+                            )
+                        except (TypeError, ValueError):
+                            replica_index = None
+
+                        if replica_index is not None:
+                            global_worker_id = replica_index * world_size + local_rank
+                            replica_suffix = f"rep{replica_index}"
+                        elif replica_identifier not in (None, "", -1):
+                            global_worker_id = f"{replica_identifier}-rank{local_rank}"
+                            replica_suffix = f"rep{replica_identifier}"
+                        else:
+                            replica_identifier = os.getpid()
+                            global_worker_id = f"pid{replica_identifier}-rank{local_rank}"
+                            replica_suffix = f"rep{replica_identifier}"
+
+                        suffix = f"{replica_suffix}-rank{local_rank}"
+
+                        original_name = wandb.run.name or "torchtitan"
+                        if f"-worker{global_worker_id}" in original_name:
+                            new_name = original_name
+                        else:
+                            new_name = f"{original_name}-worker{global_worker_id}-{suffix}"
+                            wandb.run.name = new_name
+                            wandb.run.save()
+                            logger.info(
+                                "Updated WandB run name from '%s' to '%s' (global worker id %s)",
+                                original_name,
+                                new_name,
+                                global_worker_id,
+                            )
+                except ImportError:
+                    logger.warning("wandb not available, skipping run name update")
+                except Exception as e:  # noqa: BLE001
+                    logger.warning(f"Failed to update WandB run name: {e}")
+
+            if job_config.checkpoint.create_seed_checkpoint:
+                assert (
+                    int(os.environ["WORLD_SIZE"]) == 1
+                ), "Must create seed checkpoint using a single device, to disable sharding."
+                assert (
+                    job_config.checkpoint.enable
+                ), "Must enable checkpointing when creating a seed checkpoint."
+                trainer.checkpointer.save(curr_step=0, last_step=True)
+                logger.info("Created seed checkpoint")
+            else:
+                logger.info(
+                    f"[S3 DEBUG] download_manager={download_manager}, s3_checkpointing_active={s3_checkpointing_active}"
+                )
+                if download_manager:
+                    logger.info("[S3 DEBUG] Calling download_manager.download_if_needed()")
+                    download_manager.download_if_needed()  # type: ignore[attr-defined]
+                    logger.info("[S3 DEBUG] download_if_needed() completed")
+                else:
+                    logger.warning(
+                        "[S3 DEBUG] download_manager is None! S3 download will not occur."
+                    )
+                if s3_checkpointing_active and torch.distributed.is_initialized():
+                    torch.distributed.barrier()
+                trainer.train()
     finally:
         for manager in {m for m in (s3_manager, download_manager) if m is not None}:
             manager.close()

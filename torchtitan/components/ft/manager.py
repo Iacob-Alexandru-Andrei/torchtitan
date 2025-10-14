@@ -16,6 +16,7 @@ import torch.nn as nn
 from torch.distributed._composable.fsdp.fully_shard import FSDPModule
 from torch.distributed.distributed_c10d import ReduceOp
 from torchtitan.components.ft.config import FaultTolerance as FTConfig
+from torchtitan.components.ft.extensions import get_semi_sync_context_factory
 from torchtitan.tools.logging import logger
 
 if importlib.util.find_spec("torchft") is not None:
@@ -129,7 +130,8 @@ def maybe_semi_sync_training(
         logger.info(
             f"using fragment function to split model: {fragment_fn is not None}"
         )
-        if semi_sync_method.lower() == "diloco":
+        method = semi_sync_method.lower()
+        if method == "diloco":
             if fragment_fn:
                 model_parts = fragment_fn(model, ft_config, n_layers)
             else:
@@ -163,7 +165,7 @@ def maybe_semi_sync_training(
                 fragment_sync_delay=ft_config.fragment_sync_delay,
                 fragment_update_alpha=ft_config.fragment_update_alpha,
             )
-        elif semi_sync_method.lower() == "local_sgd":
+        elif method == "local_sgd":
             sync_steps = getattr(ft_config, "sync_steps", None)
             if sync_steps is None:
                 logger.warning(
@@ -179,19 +181,15 @@ def maybe_semi_sync_training(
                 optimizer=optimizer,
                 sync_every=sync_steps,
             )
-        elif semi_sync_method.lower() == "desloc":
-            try:
-                from torchtitan.experiments.fl.desloc import desloc_semi_sync_context
-            except ImportError:  # pragma: no cover - optional dependency path
+        else:
+            context_factory = get_semi_sync_context_factory(method)
+            if context_factory is None:
                 logger.warning(
-                    "DES-LOC semi-sync requested but torchtitan.experiments.fl.desloc "
-                    "is unavailable; falling back to async quorum."
+                    "TorchFT semi-sync method '%s' requested but no extension was registered; "
+                    "falling back to async quorum.",
+                    semi_sync_method,
                 )
                 return nullcontext()
 
-            return desloc_semi_sync_context(ft_manager=ft_manager, optimizer=optimizer)
-        else:
-            raise ValueError(
-                f"Unknown training method: {semi_sync_method}, only 'diloco', 'local_sgd', and 'desloc' are supported."
-            )
+            return context_factory(ft_manager=ft_manager, optimizer=optimizer)
     return nullcontext()
