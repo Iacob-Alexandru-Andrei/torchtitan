@@ -29,7 +29,6 @@ from torchtitan.experiments.fl.configs.config import (
     BetasMonitorConfig,
     HyperparameterSwitchConfig,
     LRMonitorConfig,
-    MetricsConfig,
     OptimizerMonitorConfig,
     VSMonitorConfig,
 )
@@ -1015,8 +1014,8 @@ class FLMetricsProcessor(MetricsProcessor):
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
 
-        raw_config = getattr(self.job_config, "fl_metrics", MetricsConfig())
-        fl_metrics_config = self.coerce_config(raw_config, MetricsConfig)
+        # Get metrics config from fl_metrics field
+        fl_metrics_config = self.job_config.fl_metrics.unwrap()  # type: ignore[attr-defined]
 
         optimizer_config = fl_metrics_config.optimizer_monitor
         activation_config = fl_metrics_config.activation_monitor
