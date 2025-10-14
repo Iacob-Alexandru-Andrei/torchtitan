@@ -670,7 +670,7 @@ def _prepare_dataset_kwargs(
     }
     dataset_kwargs = {k: v for k, v in dataset_cfg.items() if k in valid_params}
 
-    subset_num_samples = dataset_cfg.pop("subset_num_samples", None)
+    subset_num_samples = dataset_cfg.get("subset_num_samples")
     if subset_num_samples is not None:
         dataset_kwargs["epoch_size"] = subset_num_samples
 

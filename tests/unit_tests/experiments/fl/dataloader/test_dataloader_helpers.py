@@ -2,9 +2,7 @@ from __future__ import annotations
 
 import sys
 import types
-from pathlib import Path
-
-sys.path.insert(0, str(Path(__file__).resolve().parents[5]))
+ 
 
 schedules_module = types.ModuleType("torch.distributed.pipelining.schedules")
 schedules_module._PipelineSchedule = type("_PipelineSchedule", (), {})
@@ -174,7 +172,7 @@ from torchtitan.experiments.fl.dataloader.dataloader import (  # noqa: E402  # i
 )
 
 
-class _DummyTokenizer:
+class _DummyTokenizerForTest:
     tokenizer = object()
 
 
@@ -273,7 +271,7 @@ def test_setup_unigram_metric_allows_failures_when_missing_counts() -> None:
         assignment,
         job_config=job_config,
         split="train",
-        tokenizer=_DummyTokenizer(),
+        tokenizer=_DummyTokenizerForTest(),
     )
 
     assert setup.collate_fn is titan_collate_fn
@@ -299,7 +297,11 @@ def test_prepare_dataset_kwargs_sets_epoch_and_split() -> None:
             "split": "val",
         }
     )
-    assert "subset_num_samples" not in dataset_cfg
+    assert dataset_cfg == {
+        "subset_num_samples": 7,
+        "shuffle": True,
+        "unused": "ignored",
+    }
 
 
 def test_create_streaming_dataset_uses_resolved_kwargs() -> None:
@@ -319,7 +321,7 @@ def test_create_streaming_dataset_uses_resolved_kwargs() -> None:
     _DummyStreamingTextDataset.last_init = None
     dataset = _create_streaming_dataset(
         assignment=assignment,
-        tokenizer=_DummyTokenizer(),
+        tokenizer=_DummyTokenizerForTest(),
         dataset_config=dataset_config,
         batch_size=4,
         split="train",
