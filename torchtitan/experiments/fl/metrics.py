@@ -1015,94 +1015,65 @@ class FLMetricsProcessor(MetricsProcessor):
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
 
-        # Get metrics config from fl_metrics field
-        fl_metrics_raw = self.job_config.fl_metrics  # type: ignore[attr-defined]
-
-        # Convert dict to dataclass if needed
-        if isinstance(fl_metrics_raw, dict):
-            optimizer_monitor_dict = fl_metrics_raw.get("optimizer_monitor", {})
-            activation_monitor_dict = fl_metrics_raw.get("activation_monitor", {})
-            lr_monitor_dict = fl_metrics_raw.get("lr_monitor", {})
-            betas_monitor_dict = fl_metrics_raw.get("betas_monitor", {})
-            vs_monitor_dict = fl_metrics_raw.get("vs_monitor", {})
-            hyper_switch_dict = fl_metrics_raw.get("hyperparameter_switch", {})
-
-            optimizer_config = OptimizerMonitorConfig(**optimizer_monitor_dict)
-            activation_config = ActivationMonitorConfig(**activation_monitor_dict)
-            lr_config = LRMonitorConfig(**lr_monitor_dict)
-            betas_config = BetasMonitorConfig(**betas_monitor_dict)
-            vs_config = VSMonitorConfig(**vs_monitor_dict)
-            hyper_config = HyperparameterSwitchConfig(**hyper_switch_dict)
-            fl_metrics_config = MetricsConfig(
-                optimizer_monitor=optimizer_config,
-                activation_monitor=activation_config,
-                lr_monitor=lr_config,
-                betas_monitor=betas_config,
-                vs_monitor=vs_config,
-                hyperparameter_switch=hyper_config,
-            )
-        else:
-            fl_metrics_config = fl_metrics_raw
+        raw_config = getattr(self.job_config, "fl_metrics", MetricsConfig())
+        fl_metrics_config = self.coerce_config(raw_config, MetricsConfig)
 
         optimizer_config = fl_metrics_config.optimizer_monitor
-        interval = optimizer_config.interval
-        only_global = optimizer_config.only_global
-        log_optimizer_metrics = optimizer_config.log_metrics
-
         activation_config = fl_metrics_config.activation_monitor
-        activation_enabled = activation_config.enabled or (
-            activation_config.interval > 0
-        )
-        activation_interval = activation_config.interval
-        ignore_types = activation_config.ignore_module_types
         lr_config = fl_metrics_config.lr_monitor
         betas_config = fl_metrics_config.betas_monitor
         vs_config = fl_metrics_config.vs_monitor
         hyper_switch_config = fl_metrics_config.hyperparameter_switch
 
-        self.optimizer_monitor = OptimizerMonitor(
-            interval=interval,
-            only_global=only_global,
-            log_optimizer_metrics=log_optimizer_metrics,
+        if optimizer_config.interval > 0:
+            self.optimizer_monitor = OptimizerMonitor(
+                interval=optimizer_config.interval,
+                only_global=optimizer_config.only_global,
+                log_optimizer_metrics=optimizer_config.log_metrics,
+            )
+            self.register_callbacks(self.optimizer_monitor)
+        else:
+            self.optimizer_monitor = None
+
+        activation_enabled = activation_config.enabled or (
+            activation_config.interval > 0
         )
-
-        self.callbacks: list[Callback] = [self.optimizer_monitor]
-
         if activation_enabled:
-            self.activation_monitor: ActivationMonitor | None = ActivationMonitor(
-                interval=activation_interval,
+            ignore_types = activation_config.ignore_module_types
+            self.activation_monitor = ActivationMonitor(
+                interval=activation_config.interval,
                 ignore_module_types=ignore_types if ignore_types else (),
                 gradient_accumulation_steps=activation_config.gradient_accumulation_steps,
                 enabled_metrics=activation_config.enabled_metrics,
             )
-            self.callbacks.append(self.activation_monitor)
+            self.register_callbacks(self.activation_monitor)
         else:
             self.activation_monitor = None
 
         if lr_config.enabled and lr_config.interval > 0:
-            self.lr_monitor: LRMonitor | None = LRMonitor(
+            self.lr_monitor = LRMonitor(
                 interval=lr_config.interval,
                 enabled=lr_config.enabled,
             )
-            self.callbacks.append(self.lr_monitor)
+            self.register_callbacks(self.lr_monitor)
         else:
             self.lr_monitor = None
 
         if betas_config.enabled and betas_config.interval > 0:
-            self.betas_monitor: BetasMonitor | None = BetasMonitor(
+            self.betas_monitor = BetasMonitor(
                 interval=betas_config.interval,
                 enabled=betas_config.enabled,
             )
-            self.callbacks.append(self.betas_monitor)
+            self.register_callbacks(self.betas_monitor)
         else:
             self.betas_monitor = None
 
         if vs_config.enabled and vs_config.interval > 0:
-            self.vs_monitor: VSMonitor | None = VSMonitor(
+            self.vs_monitor = VSMonitor(
                 interval=vs_config.interval,
                 enabled=vs_config.enabled,
             )
-            self.callbacks.append(self.vs_monitor)
+            self.register_callbacks(self.vs_monitor)
         else:
             self.vs_monitor = None
 
@@ -1119,21 +1090,17 @@ class FLMetricsProcessor(MetricsProcessor):
                 else None
             )
             reset_momenta = tuple(hyper_switch_config.reset_momenta)
-            self.hyperparameter_switch: HyperparameterSwitchCallback | None = (
-                HyperparameterSwitchCallback(
-                    enabled=hyper_switch_config.enabled,
-                    steps=steps,
-                    new_vs=new_vs,
-                    new_betas=new_betas,
-                    reset_momenta=reset_momenta,
-                    log_metrics=hyper_switch_config.log_metrics,
-                )
+            self.hyperparameter_switch = HyperparameterSwitchCallback(
+                enabled=hyper_switch_config.enabled,
+                steps=steps,
+                new_vs=new_vs,
+                new_betas=new_betas,
+                reset_momenta=reset_momenta,
+                log_metrics=hyper_switch_config.log_metrics,
             )
-            self.callbacks.append(self.hyperparameter_switch)
+            self.register_callbacks(self.hyperparameter_switch)
         else:
             self.hyperparameter_switch = None
-
-        self._callbacks_setup_done = False
 
     def should_log(self, step: int) -> bool:
         """Determine if metrics should be logged at the current step.
@@ -1185,53 +1152,6 @@ class FLMetricsProcessor(MetricsProcessor):
             "pure_unigram_cross_entropy/token_count": global_items,
         }
 
-    def _ensure_callbacks_setup(self) -> None:
-        if self._callbacks_setup_done:
-            return
-        if not self.callbacks:
-            self._callbacks_setup_done = True
-            return
-        if not self.model_parts or self.optimizers is None:
-            return
-
-        setup_context = CallbackSetupContext(
-            model_parts=self.model_parts,
-            optimizers=self.optimizers,
-            logger=self.logger,
-            parallel_dims=self.parallel_dims,
-            job_config=self.job_config,
-        )
-        for callback in self.callbacks:
-            callback.setup(setup_context)
-        self._callbacks_setup_done = True
-
-    def _run_step_callbacks(self, step: int, mesh: DeviceMesh | None) -> None:
-        if not self.callbacks:
-            return
-        if not self.model_parts or self.optimizers is None:
-            return
-
-        context = CallbackStepContext(
-            step=step,
-            model_parts=self.model_parts,
-            optimizers=self.optimizers,
-            logger=self.logger,
-            mesh=mesh,
-        )
-        for callback in self.callbacks:
-            callback.on_step_end(context)
-
-    def _run_validation_callbacks(self, loss: float, step: int) -> None:
-        if not self.callbacks:
-            return
-        context = CallbackValidationContext(
-            step=step,
-            loss=loss,
-            logger=self.logger,
-        )
-        for callback in self.callbacks:
-            callback.on_validation_end(context)
-
     def log(
         self,
         step: int,
@@ -1250,11 +1170,7 @@ class FLMetricsProcessor(MetricsProcessor):
             extra_metrics: Any additional metrics to log.
 
         """
-        mesh = (
-            self.parallel_dims.world_mesh["dp_cp"]
-            if self.parallel_dims.dp_cp_enabled
-            else None
-        )
+        mesh = self._callback_mesh()
         unigram_payload = self._build_unigram_payload(mesh)
         combined_metrics = dict(extra_metrics) if extra_metrics else {}
         if unigram_payload:
@@ -1268,23 +1184,14 @@ class FLMetricsProcessor(MetricsProcessor):
             extra_metrics=combined_metrics or None,
         )
 
-        self._ensure_callbacks_setup()
-        self._run_step_callbacks(step, mesh)
-
     def log_validation(self, loss: float, step: int) -> None:
         super().log_validation(loss, step)
-        mesh = (
-            self.parallel_dims.world_mesh["dp_cp"]
-            if self.parallel_dims.dp_cp_enabled
-            else None
-        )
+        mesh = self._callback_mesh()
         unigram_payload = self._build_unigram_payload(mesh)
         if unigram_payload:
             self.logger.log(unigram_payload, step)
-        self._ensure_callbacks_setup()
-        self._run_validation_callbacks(loss, step)
 
-    def close(self) -> None:
-        for callback in self.callbacks:
-            callback.close()
-        super().close()
+    def _callback_mesh(self) -> DeviceMesh | None:
+        if self.parallel_dims.dp_cp_enabled:
+            return self.parallel_dims.world_mesh["dp_cp"]
+        return None
