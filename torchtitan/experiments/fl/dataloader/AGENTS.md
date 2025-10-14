@@ -63,8 +63,8 @@ dataloader.py→[_extract_streams((dataset_cfg: dict[str,Any],))→{_join_local_
 ## DEPENDENCY_PATTERNS
 
 ### EDGE_PATTERNS
-Contains: 7 edges
 Call: 17 edges
+Contains: 7 edges
 
 ### CROSS_CLUSTER_FLOW
 

@@ -42,6 +42,18 @@ log_metrics = true
 interval = 1
 ignore_module_types = ["dropout", "ln"]
 
+[fl_metrics.lr_monitor]
+enabled = true
+interval = 1
+
+[fl_metrics.betas_monitor]
+enabled = true
+interval = 1
+
+[fl_metrics.vs_monitor]
+enabled = true
+interval = 1
+
 [lr_scheduler]
 warmup_steps = 2  # lr scheduler warm up, normally 20% of the train steps
 decay_ratio = 0.8  # lr scheduler decay ratio, 80% of the train steps

@@ -90,6 +90,101 @@ class ActivationMonitorConfig:
 
 
 @dataclass
+class LRMonitorConfig:
+    """Configuration for learning rate monitoring."""
+
+    enabled: bool = field(
+        default=True,
+        metadata={"help": "Enable logging of optimizer learning rates."},
+    )
+
+    interval: int = field(
+        default=1,
+        metadata={"help": "Training step interval for learning rate logging."},
+    )
+
+
+@dataclass
+class BetasMonitorConfig:
+    """Configuration for optimizer beta parameter monitoring."""
+
+    enabled: bool = field(
+        default=False,
+        metadata={"help": "Enable logging of optimizer beta tuples."},
+    )
+
+    interval: int = field(
+        default=0,
+        metadata={"help": "Training step interval for beta logging."},
+    )
+
+
+@dataclass
+class VSMonitorConfig:
+    """Configuration for quasi-hyperbolic v parameter monitoring."""
+
+    enabled: bool = field(
+        default=False,
+        metadata={
+            "help": "Enable logging of quasi-hyperbolic v parameters if present."
+        },
+    )
+
+    interval: int = field(
+        default=0,
+        metadata={"help": "Training step interval for v parameter logging."},
+    )
+
+
+@dataclass
+class HyperparameterSwitchConfig:
+    """Configuration for switching quasi-hyperbolic optimizer parameters mid-training."""
+
+    enabled: bool = field(
+        default=False,
+        metadata={"help": "Enable switching betas/vs at specific training steps."},
+    )
+
+    steps: tuple[int, ...] = field(
+        default_factory=tuple,
+        metadata={
+            "help": "Training steps (1-based) at which to apply the new parameters."
+        },
+    )
+
+    new_vs: tuple[float, ...] | None = field(
+        default=None,
+        metadata={
+            "help": "Replacement values for optimizer 'vs' entries. Leave empty to skip."
+        },
+    )
+
+    new_betas: tuple[float, ...] | None = field(
+        default=None,
+        metadata={
+            "help": "Replacement values for optimizer 'betas' entries. Leave empty to skip."
+        },
+    )
+
+    reset_momenta: tuple[str, ...] = field(
+        default_factory=tuple,
+        metadata={
+            "help": (
+                "Optimizer state keys (e.g. 'exp_avg', 'exp_avg_sq') to zero when the switch "
+                "fires. Leave empty to keep existing momenta."
+            )
+        },
+    )
+
+    log_metrics: bool = field(
+        default=True,
+        metadata={
+            "help": "If True, log the updated hyperparameters as scalar metrics."
+        },
+    )
+
+
+@dataclass
 class MetricsConfig:
     """Configuration for all metrics and monitoring."""
 
@@ -101,6 +196,30 @@ class MetricsConfig:
     activation_monitor: ActivationMonitorConfig = field(
         default_factory=ActivationMonitorConfig,
         metadata={"help": "Configuration for activation monitoring."},
+    )
+
+    lr_monitor: LRMonitorConfig = field(
+        default_factory=LRMonitorConfig,
+        metadata={"help": "Configuration for learning rate monitoring."},
+    )
+
+    betas_monitor: BetasMonitorConfig = field(
+        default_factory=BetasMonitorConfig,
+        metadata={"help": "Configuration for optimizer beta monitoring."},
+    )
+
+    vs_monitor: VSMonitorConfig = field(
+        default_factory=VSMonitorConfig,
+        metadata={"help": "Configuration for quasi-hyperbolic parameter monitoring."},
+    )
+
+    hyperparameter_switch: HyperparameterSwitchConfig = field(
+        default_factory=HyperparameterSwitchConfig,
+        metadata={
+            "help": (
+                "Configuration for mid-training switches of optimizer betas/vs with optional momentum resets."
+            )
+        },
     )
 
 
@@ -261,7 +380,7 @@ class MosaicJobConfig(JobConfig):
     fl_metrics: MetricsConfig = field(
         default_factory=MetricsConfig,
         metadata={
-            "help": "Configuration for FL-specific metrics and monitoring (optimizer and activation monitors)."
+            "help": "Configuration for FL-specific metrics and monitoring callbacks (optimizer, activation, learning rate)."
         },
     )
     unigram_metric: UnigramMetricConfig = field(
