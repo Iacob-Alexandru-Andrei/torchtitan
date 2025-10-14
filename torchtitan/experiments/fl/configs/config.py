@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
@@ -15,6 +16,174 @@ from torchtitan.components.ft.config import FaultTolerance as FTFaultTolerance
 
 from torchtitan.config import JobConfig
 from torchtitan.experiments.fl.configs.optimizers import MosaicOptimizerConfig
+
+
+DEFAULT_DATASET_SPLIT_KEYS = frozenset(
+    {"train", "val", "validation", "test", "eval", "train_eval"}
+)
+
+
+def _as_dict(value: Mapping[str, Any] | None) -> dict[str, Any]:
+    """Create a plain ``dict`` from an arbitrary mapping value."""
+
+    if value is None:
+        return {}
+    return dict(value)
+
+
+@dataclass
+class MosaicTokenizerConfig:
+    """Configuration describing how to build a Mosaic tokenizer."""
+
+    name: str = field(
+        default="",
+        metadata={
+            "help": "Tokenizer identifier. Either an llm-foundry registry entry or a HuggingFace model name.",
+        },
+    )
+    # python-explicit-any
+    kwargs: dict[str, Any] = field(
+        default_factory=dict,
+        metadata={
+            "help": "Keyword arguments forwarded to the tokenizer constructor (HuggingFace or llm-foundry).",
+        },
+    )
+
+    @classmethod
+    def from_dict(cls, data: Mapping[str, Any]) -> "MosaicTokenizerConfig":
+        return cls(name=str(data.get("name", "")), kwargs=_as_dict(data.get("kwargs")))
+
+    @classmethod
+    def coerce(cls, value: Any) -> "MosaicTokenizerConfig":
+        if isinstance(value, cls):
+            return value
+        if isinstance(value, Mapping):
+            return cls.from_dict(value)
+        raise TypeError(f"Cannot convert {type(value)} to MosaicTokenizerConfig")
+
+
+@dataclass
+class MosaicDataLoaderConfig:
+    """Configuration describing how to build the Mosaic streaming dataloader."""
+
+    name: str = field(
+        default="",
+        metadata={
+            "help": "Identifier of the Mosaic dataloader. Currently informational only.",
+        },
+    )
+    # python-explicit-any
+    dataset: dict[str, Any] = field(
+        default_factory=dict,
+        metadata={
+            "help": "Nested configuration forwarded to Mosaic's StreamingDataset/StreamingTextDataset constructors.",
+        },
+    )
+    num_workers: int = field(
+        default=8,
+        metadata={"help": "Number of worker processes used by the DataLoader."},
+    )
+    prefetch_factor: int = field(
+        default=2,
+        metadata={"help": "Prefetch factor for each DataLoader worker."},
+    )
+    pin_memory: bool = field(
+        default=True,
+        metadata={"help": "Pin tensors in page-locked memory for faster host→device transfers."},
+    )
+    persistent_workers: bool = field(
+        default=True,
+        metadata={"help": "Keep DataLoader workers alive across epochs."},
+    )
+    drop_last: bool | None = field(
+        default=None,
+        metadata={
+            "help": "Override drop_last behaviour. If unset, defaults are inferred from the training/validation split.",
+        },
+    )
+    # python-explicit-any
+    split_overrides: dict[str, dict[str, Any]] = field(
+        default_factory=dict,
+        metadata={
+            "help": "Per-split overrides (e.g. 'train', 'val') applied on top of the common DataLoader settings.",
+        },
+    )
+    # python-explicit-any
+    extras: dict[str, Any] = field(
+        default_factory=dict,
+        metadata={"help": "Additional configuration keys preserved for downstream consumers."},
+    )
+
+    @classmethod
+    def from_dict(cls, data: Mapping[str, Any]) -> "MosaicDataLoaderConfig":
+        known_keys = {
+            "name",
+            "dataset",
+            "num_workers",
+            "prefetch_factor",
+            "pin_memory",
+            "persistent_workers",
+            "drop_last",
+            "split_overrides",
+        }
+
+        inferred_split_overrides: dict[str, dict[str, Any]] = {}
+        extras: dict[str, Any] = {}
+        for key, value in data.items():
+            if key in known_keys:
+                continue
+            if isinstance(value, Mapping) and key in DEFAULT_DATASET_SPLIT_KEYS:
+                inferred_split_overrides[key] = _as_dict(value)
+            else:
+                extras[key] = _as_dict(value) if isinstance(value, Mapping) else value
+
+        explicit_split_overrides: dict[str, dict[str, Any]] = {}
+        if "split_overrides" in data and isinstance(data["split_overrides"], Mapping):
+            for key, value in data["split_overrides"].items():
+                if isinstance(value, Mapping):
+                    explicit_split_overrides[key] = _as_dict(value)
+
+        dataset_cfg = data.get("dataset", {})
+        if dataset_cfg and not isinstance(dataset_cfg, Mapping):
+            raise TypeError("mosaic_dataloader.dataset must be a mapping")
+
+        drop_last = data.get("drop_last")
+        drop_last_bool: bool | None
+        if drop_last is None:
+            drop_last_bool = None
+        elif isinstance(drop_last, bool):
+            drop_last_bool = drop_last
+        else:
+            drop_last_bool = bool(drop_last)
+
+        combined_split_overrides: dict[str, dict[str, Any]] = dict(inferred_split_overrides)
+        combined_split_overrides.update(explicit_split_overrides)
+
+        return cls(
+            name=str(data.get("name", "")),
+            dataset=_as_dict(dataset_cfg),
+            num_workers=int(data.get("num_workers", 8)),
+            prefetch_factor=int(data.get("prefetch_factor", 2)),
+            pin_memory=bool(data.get("pin_memory", True)),
+            persistent_workers=bool(data.get("persistent_workers", True)),
+            drop_last=drop_last_bool,
+            split_overrides=combined_split_overrides,
+            extras=extras,
+        )
+
+    @classmethod
+    def coerce(cls, value: Any) -> "MosaicDataLoaderConfig":
+        if isinstance(value, cls):
+            return value
+        if isinstance(value, Mapping):
+            return cls.from_dict(value)
+        raise TypeError(f"Cannot convert {type(value)} to MosaicDataLoaderConfig")
+
+    def get_split_overrides(self, split: str) -> dict[str, Any]:
+        overrides = self.split_overrides.get(split)
+        if overrides is None:
+            return {}
+        return dict(overrides)
 
 
 @dataclass
@@ -280,6 +449,72 @@ class MetricsConfig:
 
 
 @dataclass
+class FLMetricsConfigEnvelope:
+    """Wrapper that guarantees the FL metrics configuration is strongly typed."""
+
+    metrics: MetricsConfig = field(
+        default_factory=MetricsConfig,
+        metadata={"help": "Typed configuration for FL-specific metrics callbacks."},
+    )
+
+    @classmethod
+    def from_dict(cls, data: Mapping[str, Any]) -> "FLMetricsConfigEnvelope":
+        optimizer_monitor_dict = _as_dict(data.get("optimizer_monitor"))
+        activation_monitor_dict = _as_dict(data.get("activation_monitor"))
+        lr_monitor_dict = _as_dict(data.get("lr_monitor"))
+        betas_monitor_dict = _as_dict(data.get("betas_monitor"))
+        vs_monitor_dict = _as_dict(data.get("vs_monitor"))
+        hyper_switch_dict = _as_dict(data.get("hyperparameter_switch"))
+
+        metrics = MetricsConfig(
+            optimizer_monitor=OptimizerMonitorConfig(**optimizer_monitor_dict),
+            activation_monitor=ActivationMonitorConfig(**activation_monitor_dict),
+            lr_monitor=LRMonitorConfig(**lr_monitor_dict),
+            betas_monitor=BetasMonitorConfig(**betas_monitor_dict),
+            vs_monitor=VSMonitorConfig(**vs_monitor_dict),
+            hyperparameter_switch=HyperparameterSwitchConfig(**hyper_switch_dict),
+        )
+        return cls(metrics=metrics)
+
+    @classmethod
+    def coerce(cls, value: Any) -> "FLMetricsConfigEnvelope":
+        if isinstance(value, cls):
+            return value
+        if isinstance(value, MetricsConfig):
+            return cls(metrics=value)
+        if isinstance(value, Mapping):
+            return cls.from_dict(value)
+        raise TypeError(f"Cannot convert {type(value)} to FLMetricsConfigEnvelope")
+
+    def unwrap(self) -> MetricsConfig:
+        return self.metrics
+
+    @property
+    def optimizer_monitor(self) -> OptimizerMonitorConfig:
+        return self.metrics.optimizer_monitor
+
+    @property
+    def activation_monitor(self) -> ActivationMonitorConfig:
+        return self.metrics.activation_monitor
+
+    @property
+    def lr_monitor(self) -> LRMonitorConfig:
+        return self.metrics.lr_monitor
+
+    @property
+    def betas_monitor(self) -> BetasMonitorConfig:
+        return self.metrics.betas_monitor
+
+    @property
+    def vs_monitor(self) -> VSMonitorConfig:
+        return self.metrics.vs_monitor
+
+    @property
+    def hyperparameter_switch(self) -> HyperparameterSwitchConfig:
+        return self.metrics.hyperparameter_switch
+
+
+@dataclass
 class UnigramMetricConfig:
     """Configuration for unigram cross entropy metrics."""
 
@@ -396,6 +631,44 @@ class S3CheckpointingConfig:
         },
     )
 
+    @classmethod
+    def from_dict(cls, data: Mapping[str, Any]) -> "S3CheckpointingConfig":
+        run_uuid = data.get("run_uuid")
+        remote_checkpoint_folder = data.get("remote_checkpoint_folder")
+        upload_staging_folder = data.get("upload_staging_folder")
+        resume_from_run_step = data.get("resume_from_run_step")
+
+        return cls(
+            enable=bool(data.get("enable", False)),
+            bucket=str(data.get("bucket", "")),
+            prefix=str(data.get("prefix", "")),
+            run_uuid=None if run_uuid is None else str(run_uuid),
+            num_attempts=int(data.get("num_attempts", 3)),
+            client_config=_as_dict(data.get("client_config")),
+            num_concurrent_uploads=int(data.get("num_concurrent_uploads", 1)),
+            upload_staging_folder=(
+                None if upload_staging_folder is None else str(upload_staging_folder)
+            ),
+            use_procs=bool(data.get("use_procs", True)),
+            remote_checkpoint_folder=(
+                None
+                if remote_checkpoint_folder is None
+                else str(remote_checkpoint_folder)
+            ),
+            download_on_start=bool(data.get("download_on_start", True)),
+            resume_from_run_step=(
+                None if resume_from_run_step is None else str(resume_from_run_step)
+            ),
+        )
+
+    @classmethod
+    def coerce(cls, value: Any) -> "S3CheckpointingConfig":
+        if isinstance(value, cls):
+            return value
+        if isinstance(value, Mapping):
+            return cls.from_dict(value)
+        raise TypeError(f"Cannot convert {type(value)} to S3CheckpointingConfig")
+
 
 @dataclass
 class MosaicJobConfig(JobConfig):
@@ -422,9 +695,8 @@ class MosaicJobConfig(JobConfig):
         },
     )
 
-    # python-explicit-any
-    mosaic_dataloader: dict[str, Any] = field(
-        default_factory=dict,
+    mosaic_dataloader: MosaicDataLoaderConfig = field(
+        default_factory=MosaicDataLoaderConfig,
         metadata={
             "help": (
                 "Configuration for the MosaicML streaming dataloader. "
@@ -434,16 +706,16 @@ class MosaicJobConfig(JobConfig):
             )
         },
     )
-    # python-explicit-any
-    mosaic_tokenizer: dict[str, Any] = field(
-        default_factory=dict,
+
+    mosaic_tokenizer: MosaicTokenizerConfig = field(
+        default_factory=MosaicTokenizerConfig,
         metadata={
             "help": "Configuration for the MosaicML tokenizer. This should "
             "include the tokenizer name and any specific kwargs."
         },
     )
 
-    fl_metrics: MetricsConfig = field(
+    fl_metrics: MetricsConfig | FLMetricsConfigEnvelope = field(
         default_factory=MetricsConfig,
         metadata={
             "help": "Configuration for FL-specific metrics and monitoring callbacks (optimizer, activation, learning rate)."
@@ -469,3 +741,19 @@ class MosaicJobConfig(JobConfig):
             "help": "Fault tolerance configuration with TorchFT-specific options."
         },
     )
+
+
+def ensure_mosaic_job_config_types(job_config: MosaicJobConfig) -> MosaicJobConfig:
+    """Convert legacy dict-based sections into their typed equivalents."""
+
+    job_config.mosaic_dataloader = MosaicDataLoaderConfig.coerce(
+        job_config.mosaic_dataloader
+    )
+    job_config.mosaic_tokenizer = MosaicTokenizerConfig.coerce(
+        job_config.mosaic_tokenizer
+    )
+    job_config.fl_metrics = FLMetricsConfigEnvelope.coerce(job_config.fl_metrics)
+    job_config.s3_checkpoint = S3CheckpointingConfig.coerce(job_config.s3_checkpoint)
+
+    return job_config
+

@@ -47,11 +47,12 @@ def build_mosaic_tokenizer(
         ValueError: If the tokenizer configuration is missing or if the
                     resulting tokenizer does not have an EOS token.
     """
-    if not job_config.mosaic_tokenizer:
-        raise ValueError("mosaic_tokenizer config must be set.")
+    tokenizer_cfg = job_config.mosaic_tokenizer
+    if not tokenizer_cfg.name:
+        raise ValueError("mosaic_tokenizer config must specify a name.")
 
-    tokenizer_name: str = job_config.mosaic_tokenizer["name"]
-    tokenizer_kwargs: dict[str, Any] = job_config.mosaic_tokenizer.get("kwargs", {})
+    tokenizer_name: str = tokenizer_cfg.name
+    tokenizer_kwargs: dict[str, Any] = dict(tokenizer_cfg.kwargs)
 
     os.environ["TRANSFORMERS_NO_ADVISORY_WARNINGS"] = "1"
     os.environ["TOKENIZERS_PARALLELISM"] = "false"

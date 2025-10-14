@@ -16,18 +16,19 @@ import pickle
 import posixpath
 import shutil
 from collections import Counter
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from copy import deepcopy
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
-from collections.abc import Callable
 from urllib.parse import urlparse
+
 import torch
 from torchdata.stateful_dataloader import StatefulDataLoader
 
 from torchtitan.experiments.fl.metrics import (
-    PureUnigramCrossEntropy,
     add_unigram_metric,
+    PureUnigramCrossEntropy,
 )
 
 try:
@@ -46,7 +47,10 @@ except ImportError:  # pragma: no cover - optional dependency
 
 from torchtitan.components.dataloader import BaseDataLoader
 from torchtitan.components.tokenizer import BaseTokenizer
-from torchtitan.experiments.fl.configs.config import MosaicJobConfig, UnigramMetricConfig
+from torchtitan.experiments.fl.configs.config import (
+    MosaicJobConfig,
+    UnigramMetricConfig,
+)
 from torchtitan.experiments.fl.s3_checkpoint import (
     create_remote_up_down,
     download_file_from_s3,
@@ -54,6 +58,62 @@ from torchtitan.experiments.fl.s3_checkpoint import (
 from torchtitan.tools.logging import logger
 
 _SHM_CLEANED: bool = False
+
+
+@dataclass(frozen=True)
+class MosaicRuntimeConfig:
+    """Runtime settings for the Mosaic dataloader workers."""
+
+    num_workers: int
+    prefetch_factor: int | None
+    pin_memory: bool
+    persistent_workers: bool
+    drop_last: bool
+    batch_size: int
+
+
+@dataclass(frozen=True)
+class NormalizedMosaicConfig:
+    """Normalized configuration payload passed between dataloader helpers."""
+
+    dataset_config: dict[str, Any]
+    runtime: MosaicRuntimeConfig
+
+
+@dataclass(frozen=True)
+class StreamExtractionResult:
+    """Container describing the resolved Mosaic streams and metadata."""
+
+    streams: list[Stream] | None
+    dataset_config: dict[str, Any]
+    sampling_group_indices: list[list[int]] | None
+    dataset_root_remote: str | None
+    dataset_split_remote: str | None
+
+
+@dataclass(frozen=True)
+class StreamAssignment:
+    """Stream subset assigned to the current rank after sampling-group selection."""
+
+    streams: list[Stream] | None
+    group_index: int | None
+    dataset_root_remote: str | None
+    dataset_split_remote: str | None
+
+
+@dataclass(frozen=True)
+class DatasetFactoryConfig:
+    """Keyword arguments used to instantiate the StatefulStreamingTextDataset."""
+
+    kwargs: dict[str, Any]
+
+
+@dataclass(frozen=True)
+class UnigramSetupResult:
+    """Result of configuring unigram metrics for a stream subset."""
+
+    collate_fn: Callable
+    group_key: str | None
 
 
 def _is_uri(path: str | None) -> bool:
@@ -85,7 +145,9 @@ def _flatten_stream_configs(streams_cfg: Any) -> dict[str, dict[str, Any]]:
     def _collect(config: Any, parent_key: str | None = None) -> None:
         if isinstance(config, Mapping):
             if "remote" in config or "local" in config:
-                flattened_key = config.get("name") or parent_key or f"stream_{len(flattened)}"
+                flattened_key = (
+                    config.get("name") or parent_key or f"stream_{len(flattened)}"
+                )
                 flattened[flattened_key] = dict(config)
                 flattened[flattened_key].setdefault("name", flattened_key)
                 return
@@ -93,7 +155,9 @@ def _flatten_stream_configs(streams_cfg: Any) -> dict[str, dict[str, Any]]:
             for key, value in config.items():
                 if key == "client_streams":
                     _collect(value)
-                elif isinstance(value, Mapping) and ("remote" in value or "local" in value):
+                elif isinstance(value, Mapping) and (
+                    "remote" in value or "local" in value
+                ):
                     flattened[key] = dict(value)
                     flattened[key].setdefault("name", key)
                 else:
@@ -135,7 +199,9 @@ def _collect_group_stream_entries(group: Mapping[str, Any]) -> list[Any]:
     """Extract the raw stream entries referenced by a sampling group."""
     raw_streams = group.get("streams") or group.get("client_streams")
     if raw_streams is None:
-        raise ValueError(f"Sampling group '{group.get('name')}' must define a 'streams' section")
+        raise ValueError(
+            f"Sampling group '{group.get('name')}' must define a 'streams' section"
+        )
 
     if isinstance(raw_streams, Mapping):
         flattened = _flatten_stream_configs(raw_streams)
@@ -144,10 +210,14 @@ def _collect_group_stream_entries(group: Mapping[str, Any]) -> list[Any]:
         return list(raw_streams)
     if isinstance(raw_streams, str):
         return [raw_streams]
-    raise TypeError("Sampling group stream entries must be mappings, sequences, or strings")
+    raise TypeError(
+        "Sampling group stream entries must be mappings, sequences, or strings"
+    )
 
 
-def _select_dataset_config(dataset_cfg: Mapping[str, Any] | None, split: str) -> dict[str, Any]:
+def _select_dataset_config(
+    dataset_cfg: Mapping[str, Any] | None, split: str
+) -> dict[str, Any]:
     if not dataset_cfg:
         return {}
 
@@ -160,15 +230,7 @@ def _select_dataset_config(dataset_cfg: Mapping[str, Any] | None, split: str) ->
     return cfg
 
 
-def _extract_streams(
-    dataset_cfg: dict[str, Any],
-) -> tuple[
-    list[Stream] | None,
-    dict[str, Any],
-    list[list[int]] | None,
-    str | None,
-    str | None,
-]:
+def _extract_streams(dataset_cfg: dict[str, Any]) -> StreamExtractionResult:
     root_remote = dataset_cfg.pop("root_remote", None)
     root_local = dataset_cfg.pop("root_local", None)
     streams_cfg = dataset_cfg.pop("streams", None)
@@ -178,7 +240,13 @@ def _extract_streams(
     dataset_split = dataset_cfg.pop("split", None)
 
     if not streams_cfg:
-        return None, dataset_cfg, None, root_remote, dataset_split
+        return StreamExtractionResult(
+            streams=None,
+            dataset_config=dataset_cfg,
+            sampling_group_indices=None,
+            dataset_root_remote=root_remote,
+            dataset_split_remote=dataset_split,
+        )
 
     flattened = _flatten_stream_configs(streams_cfg)
     group_stream_names: list[list[str]] | None = None
@@ -203,7 +271,9 @@ def _extract_streams(
             for index, entry in enumerate(entries):
                 if isinstance(entry, str):
                     if entry not in flattened:
-                        raise KeyError(f"Sampling group '{group.get('name')}' references unknown stream '{entry}'")
+                        raise KeyError(
+                            f"Sampling group '{group.get('name')}' references unknown stream '{entry}'"
+                        )
                     candidate = deepcopy(flattened[entry])
                     candidate.setdefault("name", entry)
                 elif isinstance(entry, Mapping):
@@ -224,7 +294,9 @@ def _extract_streams(
                     elif "name" not in candidate or candidate["name"] is None:
                         candidate["name"] = f"{group.get('name')}_stream_{index}"
                 else:
-                    raise TypeError("Sampling group stream entries must be mappings, sequences, or strings")
+                    raise TypeError(
+                        "Sampling group stream entries must be mappings, sequences, or strings"
+                    )
 
                 candidate.setdefault("name", f"stream_{len(aggregated)}")
                 identifier = (
@@ -284,11 +356,15 @@ def _extract_streams(
     stream_names: list[str] = []
     for name, stream_cfg in flattened.items():
         stream_kwargs = dict(stream_cfg)
-        stream_kwargs = {key: value for key, value in stream_kwargs.items() if value is not None}
+        stream_kwargs = {
+            key: value for key, value in stream_kwargs.items() if value is not None
+        }
         stream_kwargs.pop("name", None)
 
         if "remote" in stream_kwargs:
-            stream_kwargs["remote"] = _join_remote_path(root_remote, stream_kwargs["remote"])
+            stream_kwargs["remote"] = _join_remote_path(
+                root_remote, stream_kwargs["remote"]
+            )
         elif root_remote is not None:
             logger.warning(
                 "Stream %s is missing a remote path; root_remote was provided.",
@@ -296,9 +372,13 @@ def _extract_streams(
             )
 
         if "local" in stream_kwargs:
-            stream_kwargs["local"] = _join_local_path(root_local, stream_kwargs["local"])
+            stream_kwargs["local"] = _join_local_path(
+                root_local, stream_kwargs["local"]
+            )
         elif root_local is not None:
-            logger.warning("Stream %s is missing a local path; root_local was provided.", name)
+            logger.warning(
+                "Stream %s is missing a local path; root_local was provided.", name
+            )
 
         streams.append(Stream(**stream_kwargs))
         stream_names.append(name)
@@ -306,7 +386,9 @@ def _extract_streams(
     logger.info("Built %d streams for Mosaic dataloader", len(streams))
     group_indices: list[list[int]] | None = None
     if group_stream_names:
-        name_to_index = {stream_name: idx for idx, stream_name in enumerate(stream_names)}
+        name_to_index = {
+            stream_name: idx for idx, stream_name in enumerate(stream_names)
+        }
         group_indices = []
         for names in group_stream_names:
             indices = [name_to_index[name] for name in names if name in name_to_index]
@@ -320,7 +402,13 @@ def _extract_streams(
             for idx, indices in enumerate(group_indices):
                 selected = [stream_names[i] for i in indices]
                 logger.info("Group %d contains streams: %s", idx, selected)
-    return streams, dataset_cfg, group_indices, root_remote, dataset_split
+    return StreamExtractionResult(
+        streams=streams or None,
+        dataset_config=dataset_cfg,
+        sampling_group_indices=group_indices,
+        dataset_root_remote=root_remote,
+        dataset_split_remote=dataset_split,
+    )
 
 
 def _maybe_download_unigram_file(
@@ -384,7 +472,9 @@ def _maybe_download_unigram_file(
         num_attempts=config.num_attempts,
         client_config=config.client_config,
     )
-    remote_up_down._run_name = "unigram_metrics"  # pyright: ignore[reportAttributeAccessIssue]
+    remote_up_down._run_name = (
+        "unigram_metrics"  # pyright: ignore[reportAttributeAccessIssue]
+    )
 
     try:
         destination.parent.mkdir(parents=True, exist_ok=True)
@@ -426,7 +516,9 @@ def _load_stream_unigram_counts(
     stream_split = getattr(stream, "split", None) or dataset_split or default_split
 
     if not local_root:
-        message = f"Stream '{getattr(stream, 'name', 'unknown')}' is missing a local path."
+        message = (
+            f"Stream '{getattr(stream, 'name', 'unknown')}' is missing a local path."
+        )
         raise RuntimeError(message)
 
     local_root_path = Path(local_root)
@@ -449,9 +541,7 @@ def _load_stream_unigram_counts(
             config,
         )
         if not downloaded and not cache_path.exists():
-            message = (
-                f"Unigram frequency file not found for stream '{getattr(stream, 'name', 'unknown')}' at {cache_path}"
-            )
+            message = f"Unigram frequency file not found for stream '{getattr(stream, 'name', 'unknown')}' at {cache_path}"
             raise RuntimeError(message)
         unigram_path = cache_path
 
@@ -491,6 +581,199 @@ def _load_stream_unigram_counts(
         counts[token_id] += freq
 
     return counts
+
+
+def _normalize_mosaic_dataloader_config(
+    job_config: MosaicJobConfig,
+    *,
+    split: str,
+    default_drop_last: bool,
+) -> NormalizedMosaicConfig:
+    """Normalize high-level Mosaic dataloader configuration into typed payloads."""
+    mosaic_cfg = job_config.mosaic_dataloader
+    if not mosaic_cfg:
+        raise ValueError("mosaic_dataloader config must be set.")
+
+    cfg = deepcopy(mosaic_cfg)
+    dataset_cfg_raw = cfg.dataset
+    dataset_cfg = _select_dataset_config(dataset_cfg_raw, split)
+
+    num_workers = cfg.num_workers
+    prefetch_factor = cfg.prefetch_factor
+    pin_memory = cfg.pin_memory
+    persistent_workers = cfg.persistent_workers
+    drop_last = cfg.drop_last if cfg.drop_last is not None else default_drop_last
+
+    batch_size = (
+        job_config.validation.local_batch_size
+        if split == "val"
+        else job_config.training.local_batch_size
+    )
+
+    runtime = MosaicRuntimeConfig(
+        num_workers=num_workers,
+        prefetch_factor=prefetch_factor,
+        pin_memory=pin_memory,
+        persistent_workers=persistent_workers,
+        drop_last=drop_last,
+        batch_size=batch_size,
+    )
+
+    return NormalizedMosaicConfig(dataset_config=dataset_cfg, runtime=runtime)
+
+
+def _select_stream_subset(
+    extraction: StreamExtractionResult,
+    *,
+    dp_rank: int,
+    dp_world_size: int,
+) -> StreamAssignment:
+    """Select the stream subset for the current rank based on sampling groups."""
+    streams = extraction.streams
+    sampling_group_indices = extraction.sampling_group_indices
+
+    if streams is None:
+        return StreamAssignment(
+            streams=None,
+            group_index=None,
+            dataset_root_remote=extraction.dataset_root_remote,
+            dataset_split_remote=extraction.dataset_split_remote,
+        )
+
+    group_index: int | None = None
+    stream_subset: list[Stream] | None
+
+    if sampling_group_indices:
+        group_count = len(sampling_group_indices)
+        if group_count:
+            group_index = dp_rank % group_count
+            selected_indices = sampling_group_indices[group_index]
+            stream_subset = [streams[idx] for idx in selected_indices]
+            if len(stream_subset) == len(streams):
+                logger.info(
+                    "Mosaic group %d yielded all streams for dp_rank=%d; deferring to rank-based split.",
+                    group_index,
+                    dp_rank,
+                )
+                group_count = dp_world_size if dp_world_size > 0 else len(streams)
+                group_index = dp_rank % group_count
+                stream_subset = [streams[group_index % len(streams)]]
+        else:
+            stream_subset = streams
+
+        if not stream_subset:
+            raise ValueError(
+                f"No streams resolved for Mosaic sampling group {group_index} (dp_rank={dp_rank})."
+            )
+        logger.info(
+            "Assigning Mosaic sampling group %s (dp_rank=%d) with %d stream(s): %s",
+            "global" if group_index is None else group_index,
+            dp_rank,
+            len(stream_subset),
+            [getattr(stream, "local", None) for stream in stream_subset],
+        )
+    else:
+        stream_subset = streams
+
+    return StreamAssignment(
+        streams=stream_subset,
+        group_index=group_index,
+        dataset_root_remote=extraction.dataset_root_remote,
+        dataset_split_remote=extraction.dataset_split_remote,
+    )
+
+
+def _prepare_dataset_kwargs(
+    dataset_cfg: dict[str, Any],
+    *,
+    dataset_split_remote: str | None,
+) -> DatasetFactoryConfig:
+    """Prepare keyword arguments for the streaming dataset factory."""
+    valid_params = {
+        *inspect.signature(StreamingTextDataset).parameters,
+        *inspect.signature(StreamingDataset).parameters,
+    }
+    dataset_kwargs = {k: v for k, v in dataset_cfg.items() if k in valid_params}
+
+    subset_num_samples = dataset_cfg.get("subset_num_samples")
+    if subset_num_samples is not None:
+        dataset_kwargs["epoch_size"] = subset_num_samples
+
+    if dataset_split_remote is not None:
+        dataset_kwargs["split"] = dataset_split_remote
+
+    return DatasetFactoryConfig(kwargs=dataset_kwargs)
+
+
+def _create_streaming_dataset(
+    *,
+    assignment: StreamAssignment,
+    tokenizer: BaseTokenizer,
+    dataset_config: DatasetFactoryConfig,
+    batch_size: int,
+    split: str,
+) -> StatefulStreamingTextDataset:
+    """Instantiate the stateful streaming dataset for the resolved stream subset."""
+    hf_tokenizer = getattr(tokenizer, "tokenizer", tokenizer)
+    logger.info(
+        "Building StreamingTextDataset (%s split) with config: %s",
+        split,
+        dataset_config.kwargs,
+    )
+    return StatefulStreamingTextDataset(
+        tokenizer=hf_tokenizer,
+        streams=assignment.streams,
+        batch_size=batch_size,
+        **dataset_config.kwargs,
+    )
+
+
+def _setup_unigram_metric(
+    assignment: StreamAssignment,
+    *,
+    job_config: MosaicJobConfig,
+    split: str,
+    tokenizer: BaseTokenizer,
+) -> UnigramSetupResult:
+    """Build and register unigram metrics for the current stream subset."""
+    collate_fn: Callable = titan_collate_fn
+    if not job_config.unigram_metric.enable:
+        return UnigramSetupResult(collate_fn=collate_fn, group_key=None)
+
+    group_label = (
+        f"group_{assignment.group_index}"
+        if assignment.group_index is not None and assignment.streams is not None
+        else "global"
+    )
+    unigram_group_key = f"{split}/{group_label}"
+
+    try:
+        unigram_metric = _build_unigram_metric_for_group(
+            streams=assignment.streams,
+            default_split=split,
+            tokenizer=tokenizer,
+            config=job_config.unigram_metric,
+            group_key=unigram_group_key,
+            dataset_root_remote=assignment.dataset_root_remote,
+            dataset_split_remote=assignment.dataset_split_remote,
+        )
+    except Exception as exc:
+        if job_config.unigram_metric.allow_failures:
+            logger.warning(
+                "Unable to construct unigram metric for %s: %s",
+                unigram_group_key,
+                exc,
+            )
+            return UnigramSetupResult(collate_fn=collate_fn, group_key=None)
+        raise RuntimeError(
+            f"Unable to construct unigram metric for {unigram_group_key}: {exc}"
+        ) from exc
+
+    if unigram_metric is not None:
+        add_unigram_metric(unigram_metric)
+        return UnigramSetupResult(collate_fn=collate_fn, group_key=unigram_group_key)
+
+    return UnigramSetupResult(collate_fn=collate_fn, group_key=None)
 
 
 def _build_unigram_metric_for_group(
@@ -574,15 +857,21 @@ class StatefulStreamingTextDataset(StreamingTextDataset):
         self._num_samples_yielded += 1
         return super().__getitem__(idx)
 
-    def state_dict(self, num_samples: int | None = None, from_beginning: bool = True) -> dict[str, Any]:
+    def state_dict(
+        self, num_samples: int | None = None, from_beginning: bool = True
+    ) -> dict[str, Any]:
         """Saves the dataset's state.
 
         If `num_samples` is not provided by the caller, it defaults to using
         the internal `_num_samples_yielded` counter. This makes it compatible
         with the StatefulDataLoader.
         """
-        effective_num_samples = num_samples if num_samples is not None else self._num_samples_yielded
-        parent_state = super().state_dict(num_samples=effective_num_samples, from_beginning=from_beginning)
+        effective_num_samples = (
+            num_samples if num_samples is not None else self._num_samples_yielded
+        )
+        parent_state = super().state_dict(
+            num_samples=effective_num_samples, from_beginning=from_beginning
+        )
         parent_state["_num_samples_yielded"] = self._num_samples_yielded
         return parent_state
 
@@ -657,12 +946,14 @@ class MosaicParallelAwareDataloader(StatefulDataLoader, BaseDataLoader):
             return
 
         if self._rank_id not in state_dict:
-            logger.warning(f"DataLoader state is empty for dp rank {self.dp_rank}, expected key {self._rank_id}")
+            logger.warning(
+                f"DataLoader state is empty for dp rank {self.dp_rank}, expected key {self._rank_id}"
+            )
             return
 
-        assert self.dp_world_size == state_dict["world_size"], (
-            "dp_degree is inconsistent before and after checkpoint, dataloader resharding is not supported yet."
-        )
+        assert (
+            self.dp_world_size == state_dict["world_size"]
+        ), "dp_degree is inconsistent before and after checkpoint, dataloader resharding is not supported yet."
         super().load_state_dict(pickle.loads(state_dict[self._rank_id]))
 
 
@@ -703,143 +994,94 @@ def _build_mosaic_dataloader(
     split: str,
     default_drop_last: bool,
 ) -> MosaicParallelAwareDataloader:
+    normalized = _normalize_mosaic_dataloader_config(
+        job_config,
+        split=split,
+        default_drop_last=default_drop_last,
+    )
     mosaic_cfg = job_config.mosaic_dataloader
-    if not mosaic_cfg:
-        raise ValueError("mosaic_dataloader config must be set.")
+    if not mosaic_cfg.dataset:
+        raise ValueError("mosaic_dataloader config must define a dataset section.")
 
-    cfg = deepcopy(mosaic_cfg)
-    dataset_cfg_raw = cfg.pop("dataset", {})
+    dataset_cfg_raw = deepcopy(mosaic_cfg.dataset)
     dataset_cfg = _select_dataset_config(dataset_cfg_raw, split)
 
     # Extract dataloader-specific config
-    num_workers = cfg.get("num_workers", 8)
-    prefetch_factor = cfg.get("prefetch_factor", 2)
-    pin_memory = cfg.get("pin_memory", True)
-    persistent_workers = cfg.get("persistent_workers", True)
-    drop_last = cfg.get("drop_last", default_drop_last)
+    num_workers = mosaic_cfg.num_workers
+    prefetch_factor = mosaic_cfg.prefetch_factor
+    pin_memory = mosaic_cfg.pin_memory
+    persistent_workers = mosaic_cfg.persistent_workers
+    drop_last = (
+        mosaic_cfg.drop_last if mosaic_cfg.drop_last is not None else default_drop_last
+    )
 
     # Allow per-split overrides
-    split_overrides = cfg.get(split, {})
-    if isinstance(split_overrides, Mapping):
+    split_overrides = mosaic_cfg.get_split_overrides(split)
+    if split_overrides:
         num_workers = split_overrides.get("num_workers", num_workers)
         prefetch_factor = split_overrides.get("prefetch_factor", prefetch_factor)
         pin_memory = split_overrides.get("pin_memory", pin_memory)
-        persistent_workers = split_overrides.get("persistent_workers", persistent_workers)
+        persistent_workers = split_overrides.get(
+            "persistent_workers", persistent_workers
+        )
         drop_last = split_overrides.get("drop_last", drop_last)
 
-    (
-        streams,
-        dataset_cfg,
-        sampling_group_indices,
-        dataset_root_remote,
-        dataset_split_remote,
-    ) = _extract_streams(dataset_cfg)
+    stream_extraction_result = _extract_streams(dataset_cfg)
+
+    dataset_cfg = stream_extraction_result.dataset_config
 
     # Filter dataset config to only include valid StreamingTextDataset parameters
     valid_params = {
         *inspect.signature(StreamingTextDataset).parameters,
         *inspect.signature(StreamingDataset).parameters,
     }
-    dataset_config_filtered = {k: v for k, v in dataset_cfg.items() if k in valid_params}
+    dataset_config_filtered = {
+        k: v for k, v in dataset_cfg.items() if k in valid_params
+    }
 
     # Resolve optional subset configuration
     subset_num_samples = dataset_cfg.pop("subset_num_samples", None)
     if subset_num_samples is not None:
         dataset_config_filtered["epoch_size"] = subset_num_samples
 
-    # The tokenizer is expected to be a HuggingFace tokenizer or a wrapper.
-    hf_tokenizer = getattr(tokenizer, "tokenizer", tokenizer)
-
-    batch_size = job_config.validation.local_batch_size if split == "val" else job_config.training.local_batch_size
-
-    group_idx: int | None = None
-
-    if streams is None:
-        stream_subset = None
-    elif sampling_group_indices:
-        group_count = len(sampling_group_indices)
-        group_idx = dp_rank % group_count
-        selected_indices = sampling_group_indices[group_idx]
-        stream_subset = [streams[idx] for idx in selected_indices]
-        # Detect if the subset is identical to the full set (e.g., recovery case)
-        if len(stream_subset) == len(streams):
-            logger.info(
-                "Mosaic group %d yielded all streams for dp_rank=%d; deferring to rank-based split.",
-                group_idx,
-                dp_rank,
-            )
-            group_count = dp_world_size if dp_world_size > 0 else len(streams)
-            group_idx = dp_rank % group_count
-            stream_subset = [streams[group_idx % len(streams)]]
-        if not stream_subset:
-            raise ValueError(f"No streams resolved for Mosaic sampling group {group_idx} (dp_rank={dp_rank}).")
-        logger.info(
-            "Assigning Mosaic sampling group %d (dp_rank=%d) with %d stream(s): %s",
-            group_idx,
-            dp_rank,
-            len(stream_subset),
-            [getattr(stream, "local", None) for stream in stream_subset],
-        )
-    else:
-        stream_subset = streams
-
-    unigram_group_key: str | None = None
-    collate_fn: Callable = titan_collate_fn
-    if job_config.unigram_metric.enable:
-        group_label = f"group_{group_idx}" if sampling_group_indices and group_idx is not None else "global"
-        unigram_group_key = f"{split}/{group_label}"
-        unigram_metric: PureUnigramCrossEntropy | None = None
-        try:
-            unigram_metric = _build_unigram_metric_for_group(
-                streams=stream_subset,
-                default_split=split,
-                tokenizer=tokenizer,
-                config=job_config.unigram_metric,
-                group_key=unigram_group_key,
-                dataset_root_remote=dataset_root_remote,
-                dataset_split_remote=dataset_split_remote,
-            )
-        except Exception as exc:
-            if job_config.unigram_metric.allow_failures:
-                logger.warning(
-                    "Unable to construct unigram metric for %s: %s",
-                    unigram_group_key,
-                    exc,
-                )
-                unigram_metric = None
-                unigram_group_key = None
-            else:
-                raise RuntimeError(f"Unable to construct unigram metric for {unigram_group_key}: {exc}") from exc
-        else:
-            if unigram_metric is not None:
-                add_unigram_metric(unigram_metric)
-
-    logger.info(
-        "Building StreamingTextDataset (%s split) with config: %s",
-        split,
-        dataset_config_filtered,
+    extraction = _extract_streams(normalized.dataset_config)
+    assignment = _select_stream_subset(
+        extraction,
+        dp_rank=dp_rank,
+        dp_world_size=dp_world_size,
     )
-    text_dataset = StatefulStreamingTextDataset(
-        tokenizer=hf_tokenizer,
-        streams=stream_subset,
-        batch_size=batch_size,
-        **{
-            **dataset_config_filtered,
-            **({"split": dataset_split_remote} if dataset_split_remote is not None else {}),
-        },
+
+    dataset_factory_config = _prepare_dataset_kwargs(
+        extraction.dataset_config,
+        dataset_split_remote=assignment.dataset_split_remote,
+    )
+
+    unigram_setup = _setup_unigram_metric(
+        assignment,
+        job_config=job_config,
+        split=split,
+        tokenizer=tokenizer,
+    )
+
+    text_dataset = _create_streaming_dataset(
+        assignment=assignment,
+        tokenizer=tokenizer,
+        dataset_config=dataset_factory_config,
+        batch_size=normalized.runtime.batch_size,
+        split=split,
     )
 
     return MosaicParallelAwareDataloader(
         dataset=text_dataset,
         dp_rank=dp_rank,
         dp_world_size=dp_world_size,
-        batch_size=batch_size,
-        collate_fn=collate_fn,
-        num_workers=num_workers,
-        prefetch_factor=prefetch_factor,
-        pin_memory=pin_memory,
-        persistent_workers=persistent_workers,
-        drop_last=drop_last,
+        batch_size=normalized.runtime.batch_size,
+        collate_fn=unigram_setup.collate_fn,
+        num_workers=normalized.runtime.num_workers,
+        prefetch_factor=normalized.runtime.prefetch_factor,
+        pin_memory=normalized.runtime.pin_memory,
+        persistent_workers=normalized.runtime.persistent_workers,
+        drop_last=normalized.runtime.drop_last,
     )
 
 

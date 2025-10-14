@@ -6,7 +6,7 @@
 """Mosaic Llama3 MuP model with Mosaic streaming support."""
 
 from dataclasses import replace
-from typing import Any, cast, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, cast
 
 from torch import nn
 
@@ -14,16 +14,15 @@ from torchtitan.components.ft import FTManager
 from torchtitan.components.optimizer import OptimizersContainer
 from torchtitan.config import Optimizer as OptimizerConfig
 from torchtitan.distributed import ParallelDims
-from torchtitan.experiments.fl.components import build_metrics_processor
 from torchtitan.experiments.fl.configs.optimizers import MosaicOptimizerConfig
-from torchtitan.experiments.fl.dataloader.dataloader import build_mosaic_dataloader
-from torchtitan.experiments.fl.dataloader.tokenizer import build_mosaic_tokenizer
+from torchtitan.experiments.fl.models.constants import MOSAIC_LLAMA_VOCAB_SIZE
+from torchtitan.experiments.fl.models.utils import ensure_mosaic_spec
 from torchtitan.experiments.fl.validate import build_mosaic_validator
-from torchtitan.experiments.fl.models.llama3_mup.train_configs import (
-    get_train_spec as get_llama3_mup_train_spec,
-)
 from torchtitan.experiments.fl.optimizer_builder import build_mosaic_optimizers
-from torchtitan.protocols.train_spec import TokenizerBuilder, TrainSpec
+from torchtitan.protocols.train_spec import (
+    TrainSpec,
+    get_train_spec as get_registered_train_spec,
+)
 
 if TYPE_CHECKING:
     from torchtitan.experiments.fl.models.llama3_mup.model.mup_model import Transformer
@@ -84,27 +83,22 @@ def build_mosaic_mup_optimizers(
     )
 
 
+def _update_vocab_sizes(base_spec: TrainSpec, mosaic_spec: TrainSpec) -> TrainSpec:
+    model_args = {
+        name: replace(config, vocab_size=MOSAIC_LLAMA_VOCAB_SIZE)
+        for name, config in base_spec.model_args.items()
+    }
+    return replace(mosaic_spec, model_args=model_args)
+
+
 def get_train_spec() -> TrainSpec:
-    """Get the training specification for Llama3 MuP with Mosaic streaming support.
+    """Get the training specification for Llama3 MuP with Mosaic streaming support."""
 
-    This function wraps the base Llama3 MuP TrainSpec to make it compatible with
-    Mosaic streaming by replacing the dataloader, tokenizer, and optimizer builders
-    to support Mosaic-specific optimizers like DecoupledAdamW.
-    """
-    # Get the base Llama3 MuP spec
-    base_spec = get_llama3_mup_train_spec()
-
-    # Update all model configurations with larger vocab size for Mosaic tokenizer
-    model_args = {name: replace(config, vocab_size=50368) for name, config in base_spec.model_args.items()}
-
-    # Return a new spec with Mosaic components and updated vocab sizes
-    return replace(
-        base_spec,
-        name="mosaic_llama3_mup",
-        model_args=model_args,
-        build_dataloader_fn=build_mosaic_dataloader,
-        build_tokenizer_fn=cast("TokenizerBuilder", build_mosaic_tokenizer),
-        build_optimizers_fn=build_mosaic_mup_optimizers,
-        build_metrics_processor_fn=build_metrics_processor,
-        build_validator_fn=build_mosaic_validator,
+    spec_name = ensure_mosaic_spec(
+        "llama3_mup",
+        spec_name="mosaic_llama3_mup",
+        optimizers_fn=build_mosaic_mup_optimizers,
+        validator_fn=build_mosaic_validator,
+        post_transform=_update_vocab_sizes,
     )
+    return get_registered_train_spec(spec_name)
