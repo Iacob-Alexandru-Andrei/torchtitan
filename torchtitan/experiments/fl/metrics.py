@@ -1018,10 +1018,6 @@ class FLMetricsProcessor(MetricsProcessor):
         fl_metrics_config = self.job_config.fl_metrics.unwrap()  # type: ignore[attr-defined]
 
         optimizer_config = fl_metrics_config.optimizer_monitor
-        interval = optimizer_config.interval
-        only_global = optimizer_config.only_global
-        log_optimizer_metrics = optimizer_config.log_metrics
-
         activation_config = fl_metrics_config.activation_monitor
         activation_enabled = activation_config.enabled or (
             activation_config.interval > 0
@@ -1033,13 +1029,17 @@ class FLMetricsProcessor(MetricsProcessor):
         vs_config = fl_metrics_config.vs_monitor
         hyper_switch_config = fl_metrics_config.hyperparameter_switch
 
-        self.optimizer_monitor = OptimizerMonitor(
-            interval=interval,
-            only_global=only_global,
-            log_optimizer_metrics=log_optimizer_metrics,
-        )
+        self.callbacks: list[Callback] = []
 
-        self.callbacks: list[Callback] = [self.optimizer_monitor]
+        if optimizer_config.interval > 0:
+            self.optimizer_monitor: OptimizerMonitor | None = OptimizerMonitor(
+                interval=optimizer_config.interval,
+                only_global=optimizer_config.only_global,
+                log_optimizer_metrics=optimizer_config.log_metrics,
+            )
+            self.callbacks.append(self.optimizer_monitor)
+        else:
+            self.optimizer_monitor = None
 
         if activation_enabled:
             self.activation_monitor: ActivationMonitor | None = ActivationMonitor(
