@@ -29,12 +29,8 @@ from typing import cast
 
 import torch
 
-from torchtitan.config import ConfigManager
 from torchtitan.experiments.fl.components import build_metrics_processor
-from torchtitan.experiments.fl.configs.config import (
-    MosaicJobConfig,
-    S3CheckpointingConfig,
-)
+from torchtitan.experiments.fl.configs import MosaicConfigManager
 from torchtitan.experiments.fl.dataloader.dataloader import build_mosaic_dataloader
 from torchtitan.experiments.fl.dataloader.tokenizer import build_mosaic_tokenizer
 from torchtitan.experiments.fl.ft_override import enable_desloc_only_ft
@@ -61,12 +57,8 @@ def main() -> None:  # noqa: C901, PLR0912, PLR0915
 
     # Use a ConfigManager to parse the TOML configuration file into our
     # custom MosaicJobConfig dataclass.
-    config_manager = ConfigManager(MosaicJobConfig)
+    config_manager = MosaicConfigManager()
     job_config = config_manager.parse_args()
-
-    # Convert s3_checkpoint dict to dataclass if needed (tyro may leave it as dict)
-    if isinstance(job_config.s3_checkpoint, dict):
-        job_config.s3_checkpoint = S3CheckpointingConfig(**job_config.s3_checkpoint)
 
     # Apply RUN_UUID from environment if provided
     run_uuid = os.getenv("RUN_UUID")

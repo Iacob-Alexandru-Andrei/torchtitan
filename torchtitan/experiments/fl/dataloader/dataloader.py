@@ -704,23 +704,22 @@ def _build_mosaic_dataloader(
     default_drop_last: bool,
 ) -> MosaicParallelAwareDataloader:
     mosaic_cfg = job_config.mosaic_dataloader
-    if not mosaic_cfg:
-        raise ValueError("mosaic_dataloader config must be set.")
+    if not mosaic_cfg.dataset:
+        raise ValueError("mosaic_dataloader config must define a dataset section.")
 
-    cfg = deepcopy(mosaic_cfg)
-    dataset_cfg_raw = cfg.pop("dataset", {})
+    dataset_cfg_raw = deepcopy(mosaic_cfg.dataset)
     dataset_cfg = _select_dataset_config(dataset_cfg_raw, split)
 
     # Extract dataloader-specific config
-    num_workers = cfg.get("num_workers", 8)
-    prefetch_factor = cfg.get("prefetch_factor", 2)
-    pin_memory = cfg.get("pin_memory", True)
-    persistent_workers = cfg.get("persistent_workers", True)
-    drop_last = cfg.get("drop_last", default_drop_last)
+    num_workers = mosaic_cfg.num_workers
+    prefetch_factor = mosaic_cfg.prefetch_factor
+    pin_memory = mosaic_cfg.pin_memory
+    persistent_workers = mosaic_cfg.persistent_workers
+    drop_last = mosaic_cfg.drop_last if mosaic_cfg.drop_last is not None else default_drop_last
 
     # Allow per-split overrides
-    split_overrides = cfg.get(split, {})
-    if isinstance(split_overrides, Mapping):
+    split_overrides = mosaic_cfg.get_split_overrides(split)
+    if split_overrides:
         num_workers = split_overrides.get("num_workers", num_workers)
         prefetch_factor = split_overrides.get("prefetch_factor", prefetch_factor)
         pin_memory = split_overrides.get("pin_memory", pin_memory)
