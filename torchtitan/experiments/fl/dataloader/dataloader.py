@@ -18,16 +18,17 @@ import shutil
 from collections import Counter
 from collections.abc import Callable, Mapping, Sequence
 from copy import deepcopy
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
-from dataclasses import dataclass
 from urllib.parse import urlparse
+
 import torch
 from torchdata.stateful_dataloader import StatefulDataLoader
 
 from torchtitan.experiments.fl.metrics import (
-    PureUnigramCrossEntropy,
     add_unigram_metric,
+    PureUnigramCrossEntropy,
 )
 
 try:
@@ -46,7 +47,10 @@ except ImportError:  # pragma: no cover - optional dependency
 
 from torchtitan.components.dataloader import BaseDataLoader
 from torchtitan.components.tokenizer import BaseTokenizer
-from torchtitan.experiments.fl.configs.config import MosaicJobConfig, UnigramMetricConfig
+from torchtitan.experiments.fl.configs.config import (
+    MosaicJobConfig,
+    UnigramMetricConfig,
+)
 from torchtitan.experiments.fl.s3_checkpoint import (
     create_remote_up_down,
     download_file_from_s3,
@@ -141,7 +145,9 @@ def _flatten_stream_configs(streams_cfg: Any) -> dict[str, dict[str, Any]]:
     def _collect(config: Any, parent_key: str | None = None) -> None:
         if isinstance(config, Mapping):
             if "remote" in config or "local" in config:
-                flattened_key = config.get("name") or parent_key or f"stream_{len(flattened)}"
+                flattened_key = (
+                    config.get("name") or parent_key or f"stream_{len(flattened)}"
+                )
                 flattened[flattened_key] = dict(config)
                 flattened[flattened_key].setdefault("name", flattened_key)
                 return
@@ -149,7 +155,9 @@ def _flatten_stream_configs(streams_cfg: Any) -> dict[str, dict[str, Any]]:
             for key, value in config.items():
                 if key == "client_streams":
                     _collect(value)
-                elif isinstance(value, Mapping) and ("remote" in value or "local" in value):
+                elif isinstance(value, Mapping) and (
+                    "remote" in value or "local" in value
+                ):
                     flattened[key] = dict(value)
                     flattened[key].setdefault("name", key)
                 else:
@@ -191,7 +199,9 @@ def _collect_group_stream_entries(group: Mapping[str, Any]) -> list[Any]:
     """Extract the raw stream entries referenced by a sampling group."""
     raw_streams = group.get("streams") or group.get("client_streams")
     if raw_streams is None:
-        raise ValueError(f"Sampling group '{group.get('name')}' must define a 'streams' section")
+        raise ValueError(
+            f"Sampling group '{group.get('name')}' must define a 'streams' section"
+        )
 
     if isinstance(raw_streams, Mapping):
         flattened = _flatten_stream_configs(raw_streams)
@@ -200,10 +210,14 @@ def _collect_group_stream_entries(group: Mapping[str, Any]) -> list[Any]:
         return list(raw_streams)
     if isinstance(raw_streams, str):
         return [raw_streams]
-    raise TypeError("Sampling group stream entries must be mappings, sequences, or strings")
+    raise TypeError(
+        "Sampling group stream entries must be mappings, sequences, or strings"
+    )
 
 
-def _select_dataset_config(dataset_cfg: Mapping[str, Any] | None, split: str) -> dict[str, Any]:
+def _select_dataset_config(
+    dataset_cfg: Mapping[str, Any] | None, split: str
+) -> dict[str, Any]:
     if not dataset_cfg:
         return {}
 
@@ -257,7 +271,9 @@ def _extract_streams(dataset_cfg: dict[str, Any]) -> StreamExtractionResult:
             for index, entry in enumerate(entries):
                 if isinstance(entry, str):
                     if entry not in flattened:
-                        raise KeyError(f"Sampling group '{group.get('name')}' references unknown stream '{entry}'")
+                        raise KeyError(
+                            f"Sampling group '{group.get('name')}' references unknown stream '{entry}'"
+                        )
                     candidate = deepcopy(flattened[entry])
                     candidate.setdefault("name", entry)
                 elif isinstance(entry, Mapping):
@@ -278,7 +294,9 @@ def _extract_streams(dataset_cfg: dict[str, Any]) -> StreamExtractionResult:
                     elif "name" not in candidate or candidate["name"] is None:
                         candidate["name"] = f"{group.get('name')}_stream_{index}"
                 else:
-                    raise TypeError("Sampling group stream entries must be mappings, sequences, or strings")
+                    raise TypeError(
+                        "Sampling group stream entries must be mappings, sequences, or strings"
+                    )
 
                 candidate.setdefault("name", f"stream_{len(aggregated)}")
                 identifier = (
@@ -338,11 +356,15 @@ def _extract_streams(dataset_cfg: dict[str, Any]) -> StreamExtractionResult:
     stream_names: list[str] = []
     for name, stream_cfg in flattened.items():
         stream_kwargs = dict(stream_cfg)
-        stream_kwargs = {key: value for key, value in stream_kwargs.items() if value is not None}
+        stream_kwargs = {
+            key: value for key, value in stream_kwargs.items() if value is not None
+        }
         stream_kwargs.pop("name", None)
 
         if "remote" in stream_kwargs:
-            stream_kwargs["remote"] = _join_remote_path(root_remote, stream_kwargs["remote"])
+            stream_kwargs["remote"] = _join_remote_path(
+                root_remote, stream_kwargs["remote"]
+            )
         elif root_remote is not None:
             logger.warning(
                 "Stream %s is missing a remote path; root_remote was provided.",
@@ -350,9 +372,13 @@ def _extract_streams(dataset_cfg: dict[str, Any]) -> StreamExtractionResult:
             )
 
         if "local" in stream_kwargs:
-            stream_kwargs["local"] = _join_local_path(root_local, stream_kwargs["local"])
+            stream_kwargs["local"] = _join_local_path(
+                root_local, stream_kwargs["local"]
+            )
         elif root_local is not None:
-            logger.warning("Stream %s is missing a local path; root_local was provided.", name)
+            logger.warning(
+                "Stream %s is missing a local path; root_local was provided.", name
+            )
 
         streams.append(Stream(**stream_kwargs))
         stream_names.append(name)
@@ -360,7 +386,9 @@ def _extract_streams(dataset_cfg: dict[str, Any]) -> StreamExtractionResult:
     logger.info("Built %d streams for Mosaic dataloader", len(streams))
     group_indices: list[list[int]] | None = None
     if group_stream_names:
-        name_to_index = {stream_name: idx for idx, stream_name in enumerate(stream_names)}
+        name_to_index = {
+            stream_name: idx for idx, stream_name in enumerate(stream_names)
+        }
         group_indices = []
         for names in group_stream_names:
             indices = [name_to_index[name] for name in names if name in name_to_index]
@@ -444,7 +472,9 @@ def _maybe_download_unigram_file(
         num_attempts=config.num_attempts,
         client_config=config.client_config,
     )
-    remote_up_down._run_name = "unigram_metrics"  # pyright: ignore[reportAttributeAccessIssue]
+    remote_up_down._run_name = (
+        "unigram_metrics"  # pyright: ignore[reportAttributeAccessIssue]
+    )
 
     try:
         destination.parent.mkdir(parents=True, exist_ok=True)
@@ -486,7 +516,9 @@ def _load_stream_unigram_counts(
     stream_split = getattr(stream, "split", None) or dataset_split or default_split
 
     if not local_root:
-        message = f"Stream '{getattr(stream, 'name', 'unknown')}' is missing a local path."
+        message = (
+            f"Stream '{getattr(stream, 'name', 'unknown')}' is missing a local path."
+        )
         raise RuntimeError(message)
 
     local_root_path = Path(local_root)
@@ -509,9 +541,7 @@ def _load_stream_unigram_counts(
             config,
         )
         if not downloaded and not cache_path.exists():
-            message = (
-                f"Unigram frequency file not found for stream '{getattr(stream, 'name', 'unknown')}' at {cache_path}"
-            )
+            message = f"Unigram frequency file not found for stream '{getattr(stream, 'name', 'unknown')}' at {cache_path}"
             raise RuntimeError(message)
         unigram_path = cache_path
 
@@ -560,30 +590,25 @@ def _normalize_mosaic_dataloader_config(
     default_drop_last: bool,
 ) -> NormalizedMosaicConfig:
     """Normalize high-level Mosaic dataloader configuration into typed payloads."""
-
     mosaic_cfg = job_config.mosaic_dataloader
     if not mosaic_cfg:
         raise ValueError("mosaic_dataloader config must be set.")
 
     cfg = deepcopy(mosaic_cfg)
-    dataset_cfg_raw = cfg.pop("dataset", {})
+    dataset_cfg_raw = cfg.dataset
     dataset_cfg = _select_dataset_config(dataset_cfg_raw, split)
 
-    num_workers = cfg.get("num_workers", 8)
-    prefetch_factor = cfg.get("prefetch_factor", 2)
-    pin_memory = cfg.get("pin_memory", True)
-    persistent_workers = cfg.get("persistent_workers", True)
-    drop_last = cfg.get("drop_last", default_drop_last)
+    num_workers = cfg.num_workers
+    prefetch_factor = cfg.prefetch_factor
+    pin_memory = cfg.pin_memory
+    persistent_workers = cfg.persistent_workers
+    drop_last = cfg.drop_last if cfg.drop_last is not None else default_drop_last
 
-    split_overrides = cfg.get(split, {})
-    if isinstance(split_overrides, Mapping):
-        num_workers = split_overrides.get("num_workers", num_workers)
-        prefetch_factor = split_overrides.get("prefetch_factor", prefetch_factor)
-        pin_memory = split_overrides.get("pin_memory", pin_memory)
-        persistent_workers = split_overrides.get("persistent_workers", persistent_workers)
-        drop_last = split_overrides.get("drop_last", drop_last)
-
-    batch_size = job_config.validation.local_batch_size if split == "val" else job_config.training.local_batch_size
+    batch_size = (
+        job_config.validation.local_batch_size
+        if split == "val"
+        else job_config.training.local_batch_size
+    )
 
     runtime = MosaicRuntimeConfig(
         num_workers=num_workers,
@@ -604,7 +629,6 @@ def _select_stream_subset(
     dp_world_size: int,
 ) -> StreamAssignment:
     """Select the stream subset for the current rank based on sampling groups."""
-
     streams = extraction.streams
     sampling_group_indices = extraction.sampling_group_indices
 
@@ -638,7 +662,9 @@ def _select_stream_subset(
             stream_subset = streams
 
         if not stream_subset:
-            raise ValueError(f"No streams resolved for Mosaic sampling group {group_index} (dp_rank={dp_rank}).")
+            raise ValueError(
+                f"No streams resolved for Mosaic sampling group {group_index} (dp_rank={dp_rank})."
+            )
         logger.info(
             "Assigning Mosaic sampling group %s (dp_rank=%d) with %d stream(s): %s",
             "global" if group_index is None else group_index,
@@ -663,7 +689,6 @@ def _prepare_dataset_kwargs(
     dataset_split_remote: str | None,
 ) -> DatasetFactoryConfig:
     """Prepare keyword arguments for the streaming dataset factory."""
-
     valid_params = {
         *inspect.signature(StreamingTextDataset).parameters,
         *inspect.signature(StreamingDataset).parameters,
@@ -689,7 +714,6 @@ def _create_streaming_dataset(
     split: str,
 ) -> StatefulStreamingTextDataset:
     """Instantiate the stateful streaming dataset for the resolved stream subset."""
-
     hf_tokenizer = getattr(tokenizer, "tokenizer", tokenizer)
     logger.info(
         "Building StreamingTextDataset (%s split) with config: %s",
@@ -712,7 +736,6 @@ def _setup_unigram_metric(
     tokenizer: BaseTokenizer,
 ) -> UnigramSetupResult:
     """Build and register unigram metrics for the current stream subset."""
-
     collate_fn: Callable = titan_collate_fn
     if not job_config.unigram_metric.enable:
         return UnigramSetupResult(collate_fn=collate_fn, group_key=None)
@@ -734,7 +757,7 @@ def _setup_unigram_metric(
             dataset_root_remote=assignment.dataset_root_remote,
             dataset_split_remote=assignment.dataset_split_remote,
         )
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         if job_config.unigram_metric.allow_failures:
             logger.warning(
                 "Unable to construct unigram metric for %s: %s",
@@ -742,7 +765,9 @@ def _setup_unigram_metric(
                 exc,
             )
             return UnigramSetupResult(collate_fn=collate_fn, group_key=None)
-        raise RuntimeError(f"Unable to construct unigram metric for {unigram_group_key}: {exc}") from exc
+        raise RuntimeError(
+            f"Unable to construct unigram metric for {unigram_group_key}: {exc}"
+        ) from exc
 
     if unigram_metric is not None:
         add_unigram_metric(unigram_metric)
@@ -832,15 +857,21 @@ class StatefulStreamingTextDataset(StreamingTextDataset):
         self._num_samples_yielded += 1
         return super().__getitem__(idx)
 
-    def state_dict(self, num_samples: int | None = None, from_beginning: bool = True) -> dict[str, Any]:
+    def state_dict(
+        self, num_samples: int | None = None, from_beginning: bool = True
+    ) -> dict[str, Any]:
         """Saves the dataset's state.
 
         If `num_samples` is not provided by the caller, it defaults to using
         the internal `_num_samples_yielded` counter. This makes it compatible
         with the StatefulDataLoader.
         """
-        effective_num_samples = num_samples if num_samples is not None else self._num_samples_yielded
-        parent_state = super().state_dict(num_samples=effective_num_samples, from_beginning=from_beginning)
+        effective_num_samples = (
+            num_samples if num_samples is not None else self._num_samples_yielded
+        )
+        parent_state = super().state_dict(
+            num_samples=effective_num_samples, from_beginning=from_beginning
+        )
         parent_state["_num_samples_yielded"] = self._num_samples_yielded
         return parent_state
 
@@ -915,12 +946,14 @@ class MosaicParallelAwareDataloader(StatefulDataLoader, BaseDataLoader):
             return
 
         if self._rank_id not in state_dict:
-            logger.warning(f"DataLoader state is empty for dp rank {self.dp_rank}, expected key {self._rank_id}")
+            logger.warning(
+                f"DataLoader state is empty for dp rank {self.dp_rank}, expected key {self._rank_id}"
+            )
             return
 
-        assert self.dp_world_size == state_dict["world_size"], (
-            "dp_degree is inconsistent before and after checkpoint, dataloader resharding is not supported yet."
-        )
+        assert (
+            self.dp_world_size == state_dict["world_size"]
+        ), "dp_degree is inconsistent before and after checkpoint, dataloader resharding is not supported yet."
         super().load_state_dict(pickle.loads(state_dict[self._rank_id]))
 
 
@@ -978,7 +1011,9 @@ def _build_mosaic_dataloader(
     prefetch_factor = mosaic_cfg.prefetch_factor
     pin_memory = mosaic_cfg.pin_memory
     persistent_workers = mosaic_cfg.persistent_workers
-    drop_last = mosaic_cfg.drop_last if mosaic_cfg.drop_last is not None else default_drop_last
+    drop_last = (
+        mosaic_cfg.drop_last if mosaic_cfg.drop_last is not None else default_drop_last
+    )
 
     # Allow per-split overrides
     split_overrides = mosaic_cfg.get_split_overrides(split)
@@ -986,35 +1021,28 @@ def _build_mosaic_dataloader(
         num_workers = split_overrides.get("num_workers", num_workers)
         prefetch_factor = split_overrides.get("prefetch_factor", prefetch_factor)
         pin_memory = split_overrides.get("pin_memory", pin_memory)
-        persistent_workers = split_overrides.get("persistent_workers", persistent_workers)
+        persistent_workers = split_overrides.get(
+            "persistent_workers", persistent_workers
+        )
         drop_last = split_overrides.get("drop_last", drop_last)
 
-    (
-        streams,
-        dataset_cfg,
-        sampling_group_indices,
-        dataset_root_remote,
-        dataset_split_remote,
-    ) = _extract_streams(dataset_cfg)
+    stream_extraction_result = _extract_streams(dataset_cfg)
+
+    dataset_cfg = stream_extraction_result.dataset_config
 
     # Filter dataset config to only include valid StreamingTextDataset parameters
     valid_params = {
         *inspect.signature(StreamingTextDataset).parameters,
         *inspect.signature(StreamingDataset).parameters,
     }
-    dataset_config_filtered = {k: v for k, v in dataset_cfg.items() if k in valid_params}
+    dataset_config_filtered = {
+        k: v for k, v in dataset_cfg.items() if k in valid_params
+    }
 
     # Resolve optional subset configuration
     subset_num_samples = dataset_cfg.pop("subset_num_samples", None)
     if subset_num_samples is not None:
         dataset_config_filtered["epoch_size"] = subset_num_samples
-
-    # The tokenizer is expected to be a HuggingFace tokenizer or a wrapper.
-    hf_tokenizer = getattr(tokenizer, "tokenizer", tokenizer)
-
-    batch_size = job_config.validation.local_batch_size if split == "val" else job_config.training.local_batch_size
-
-    group_idx: int | None = None
 
     extraction = _extract_streams(normalized.dataset_config)
     assignment = _select_stream_subset(

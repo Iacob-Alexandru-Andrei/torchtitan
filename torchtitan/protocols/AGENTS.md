@@ -48,7 +48,7 @@ You are analyzing a codebase dependency graph optimized for AI understanding. Th
 ---
 
 # CODE_GRAPH
-NODES:54 EDGES:8
+NODES:56 EDGES:8
 
 ## DIRECTORY_TREE
 ROOT: torchtitan/protocols/
@@ -56,9 +56,9 @@ ROOT: torchtitan/protocols/
 ## ARCHITECTURAL_CLUSTERS
 
 ### UTILITY_LAYER
-NODES:54 CALL_DEPTH:1
+NODES:56 CALL_DEPTH:1
 
-__init__.py→[] model.py→[__init__((self,model_args: BaseModelArgs))[CTOR,DUNDER]] model_converter.py→[__init__((self,job_config: JobConfig,parallel_dims: ParallelDims))[CTOR,DUNDER],convert((self,model: nn.Module)),post_optimizer_hook((self,model: Union[nn.Module,List[nn.Module]])),register_model_converter((converter_cls: type[ModelConverter],name: str)),__init__((self,job_config: JobConfig,parallel_dims: ParallelDims))[CTOR,DUNDER],convert((self,model: nn.Module)),post_optimizer_hook((self,model: Union[nn.Module,List[nn.Module]])),build_model_converters((job_config: JobConfig,parallel_dims: ParallelDims))[HOT]] state_dict_adapter.py→[__init__((self,model_args: BaseModelArgs,hf_assets_path: str | None,))[CTOR,DUNDER]] train_spec.py→[register_train_spec((train_spec: TrainSpec)),get_train_spec((name: str))] 
+__init__.py→[] model.py→[__init__((self,model_args: BaseModelArgs))[CTOR,DUNDER]] model_converter.py→[__init__((self,job_config: JobConfig,parallel_dims: ParallelDims))[CTOR,DUNDER],convert((self,model: nn.Module)),post_optimizer_hook((self,model: Union[nn.Module,List[nn.Module]])),register_model_converter((converter_cls: type[ModelConverter],name: str)),__init__((self,job_config: JobConfig,parallel_dims: ParallelDims))[CTOR,DUNDER],convert((self,model: nn.Module)),post_optimizer_hook((self,model: Union[nn.Module,List[nn.Module]])),build_model_converters((job_config: JobConfig,parallel_dims: ParallelDims))[HOT]] state_dict_adapter.py→[__init__((self,model_args: BaseModelArgs,hf_assets_path: str | None,))[CTOR,DUNDER]] train_spec.py→[register_train_spec((train_spec: TrainSpec)),update_train_spec((train_spec: TrainSpec)),unregister_train_spec((name: str)),get_train_spec((name: str))] 
 
 ## DEPENDENCY_PATTERNS
 
