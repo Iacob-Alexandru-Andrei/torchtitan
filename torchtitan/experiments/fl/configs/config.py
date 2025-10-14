@@ -18,6 +18,11 @@ from torchtitan.config import JobConfig
 from torchtitan.experiments.fl.configs.optimizers import MosaicOptimizerConfig
 
 
+DEFAULT_DATASET_SPLIT_KEYS = frozenset(
+    {"train", "val", "validation", "test", "eval", "train_eval"}
+)
+
+
 def _as_dict(value: Mapping[str, Any] | None) -> dict[str, Any]:
     """Create a plain ``dict`` from an arbitrary mapping value."""
 
@@ -122,20 +127,21 @@ class MosaicDataLoaderConfig:
             "split_overrides",
         }
 
-        split_overrides: dict[str, dict[str, Any]] = {}
+        inferred_split_overrides: dict[str, dict[str, Any]] = {}
         extras: dict[str, Any] = {}
         for key, value in data.items():
             if key in known_keys:
                 continue
-            if isinstance(value, Mapping):
-                split_overrides[key] = _as_dict(value)
+            if isinstance(value, Mapping) and key in DEFAULT_DATASET_SPLIT_KEYS:
+                inferred_split_overrides[key] = _as_dict(value)
             else:
-                extras[key] = value
+                extras[key] = _as_dict(value) if isinstance(value, Mapping) else value
 
+        explicit_split_overrides: dict[str, dict[str, Any]] = {}
         if "split_overrides" in data and isinstance(data["split_overrides"], Mapping):
             for key, value in data["split_overrides"].items():
                 if isinstance(value, Mapping):
-                    split_overrides[key] = _as_dict(value)
+                    explicit_split_overrides[key] = _as_dict(value)
 
         dataset_cfg = data.get("dataset", {})
         if dataset_cfg and not isinstance(dataset_cfg, Mapping):
@@ -150,6 +156,9 @@ class MosaicDataLoaderConfig:
         else:
             drop_last_bool = bool(drop_last)
 
+        combined_split_overrides: dict[str, dict[str, Any]] = dict(inferred_split_overrides)
+        combined_split_overrides.update(explicit_split_overrides)
+
         return cls(
             name=str(data.get("name", "")),
             dataset=_as_dict(dataset_cfg),
@@ -158,7 +167,7 @@ class MosaicDataLoaderConfig:
             pin_memory=bool(data.get("pin_memory", True)),
             persistent_workers=bool(data.get("persistent_workers", True)),
             drop_last=drop_last_bool,
-            split_overrides={k: _as_dict(v) for k, v in split_overrides.items()},
+            split_overrides=combined_split_overrides,
             extras=extras,
         )
 
@@ -622,6 +631,44 @@ class S3CheckpointingConfig:
         },
     )
 
+    @classmethod
+    def from_dict(cls, data: Mapping[str, Any]) -> "S3CheckpointingConfig":
+        run_uuid = data.get("run_uuid")
+        remote_checkpoint_folder = data.get("remote_checkpoint_folder")
+        upload_staging_folder = data.get("upload_staging_folder")
+        resume_from_run_step = data.get("resume_from_run_step")
+
+        return cls(
+            enable=bool(data.get("enable", False)),
+            bucket=str(data.get("bucket", "")),
+            prefix=str(data.get("prefix", "")),
+            run_uuid=None if run_uuid is None else str(run_uuid),
+            num_attempts=int(data.get("num_attempts", 3)),
+            client_config=_as_dict(data.get("client_config")),
+            num_concurrent_uploads=int(data.get("num_concurrent_uploads", 1)),
+            upload_staging_folder=(
+                None if upload_staging_folder is None else str(upload_staging_folder)
+            ),
+            use_procs=bool(data.get("use_procs", True)),
+            remote_checkpoint_folder=(
+                None
+                if remote_checkpoint_folder is None
+                else str(remote_checkpoint_folder)
+            ),
+            download_on_start=bool(data.get("download_on_start", True)),
+            resume_from_run_step=(
+                None if resume_from_run_step is None else str(resume_from_run_step)
+            ),
+        )
+
+    @classmethod
+    def coerce(cls, value: Any) -> "S3CheckpointingConfig":
+        if isinstance(value, cls):
+            return value
+        if isinstance(value, Mapping):
+            return cls.from_dict(value)
+        raise TypeError(f"Cannot convert {type(value)} to S3CheckpointingConfig")
+
 
 @dataclass
 class MosaicJobConfig(JobConfig):
@@ -668,8 +715,8 @@ class MosaicJobConfig(JobConfig):
         },
     )
 
-    fl_metrics: FLMetricsConfigEnvelope = field(
-        default_factory=FLMetricsConfigEnvelope,
+    fl_metrics: MetricsConfig | FLMetricsConfigEnvelope = field(
+        default_factory=MetricsConfig,
         metadata={
             "help": "Configuration for FL-specific metrics and monitoring callbacks (optimizer, activation, learning rate)."
         },
@@ -706,9 +753,7 @@ def ensure_mosaic_job_config_types(job_config: MosaicJobConfig) -> MosaicJobConf
         job_config.mosaic_tokenizer
     )
     job_config.fl_metrics = FLMetricsConfigEnvelope.coerce(job_config.fl_metrics)
-
-    if isinstance(job_config.s3_checkpoint, Mapping):
-        job_config.s3_checkpoint = S3CheckpointingConfig(**_as_dict(job_config.s3_checkpoint))
+    job_config.s3_checkpoint = S3CheckpointingConfig.coerce(job_config.s3_checkpoint)
 
     return job_config
 
