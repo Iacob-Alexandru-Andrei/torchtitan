@@ -69,6 +69,34 @@ def register_train_spec(train_spec: TrainSpec) -> None:
     _extra_train_specs[train_spec.name] = train_spec
 
 
+def update_train_spec(train_spec: TrainSpec) -> None:
+    """Update an already registered TrainSpec.
+
+    Args:
+        train_spec: The TrainSpec instance that should replace the currently
+            registered spec with the same name.
+
+    Raises:
+        ValueError: If the provided TrainSpec name has not been registered via
+            :func:`register_train_spec`.
+    """
+
+    global _extra_train_specs
+    if train_spec.name not in _extra_train_specs:
+        raise ValueError(
+            f"TrainSpec {train_spec.name} is not registered and cannot be updated."
+        )
+
+    _extra_train_specs[train_spec.name] = train_spec
+
+
+def unregister_train_spec(name: str) -> None:
+    """Remove a previously registered TrainSpec from the registry."""
+
+    global _extra_train_specs
+    _extra_train_specs.pop(name, None)
+
+
 def get_train_spec(name: str) -> TrainSpec:
     # user-defined TrainSpec has higher priority
     global _extra_train_specs

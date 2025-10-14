@@ -135,7 +135,11 @@ if not hasattr(_schedules, "ScheduleZBVZeroBubble"):
 
 from torchtitan.experiments.fl.models.utils import ensure_mosaic_spec
 from torchtitan.protocols import train_spec as train_spec_module
-from torchtitan.protocols.train_spec import TrainSpec, register_train_spec
+from torchtitan.protocols.train_spec import (
+    TrainSpec,
+    register_train_spec,
+    unregister_train_spec,
+)
 
 
 @dataclass
@@ -156,38 +160,37 @@ def _dummy_builder(*args: Any, **kwargs: Any) -> None:
 
 
 def test_ensure_mosaic_spec_is_idempotent_for_multiple_models() -> None:
-    original_registry = train_spec_module._extra_train_specs.copy()
+    base_spec_a = TrainSpec(
+        name="test_base_a",
+        model_cls=_DummyModel,
+        model_args={"cfg": SimpleNamespace(vocab_size=10)},
+        parallelize_fn=_dummy_parallelize,
+        pipelining_fn=_dummy_pipeline,
+        build_optimizers_fn=_dummy_builder,
+        build_lr_schedulers_fn=lambda *args, **kwargs: None,
+        build_dataloader_fn=_dummy_builder,
+        build_tokenizer_fn=_dummy_builder,
+        build_loss_fn=_dummy_builder,
+    )
+    base_spec_b = replace(
+        base_spec_a,
+        name="test_base_b",
+        model_args={"cfg": SimpleNamespace(vocab_size=32)},
+    )
+
+    register_train_spec(base_spec_a)
+    register_train_spec(base_spec_b)
+
+    def _post_transform(base_spec: TrainSpec, mosaic_spec: TrainSpec) -> TrainSpec:
+        model_args = {
+            name: SimpleNamespace(
+                **{**config.__dict__, "vocab_size": config.vocab_size + 5}
+            )
+            for name, config in base_spec.model_args.items()
+        }
+        return replace(mosaic_spec, model_args=model_args)
+
     try:
-        base_spec_a = TrainSpec(
-            name="test_base_a",
-            model_cls=_DummyModel,
-            model_args={"cfg": SimpleNamespace(vocab_size=10)},
-            parallelize_fn=_dummy_parallelize,
-            pipelining_fn=_dummy_pipeline,
-            build_optimizers_fn=_dummy_builder,
-            build_lr_schedulers_fn=lambda *args, **kwargs: None,
-            build_dataloader_fn=_dummy_builder,
-            build_tokenizer_fn=_dummy_builder,
-            build_loss_fn=_dummy_builder,
-        )
-        base_spec_b = replace(
-            base_spec_a,
-            name="test_base_b",
-            model_args={"cfg": SimpleNamespace(vocab_size=32)},
-        )
-
-        register_train_spec(base_spec_a)
-        register_train_spec(base_spec_b)
-
-        def _post_transform(base_spec: TrainSpec, mosaic_spec: TrainSpec) -> TrainSpec:
-            model_args = {
-                name: SimpleNamespace(
-                    **{**config.__dict__, "vocab_size": config.vocab_size + 5}
-                )
-                for name, config in base_spec.model_args.items()
-            }
-            return replace(mosaic_spec, model_args=model_args)
-
         mosaic_a = ensure_mosaic_spec(
             base_spec_a.name,
             spec_name="mosaic_test_a",
@@ -223,7 +226,6 @@ def test_ensure_mosaic_spec_is_idempotent_for_multiple_models() -> None:
             == base_vocab + 5
         )
 
-        registry_size = len(train_spec_module._extra_train_specs)
         assert (
             ensure_mosaic_spec(
                 base_spec_a.name,
@@ -234,6 +236,8 @@ def test_ensure_mosaic_spec_is_idempotent_for_multiple_models() -> None:
             )
             == "mosaic_test_a"
         )
+        assert train_spec_module.get_train_spec(mosaic_a) is mosaic_spec_a
+
         assert (
             ensure_mosaic_spec(
                 base_spec_b.name,
@@ -247,6 +251,73 @@ def test_ensure_mosaic_spec_is_idempotent_for_multiple_models() -> None:
             )
             == "mosaic_test_b"
         )
-        assert len(train_spec_module._extra_train_specs) == registry_size
+        assert train_spec_module.get_train_spec(mosaic_b) is mosaic_spec_b
     finally:
-        train_spec_module._extra_train_specs = original_registry
+        for spec_name in (
+            "mosaic_test_a",
+            "mosaic_test_b",
+            base_spec_a.name,
+            base_spec_b.name,
+        ):
+            unregister_train_spec(spec_name)
+
+
+def test_ensure_mosaic_spec_updates_existing_spec_with_new_overrides() -> None:
+    base_spec = TrainSpec(
+        name="test_base_update",
+        model_cls=_DummyModel,
+        model_args={"cfg": SimpleNamespace(vocab_size=7)},
+        parallelize_fn=_dummy_parallelize,
+        pipelining_fn=_dummy_pipeline,
+        build_optimizers_fn=_dummy_builder,
+        build_lr_schedulers_fn=lambda *args, **kwargs: None,
+        build_dataloader_fn=_dummy_builder,
+        build_tokenizer_fn=_dummy_builder,
+        build_loss_fn=_dummy_builder,
+    )
+    register_train_spec(base_spec)
+
+    try:
+        spec_name = ensure_mosaic_spec(
+            base_spec.name,
+            spec_name="mosaic_update",
+            dataloader_fn=_dummy_builder,
+            tokenizer_fn=_dummy_builder,
+            metrics_processor_fn=_dummy_builder,
+        )
+        initial_spec = train_spec_module.get_train_spec(spec_name)
+        assert initial_spec.build_optimizers_fn is _dummy_builder
+
+        def _post_transform(
+            base_spec: TrainSpec, mosaic_spec: TrainSpec
+        ) -> TrainSpec:
+            return replace(
+                mosaic_spec,
+                model_args={
+                    name: SimpleNamespace(vocab_size=config.vocab_size + 1)
+                    for name, config in base_spec.model_args.items()
+                },
+            )
+
+        ensure_mosaic_spec(
+            base_spec.name,
+            spec_name=spec_name,
+            dataloader_fn=_dummy_builder,
+            tokenizer_fn=_dummy_builder,
+            metrics_processor_fn=_dummy_builder,
+            optimizers_fn=lambda *args, **kwargs: None,
+            validator_fn=_dummy_builder,
+            post_transform=_post_transform,
+        )
+
+        updated_spec = train_spec_module.get_train_spec(spec_name)
+        assert updated_spec is not initial_spec
+        assert updated_spec.build_optimizers_fn is not _dummy_builder
+        assert updated_spec.build_validator_fn is _dummy_builder
+        assert (
+            updated_spec.model_args["cfg"].vocab_size
+            == base_spec.model_args["cfg"].vocab_size + 1
+        )
+    finally:
+        unregister_train_spec("mosaic_update")
+        unregister_train_spec(base_spec.name)

@@ -18,11 +18,50 @@ from torchtitan.protocols.train_spec import (
     ValidatorBuilder,
     get_train_spec,
     register_train_spec,
+    update_train_spec,
 )
 from torchtitan.tools.logging import logger
 
 
 PostTransform = Callable[[TrainSpec, TrainSpec], TrainSpec]
+"""Callable applied after constructing the Mosaic spec."""
+
+
+def _build_mosaic_spec(
+    base_spec: TrainSpec,
+    *,
+    spec_name: str,
+    dataloader_fn: DataLoaderBuilder | None = None,
+    tokenizer_fn: TokenizerBuilder | None = None,
+    metrics_processor_fn: MetricsProcessorBuilder | None = None,
+    optimizers_fn: OptimizersBuilder | None = None,
+    validator_fn: ValidatorBuilder | None = None,
+    post_transform: PostTransform | None = None,
+) -> TrainSpec:
+    dataloader_builder = dataloader_fn or build_mosaic_dataloader
+    tokenizer_builder = tokenizer_fn or cast("TokenizerBuilder", build_mosaic_tokenizer)
+    metrics_builder = metrics_processor_fn or build_metrics_processor
+
+    replace_kwargs: dict[str, object] = {
+        "name": spec_name,
+        "build_dataloader_fn": dataloader_builder,
+        "build_tokenizer_fn": tokenizer_builder,
+        "build_metrics_processor_fn": metrics_builder,
+    }
+
+    if optimizers_fn is not None:
+        replace_kwargs["build_optimizers_fn"] = optimizers_fn
+    if validator_fn is not None:
+        replace_kwargs["build_validator_fn"] = validator_fn
+
+    mosaic_spec = replace(base_spec, **replace_kwargs)
+
+    if post_transform is not None:
+        mosaic_spec = post_transform(base_spec, mosaic_spec)
+        if mosaic_spec.name != spec_name:
+            mosaic_spec = replace(mosaic_spec, name=spec_name)
+
+    return mosaic_spec
 
 
 def ensure_mosaic_spec(
@@ -59,36 +98,36 @@ def ensure_mosaic_spec(
     base_spec = get_train_spec(base_spec_name)
     mosaic_spec_name = spec_name or f"mosaic_{base_spec.name}"
 
+    mosaic_spec = _build_mosaic_spec(
+        base_spec,
+        spec_name=mosaic_spec_name,
+        dataloader_fn=dataloader_fn,
+        tokenizer_fn=tokenizer_fn,
+        metrics_processor_fn=metrics_processor_fn,
+        optimizers_fn=optimizers_fn,
+        validator_fn=validator_fn,
+        post_transform=post_transform,
+    )
+
     try:
-        get_train_spec(mosaic_spec_name)
+        existing_spec = get_train_spec(mosaic_spec_name)
     except ValueError:
-        dataloader_builder = dataloader_fn or build_mosaic_dataloader
-        tokenizer_builder = tokenizer_fn or cast("TokenizerBuilder", build_mosaic_tokenizer)
-        metrics_builder = metrics_processor_fn or build_metrics_processor
-
-        replace_kwargs: dict[str, object] = {
-            "name": mosaic_spec_name,
-            "build_dataloader_fn": dataloader_builder,
-            "build_tokenizer_fn": tokenizer_builder,
-            "build_metrics_processor_fn": metrics_builder,
-        }
-
-        if optimizers_fn is not None:
-            replace_kwargs["build_optimizers_fn"] = optimizers_fn
-        if validator_fn is not None:
-            replace_kwargs["build_validator_fn"] = validator_fn
-
-        mosaic_spec = replace(base_spec, **replace_kwargs)
-
-        if post_transform is not None:
-            mosaic_spec = post_transform(base_spec, mosaic_spec)
-            if mosaic_spec.name != mosaic_spec_name:
-                mosaic_spec = replace(mosaic_spec, name=mosaic_spec_name)
-
         register_train_spec(mosaic_spec)
         logger.info(f"Registered new TrainSpec: {mosaic_spec_name}")
     else:
-        logger.info(f"TrainSpec {mosaic_spec_name} already registered, reusing it")
+        if existing_spec != mosaic_spec:
+            try:
+                update_train_spec(mosaic_spec)
+            except ValueError:
+                register_train_spec(mosaic_spec)
+                logger.info(
+                    "Registered new TrainSpec after import-time registration: %s",
+                    mosaic_spec_name,
+                )
+            else:
+                logger.info(f"Updated TrainSpec: {mosaic_spec_name}")
+        else:
+            logger.info(f"TrainSpec {mosaic_spec_name} already registered, reusing it")
 
     return mosaic_spec_name
 
