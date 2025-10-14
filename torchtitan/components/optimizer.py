@@ -4,8 +4,11 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 
+from __future__ import annotations
+
 import functools
-from collections.abc import MutableMapping
+from dataclasses import dataclass
+from collections.abc import Callable, MutableMapping
 from typing import Any, Generic, Iterator, TypeVar
 
 import torch
@@ -27,6 +30,8 @@ __all__ = [
     "OptimizersContainer",
     "build_optimizers",
     "build_optimizers_with_moe_load_balancing",
+    "register_optimizer_class",
+    "register_optimizer_container",
 ]
 
 
@@ -35,6 +40,76 @@ if has_torchft:
 
 
 T = TypeVar("T", bound=Optimizer)
+
+
+_OptimizerClass = type[Optimizer]
+
+
+@dataclass
+class _OptimizerContainerContext(Generic[T]):
+    """Context passed to container factory hooks."""
+
+    model_parts: list[nn.Module]
+    optimizer_cls: type[T]
+    optimizer_kwargs: dict[str, Any]
+    parallel_dims: ParallelDims
+    ft_manager: FTManager | None
+    param_groups: list[dict[str, Any]] | None
+
+
+ContainerPredicate = Callable[[OptimizerConfig, _OptimizerContainerContext[T]], bool]
+ContainerFactory = Callable[
+    [OptimizerConfig, _OptimizerContainerContext[T]], "OptimizersContainer"
+]
+
+
+@dataclass(order=True)
+class _ContainerRegistration(Generic[T]):
+    priority: int
+    predicate: ContainerPredicate[T]
+    factory: ContainerFactory[T]
+
+
+_OPTIMIZER_REGISTRY: dict[str, _OptimizerClass] = {
+    "Adam": torch.optim.Adam,
+    "AdamW": torch.optim.AdamW,
+}
+
+_CONTAINER_REGISTRY: list[_ContainerRegistration[Any]] = []
+
+
+def register_optimizer_class(
+    name: str,
+    optimizer_cls: _OptimizerClass,
+    *,
+    exist_ok: bool = False,
+) -> None:
+    """Register an optimizer implementation for ``build_optimizers``."""
+
+    if not exist_ok and name in _OPTIMIZER_REGISTRY:
+        if _OPTIMIZER_REGISTRY[name] is not optimizer_cls:
+            msg = f"Optimizer {name!r} is already registered with a different class."
+            raise ValueError(msg)
+    _OPTIMIZER_REGISTRY[name] = optimizer_cls
+
+
+def register_optimizer_container(
+    predicate: ContainerPredicate[T],
+    factory: ContainerFactory[T],
+    *,
+    priority: int = 0,
+) -> None:
+    """Register a container factory used by ``build_optimizers``.
+
+    Registrations are evaluated in descending ``priority`` order. The first
+    predicate returning ``True`` determines the container factory that will be
+    used for the given optimizer configuration.
+    """
+
+    _CONTAINER_REGISTRY.append(
+        _ContainerRegistration(priority=priority, predicate=predicate, factory=factory)
+    )
+    _CONTAINER_REGISTRY.sort(key=lambda registration: registration.priority, reverse=True)
 
 
 class _OptimizerStateProxy(MutableMapping):
@@ -358,12 +433,70 @@ class FTOptimizersContainer(OptimizersContainer):
             super().zero_grad(*args, **kwargs)
 
 
+def _register_default_optimizer_containers() -> None:
+    def _optim_in_backward_predicate(
+        optimizer_config: OptimizerConfig,
+        context: _OptimizerContainerContext[T],
+    ) -> bool:
+        return optimizer_config.early_step_in_backward
+
+    def _optim_in_backward_factory(
+        optimizer_config: OptimizerConfig,  # noqa: ARG001 - symmetry with predicate
+        context: _OptimizerContainerContext[T],
+    ) -> OptimizersContainer:
+        return OptimizersInBackwardContainer(
+            context.model_parts, context.optimizer_cls, context.optimizer_kwargs
+        )
+
+    def _ft_enabled_predicate(
+        optimizer_config: OptimizerConfig,
+        context: _OptimizerContainerContext[T],
+    ) -> bool:
+        return bool(context.ft_manager and context.ft_manager.enabled)
+
+    def _ft_enabled_factory(
+        optimizer_config: OptimizerConfig,  # noqa: ARG001 - symmetry with predicate
+        context: _OptimizerContainerContext[T],
+    ) -> OptimizersContainer:
+        assert context.ft_manager is not None  # guarded by predicate
+        return FTOptimizersContainer(
+            context.model_parts,
+            context.optimizer_cls,
+            context.optimizer_kwargs,
+            context.ft_manager.manager,
+            use_ft_optimizer=context.ft_manager.use_async_quorum,
+            param_groups=context.param_groups,
+        )
+
+    def _default_factory(
+        optimizer_config: OptimizerConfig,  # noqa: ARG001 - symmetry with predicate
+        context: _OptimizerContainerContext[T],
+    ) -> OptimizersContainer:
+        return OptimizersContainer(
+            context.model_parts,
+            context.optimizer_cls,
+            context.optimizer_kwargs,
+            param_groups=context.param_groups,
+        )
+
+    register_optimizer_container(
+        _optim_in_backward_predicate, _optim_in_backward_factory, priority=50
+    )
+    register_optimizer_container(_ft_enabled_predicate, _ft_enabled_factory, priority=0)
+    register_optimizer_container(lambda *_: True, _default_factory, priority=-100)
+
+
+_register_default_optimizer_containers()
+
+
 def build_optimizers(
     model_parts: list[nn.Module],
     optimizer_config: OptimizerConfig,
     parallel_dims: ParallelDims,
     ft_manager: FTManager | None = None,
     param_groups: list[dict[str, Any]] | None = None,
+    *,
+    extra_optimizer_kwargs: dict[str, Any] | None = None,
 ) -> OptimizersContainer:
     """Create a OptimizersContainer for the given model parts and job config.
 
@@ -419,33 +552,28 @@ def build_optimizers(
         "fused": fused,
         "foreach": foreach,
     }
+    if extra_optimizer_kwargs:
+        optimizer_kwargs.update(extra_optimizer_kwargs)
 
-    optimizer_classes = {
-        "Adam": torch.optim.Adam,
-        "AdamW": torch.optim.AdamW,
-    }
-    if name not in optimizer_classes:
-        raise NotImplementedError(f"Optimizer {name} not added.")
-    optimizer_cls = optimizer_classes[name]
+    try:
+        optimizer_cls = _OPTIMIZER_REGISTRY[name]
+    except KeyError as exc:  # pragma: no cover - defensive, exercised in tests
+        raise NotImplementedError(f"Optimizer {name} not added.") from exc
 
-    if optim_in_bwd:
-        return OptimizersInBackwardContainer(
-            model_parts, optimizer_cls, optimizer_kwargs
-        )
-
-    if ft_manager and ft_manager.enabled:
-        return FTOptimizersContainer(
-            model_parts,
-            optimizer_cls,
-            optimizer_kwargs,
-            ft_manager.manager,
-            use_ft_optimizer=ft_manager.use_async_quorum,
-            param_groups=param_groups,
-        )
-
-    return OptimizersContainer(
-        model_parts, optimizer_cls, optimizer_kwargs, param_groups=param_groups
+    context: _OptimizerContainerContext[Any] = _OptimizerContainerContext(
+        model_parts=model_parts,
+        optimizer_cls=optimizer_cls,
+        optimizer_kwargs=optimizer_kwargs,
+        parallel_dims=parallel_dims,
+        ft_manager=ft_manager,
+        param_groups=param_groups,
     )
+
+    for registration in _CONTAINER_REGISTRY:
+        if registration.predicate(optimizer_config, context):
+            return registration.factory(optimizer_config, context)
+
+    raise RuntimeError("No optimizer container registered for the provided config.")
 
 
 def build_optimizers_with_moe_load_balancing(
