@@ -29,7 +29,6 @@ from torchtitan.experiments.fl.configs.config import (
     BetasMonitorConfig,
     HyperparameterSwitchConfig,
     LRMonitorConfig,
-    MetricsConfig,
     OptimizerMonitorConfig,
     VSMonitorConfig,
 )
@@ -1016,33 +1015,7 @@ class FLMetricsProcessor(MetricsProcessor):
         super().__init__(*args, **kwargs)
 
         # Get metrics config from fl_metrics field
-        fl_metrics_raw = self.job_config.fl_metrics  # type: ignore[attr-defined]
-
-        # Convert dict to dataclass if needed
-        if isinstance(fl_metrics_raw, dict):
-            optimizer_monitor_dict = fl_metrics_raw.get("optimizer_monitor", {})
-            activation_monitor_dict = fl_metrics_raw.get("activation_monitor", {})
-            lr_monitor_dict = fl_metrics_raw.get("lr_monitor", {})
-            betas_monitor_dict = fl_metrics_raw.get("betas_monitor", {})
-            vs_monitor_dict = fl_metrics_raw.get("vs_monitor", {})
-            hyper_switch_dict = fl_metrics_raw.get("hyperparameter_switch", {})
-
-            optimizer_config = OptimizerMonitorConfig(**optimizer_monitor_dict)
-            activation_config = ActivationMonitorConfig(**activation_monitor_dict)
-            lr_config = LRMonitorConfig(**lr_monitor_dict)
-            betas_config = BetasMonitorConfig(**betas_monitor_dict)
-            vs_config = VSMonitorConfig(**vs_monitor_dict)
-            hyper_config = HyperparameterSwitchConfig(**hyper_switch_dict)
-            fl_metrics_config = MetricsConfig(
-                optimizer_monitor=optimizer_config,
-                activation_monitor=activation_config,
-                lr_monitor=lr_config,
-                betas_monitor=betas_config,
-                vs_monitor=vs_config,
-                hyperparameter_switch=hyper_config,
-            )
-        else:
-            fl_metrics_config = fl_metrics_raw
+        fl_metrics_config = self.job_config.fl_metrics.unwrap()  # type: ignore[attr-defined]
 
         optimizer_config = fl_metrics_config.optimizer_monitor
         interval = optimizer_config.interval

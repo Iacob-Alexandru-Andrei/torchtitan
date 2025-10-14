@@ -24,28 +24,17 @@ To run this script, you can use a command like:
 from __future__ import annotations
 
 import os
-from dataclasses import replace
-from typing import cast
-
 import torch
 
-from torchtitan.config import ConfigManager
 from torchtitan.experiments.fl.components import build_metrics_processor
-from torchtitan.experiments.fl.configs.config import (
-    MosaicJobConfig,
-    S3CheckpointingConfig,
-)
+from torchtitan.experiments.fl.configs import MosaicConfigManager
 from torchtitan.experiments.fl.dataloader.dataloader import build_mosaic_dataloader
 from torchtitan.experiments.fl.dataloader.tokenizer import build_mosaic_tokenizer
 from torchtitan.experiments.fl.ft_override import enable_desloc_only_ft
+from torchtitan.experiments.fl.models.utils import ensure_mosaic_spec
 from torchtitan.experiments.fl.s3_checkpoint import (
     S3CheckpointManager,
     setup_s3_checkpointing,
-)
-from torchtitan.protocols.train_spec import (
-    get_train_spec,
-    register_train_spec,
-    TokenizerBuilder,
 )
 from torchtitan.tools.logging import init_logger, logger
 from torchtitan.train import Trainer
@@ -61,12 +50,8 @@ def main() -> None:  # noqa: C901, PLR0912, PLR0915
 
     # Use a ConfigManager to parse the TOML configuration file into our
     # custom MosaicJobConfig dataclass.
-    config_manager = ConfigManager(MosaicJobConfig)
+    config_manager = MosaicConfigManager()
     job_config = config_manager.parse_args()
-
-    # Convert s3_checkpoint dict to dataclass if needed (tyro may leave it as dict)
-    if isinstance(job_config.s3_checkpoint, dict):
-        job_config.s3_checkpoint = S3CheckpointingConfig(**job_config.s3_checkpoint)
 
     # Apply RUN_UUID from environment if provided
     run_uuid = os.getenv("RUN_UUID")
@@ -90,29 +75,13 @@ def main() -> None:  # noqa: C901, PLR0912, PLR0915
     # Otherwise, we are in the generic case, where we take a standard model
     # and wrap it with mosaic components.
     if not job_config.model.name.startswith("mosaic_"):
-        # Dynamically get the base TrainSpec for the specified model
-        # and modify it to use the Mosaic dataloader and tokenizer.
-        base_spec = get_train_spec(job_config.model.name)
-        mosaic_spec_name = f"mosaic_{base_spec.name}"
-
-        # Check if the mosaic spec is already registered (e.g., from a previous run)
-        try:
-            mosaic_spec = get_train_spec(mosaic_spec_name)
-            logger.info(f"TrainSpec {mosaic_spec_name} already registered, reusing it")
-        except ValueError:
-            # Not registered yet, create and register it
-            mosaic_spec = replace(
-                base_spec,
-                build_dataloader_fn=build_mosaic_dataloader,
-                build_tokenizer_fn=cast("TokenizerBuilder", build_mosaic_tokenizer),
-                build_metrics_processor_fn=build_metrics_processor,
-            )
-            mosaic_spec.name = mosaic_spec_name
-            register_train_spec(mosaic_spec)
-            logger.info(f"Registered new TrainSpec: {mosaic_spec_name}")
-
-        # Update the job config to use the mosaic spec
-        job_config.model.name = mosaic_spec.name
+        mosaic_spec_name = ensure_mosaic_spec(
+            job_config.model.name,
+            dataloader_fn=build_mosaic_dataloader,
+            tokenizer_fn=build_mosaic_tokenizer,
+            metrics_processor_fn=build_metrics_processor,
+        )
+        job_config.model.name = mosaic_spec_name
 
     # Launch the trainer
     trainer: Trainer | None = None
