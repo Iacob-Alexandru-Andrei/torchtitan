@@ -3,22 +3,18 @@
 #
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
-from __future__ import annotations
 
 import os
 import time
 from collections import namedtuple
-from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, Callable, TYPE_CHECKING, Protocol, TypeVar
+from typing import Any, TYPE_CHECKING
 
 import torch
 from torch.utils.tensorboard import SummaryWriter
 from torchtitan.components.lr_scheduler import LRSchedulersContainer
 from torchtitan.components.optimizer import OptimizersContainer
 from torchtitan.config import JobConfig
-from torchtitan.config.manager import ConfigManager
 from torchtitan.distributed import ParallelDims
 from torchtitan.tools import utils
 from torchtitan.tools.logging import logger
@@ -26,11 +22,6 @@ from torchtitan.tools.utils import Color, device_module, device_type
 
 if TYPE_CHECKING:
     from torchtitan.protocols import BaseModelArgs
-    from torch import nn
-    from torch.distributed.device_mesh import DeviceMesh
-
-
-T = TypeVar("T")
 
 
 # named tuple for passing device memory stats for logging
@@ -45,70 +36,6 @@ DeviceMemStats = namedtuple(
         "num_ooms",
     ],
 )
-
-
-@dataclass(slots=True)
-class MetricsCallbackSetupContext:
-    """Context provided to metrics callbacks during setup."""
-
-    model_parts: Sequence[nn.Module]
-    optimizers: OptimizersContainer
-    logger: "BaseLogger"
-    parallel_dims: ParallelDims
-    job_config: JobConfig
-
-
-@dataclass(slots=True)
-class MetricsCallbackStepContext:
-    """Context provided to metrics callbacks after each training step."""
-
-    step: int
-    model_parts: Sequence[nn.Module]
-    optimizers: OptimizersContainer
-    logger: "BaseLogger"
-    mesh: DeviceMesh | None
-
-
-@dataclass(slots=True)
-class MetricsCallbackValidationContext:
-    """Context provided to metrics callbacks when validation finishes."""
-
-    step: int
-    loss: float
-    logger: "BaseLogger"
-
-
-class MetricsCallback(Protocol):
-    """Protocol describing the callback lifecycle used by metrics processors."""
-
-    def setup(self, context: MetricsCallbackSetupContext) -> None:
-        """Called once when model parts and optimizers become available."""
-
-    def on_step_end(self, context: MetricsCallbackStepContext) -> None:
-        """Invoked after metrics logging for each training step."""
-
-    def on_validation_end(self, context: MetricsCallbackValidationContext) -> None:
-        """Invoked after validation metrics are logged."""
-
-    def close(self) -> None:
-        """Called when the metrics processor is shutting down."""
-
-
-MetricsCallbackFactory = Callable[
-    [JobConfig, ParallelDims], Sequence[MetricsCallback]
-]
-
-
-def _coerce_dataclass(value: T | Mapping[str, Any], cls: type[T]) -> T:
-    """Convert mappings loaded from configs into strongly typed dataclasses."""
-
-    if isinstance(value, cls):
-        return value
-    if isinstance(value, Mapping):
-        # ConfigManager.dict_to_dataclass handles nested dataclasses and type coercion.
-        return ConfigManager.dict_to_dataclass(cls, dict(value))  # type: ignore[call-arg]
-    msg = f"Expected {cls.__name__} or mapping, but received {type(value)!r}."
-    raise TypeError(msg)
 
 
 class DeviceMemoryMonitor:
@@ -429,8 +356,6 @@ class MetricsProcessor:
         job_config: JobConfig,
         parallel_dims: ParallelDims,
         tag: str | None = None,
-        *,
-        callback_factories: Sequence[MetricsCallbackFactory] | None = None,
     ):
         self.logger = _build_metric_logger(job_config, parallel_dims, tag)
         self.parallel_dims = parallel_dims
@@ -456,11 +381,6 @@ class MetricsProcessor:
         self.optimizers = None
         self.lr_schedulers = None
         self.model_parts = None
-
-        self._callback_factories = list(callback_factories or [])
-        self._direct_callbacks: list[MetricsCallback] = []
-        self._callbacks: list[MetricsCallback] | None = None
-        self._callbacks_setup_done = False
 
     def should_log(self, step: int) -> bool:
         return step == 1 or step % self.job_config.metrics.log_freq == 0
@@ -533,10 +453,6 @@ class MetricsProcessor:
         self.time_last_log = time.perf_counter()
         self.device_memory_monitor.reset_peak_stats()
 
-        mesh = self._callback_mesh()
-        self._ensure_callbacks_setup()
-        self._run_step_callbacks(step, mesh)
-
     def log_validation(self, loss: float, step: int):
         time_delta = time.perf_counter() - self.time_last_log
 
@@ -570,107 +486,8 @@ class MetricsProcessor:
         self.time_last_log = time.perf_counter()
         self.device_memory_monitor.reset_peak_stats()
 
-        self._ensure_callbacks_setup()
-        self._run_validation_callbacks(loss, step)
-
     def close(self):
-        for callback in self._resolve_callbacks():
-            callback.close()
         self.logger.close()
-
-    @property
-    def callbacks(self) -> tuple[MetricsCallback, ...]:
-        """Return the callbacks currently registered with the processor."""
-
-        return tuple(self._resolve_callbacks())
-
-    def register_callbacks(self, *callbacks: MetricsCallback) -> None:
-        """Register callback instances to run alongside metric logging."""
-
-        if not callbacks:
-            return
-        self._direct_callbacks.extend(callbacks)
-        if self._callbacks is not None:
-            self._callbacks.extend(callbacks)
-        self._callbacks_setup_done = False
-
-    def register_callback_factory(self, factory: MetricsCallbackFactory) -> None:
-        """Register a factory that lazily instantiates callbacks from config."""
-
-        self._callback_factories.append(factory)
-        if self._callbacks is not None:
-            self._callbacks.extend(factory(self.job_config, self.parallel_dims))
-        self._callbacks_setup_done = False
-
-    def _resolve_callbacks(self) -> list[MetricsCallback]:
-        if self._callbacks is None:
-            callbacks: list[MetricsCallback] = []
-            for factory in self._callback_factories:
-                callbacks.extend(factory(self.job_config, self.parallel_dims))
-            callbacks.extend(self._direct_callbacks)
-            self._callbacks = callbacks
-        return self._callbacks
-
-    def _ensure_callbacks_setup(self) -> None:
-        if self._callbacks_setup_done:
-            return
-
-        callbacks = self._resolve_callbacks()
-        if not callbacks:
-            self._callbacks_setup_done = True
-            return
-
-        if not self.model_parts or self.optimizers is None:
-            return
-
-        setup_context = MetricsCallbackSetupContext(
-            model_parts=self.model_parts,
-            optimizers=self.optimizers,
-            logger=self.logger,
-            parallel_dims=self.parallel_dims,
-            job_config=self.job_config,
-        )
-        for callback in callbacks:
-            callback.setup(setup_context)
-        self._callbacks_setup_done = True
-
-    def _run_step_callbacks(self, step: int, mesh: DeviceMesh | None) -> None:
-        callbacks = self._resolve_callbacks()
-        if not callbacks or not self.model_parts or self.optimizers is None:
-            return
-
-        context = MetricsCallbackStepContext(
-            step=step,
-            model_parts=self.model_parts,
-            optimizers=self.optimizers,
-            logger=self.logger,
-            mesh=mesh,
-        )
-        for callback in callbacks:
-            callback.on_step_end(context)
-
-    def _run_validation_callbacks(self, loss: float, step: int) -> None:
-        callbacks = self._resolve_callbacks()
-        if not callbacks:
-            return
-
-        context = MetricsCallbackValidationContext(
-            step=step,
-            loss=loss,
-            logger=self.logger,
-        )
-        for callback in callbacks:
-            callback.on_validation_end(context)
-
-    def _callback_mesh(self) -> DeviceMesh | None:
-        """Return the mesh passed into step callbacks."""
-
-        return None
-
-    def coerce_config(self, value: T | Mapping[str, Any], cls: type[T]) -> T:
-        """Coerce configuration objects into the requested dataclass type."""
-
-        return _coerce_dataclass(value, cls)
 
 
 def build_metrics_processor(
