@@ -20,6 +20,7 @@ from torchtitan.experiments.fl.configs.optimizers import (
     DesLocConfig,
     MosaicOptimizerConfig,
 )
+from torchtitan.experiments.fl.desloc import DesLocFTOptimizersContainer
 from torchtitan.experiments.fl.optimizers import (
     ADOPT,
     AggMoAdamW,
@@ -127,6 +128,17 @@ def build_mosaic_optimizers(  # noqa: C901, PLR0912
     if optim_in_bwd:
         return OptimizersInBackwardContainer(
             model_parts, optimizer_cls, optimizer_kwargs
+        )
+
+    if desloc_enabled and ft_manager and desloc_config is not None:
+        return DesLocFTOptimizersContainer(
+            model_parts,
+            optimizer_cls,
+            optimizer_kwargs,
+            ft_manager.manager,
+            desloc_config,
+            use_ft_optimizer=ft_manager.use_async_quorum,
+            param_groups=param_groups,
         )
 
     if ft_manager and ft_manager.enabled:

@@ -4,10 +4,6 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 
-from torchtitan.components.ft.extensions import (
-    register_optimizer_extension,
-    register_semi_sync_context,
-)
 from torchtitan.components.ft.manager import (
     FTManager,
     has_torchft,
@@ -19,6 +15,4 @@ __all__ = [
     "FTManager",
     "has_torchft",
     "maybe_semi_sync_training",
-    "register_optimizer_extension",
-    "register_semi_sync_context",
 ]

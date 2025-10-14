@@ -15,8 +15,6 @@ from typing import Iterator
 from torchtitan.components.ft import has_torchft
 from torchtitan.tools.logging import logger
 
-from torchtitan.experiments.fl.desloc import install_desloc_support
-
 __all__ = ["configure_desloc"]
 
 
@@ -52,5 +50,4 @@ def configure_desloc(job_config: object) -> Iterator[None]:
 
     fault_tolerance.semi_sync_method = "desloc"
 
-    with install_desloc_support(desloc_cfg):
-        yield
+    yield

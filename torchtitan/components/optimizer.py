@@ -5,7 +5,7 @@
 # LICENSE file in the root directory of this source tree.
 
 import functools
-from collections.abc import Callable, MutableMapping
+from collections.abc import MutableMapping
 from typing import Any, Generic, Iterator, TypeVar
 
 import torch
@@ -20,10 +20,8 @@ from torch.distributed.checkpoint.stateful import Stateful
 from torch.optim import Optimizer
 
 from torchtitan.components.ft import FTManager, has_torchft
-from torchtitan.components.ft.extensions import apply_optimizer_extensions
 from torchtitan.config import Optimizer as OptimizerConfig
 from torchtitan.distributed import ParallelDims
-from torchtitan.tools.logging import logger
 
 __all__ = [
     "OptimizersContainer",
@@ -317,20 +315,6 @@ class FTOptimizersContainer(OptimizersContainer):
         # Whether to determine quorum using FT.optimizer,
         # in semi-sync training we use the synchronization step to start quorum
         self._use_ft_optimizer: bool = use_ft_optimizer
-        self._ft_extension_cleanups: list[Callable[[], None]] = apply_optimizer_extensions(
-            self, ft_manager
-        )
-
-    def close_ft_extensions(self) -> None:
-        """Run and clear any cleanup callbacks registered by FT extensions."""
-
-        while self._ft_extension_cleanups:
-            cleanup = self._ft_extension_cleanups.pop()
-            try:
-                cleanup()
-            except Exception:  # pragma: no cover - defensive cleanup
-                logger.exception("Error while running FT extension cleanup")
-
 
     def init_cache_state_dict(self) -> None:
         self.cache_state_dict = super().state_dict()
@@ -372,17 +356,6 @@ class FTOptimizersContainer(OptimizersContainer):
             self._use_ft_optimizer = True
         else:
             super().zero_grad(*args, **kwargs)
-
-    def close_ft_extensions(self) -> None:
-        """Invoke any registered cleanup callbacks for FT extensions."""
-
-        while self._ft_extension_cleanups:
-            cleanup = self._ft_extension_cleanups.pop()
-            cleanup()
-
-    # Backwards compatibility for older DES-LOC integrations.
-    def close_desloc(self) -> None:  # pragma: no cover - legacy alias
-        self.close_ft_extensions()
 
 
 def build_optimizers(

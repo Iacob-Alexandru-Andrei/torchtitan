@@ -10,7 +10,7 @@ from __future__ import annotations
 import logging
 from contextlib import contextmanager
 from datetime import timedelta
-from typing import Any, TYPE_CHECKING, Callable, Iterator
+from typing import Any, TYPE_CHECKING, Iterator
 
 import torch
 from torch import nn
@@ -20,10 +20,7 @@ try:  # pragma: no cover - optional dependency in some environments
 except ImportError:  # pragma: no cover - DTensor is optional
     DTensor = None  # type: ignore[assignment]
 
-from torchtitan.components.ft.extensions import (
-    register_optimizer_extension,
-    register_semi_sync_context,
-)
+from torchtitan.components.optimizer import FTOptimizersContainer
 from torchtitan.experiments.fl.configs.optimizers import DesLocConfig
 
 if TYPE_CHECKING:
@@ -31,7 +28,6 @@ if TYPE_CHECKING:
 
     from torch.optim import Optimizer
     from torchtitan.components.ft.manager import FTManager
-    from torchtitan.components.optimizer import FTOptimizersContainer
 
 logger = logging.getLogger(__name__)
 
@@ -448,35 +444,39 @@ class DesLocController:
                 fragment.restore_state()
 
 
-@contextmanager
-def desloc_semi_sync_context(
-    ft_manager: "FTManager", optimizer: torch.optim.Optimizer
-) -> Iterator[None]:
-    """Context manager wiring DES-LOC into TorchFT semi-sync execution."""
-    try:
-        yield
-    finally:
-        close_hook = getattr(optimizer, "close_ft_extensions", None)
-        if callable(close_hook):
-            close_hook()
-        else:  # pragma: no cover - fallback for legacy integrations
-            legacy_hook = getattr(optimizer, "close_desloc", None)
-            if callable(legacy_hook):
-                legacy_hook()
+class DesLocFTOptimizersContainer(FTOptimizersContainer):
+    """FT optimizer container augmented with DES-LOC synchronization."""
 
+    def __init__(
+        self,
+        model_parts: list[nn.Module],
+        optimizer_cls: type[torch.optim.Optimizer],
+        optimizer_kwargs: dict[str, Any],
+        ft_manager: Any,
+        desloc_config: DesLocConfig,
+        *,
+        use_ft_optimizer: bool = True,
+        param_groups: list[dict[str, Any]] | None = None,
+    ) -> None:
+        if desloc_config.param_sync_every <= 0:
+            msg = "desloc.param_sync_every must be a positive integer."
+            raise ValueError(msg)
 
-def _make_optimizer_extension(
-    desloc_config: DesLocConfig,
-) -> Callable[["FTOptimizersContainer", Any], Callable[[], None]]:
-    backup_device = desloc_config.resolved_backup_device()
-    optimizer_sync = desloc_config.normalized_optimizer_sync()
+        super().__init__(
+            model_parts,
+            optimizer_cls,
+            optimizer_kwargs,
+            ft_manager,
+            use_ft_optimizer=use_ft_optimizer,
+            param_groups=param_groups,
+        )
 
-    def extension(
-        container: "FTOptimizersContainer", ft_manager: Any
-    ) -> Callable[[], None]:
-        controllers: list[DesLocController] = []
+        backup_device = desloc_config.resolved_backup_device()
+        optimizer_sync = desloc_config.normalized_optimizer_sync()
+
+        self._desloc_controllers: list[DesLocController] = []
         for idx, (model, optimizer) in enumerate(
-            zip(container.model_parts, container.optimizers, strict=True)
+            zip(self.model_parts, self.optimizers, strict=True)
         ):
             controller = DesLocController(
                 manager=ft_manager,
@@ -489,32 +489,25 @@ def _make_optimizer_extension(
                 name_prefix=f"desloc_{idx}",
                 quorum_timeout_seconds=desloc_config.quorum_timeout_seconds,
             )
-            controllers.append(controller)
+            self._desloc_controllers.append(controller)
 
-        setattr(container, "_desloc_controllers", controllers)
+    def close_desloc(self) -> None:
+        """Detach any registered DES-LOC hooks from the wrapped optimizers."""
 
-        def cleanup() -> None:
-            while controllers:
-                controller = controllers.pop()
-                controller.close()
-
-        # Provide a legacy hook for backwards compatibility.
-        setattr(container, "close_desloc", cleanup)
-        return cleanup
-
-    return extension
+        for controller in self._desloc_controllers:
+            controller.close()
+        self._desloc_controllers.clear()
 
 
 @contextmanager
-def install_desloc_support(desloc_config: DesLocConfig) -> Iterator[None]:
-    """Register optimizer and context hooks for DES-LOC integration."""
+def desloc_semi_sync_context(
+    ft_manager: "FTManager", optimizer: torch.optim.Optimizer
+) -> Iterator[None]:
+    """Context manager wiring DES-LOC into TorchFT semi-sync execution."""
 
-    unregister_callbacks = [
-        register_optimizer_extension(_make_optimizer_extension(desloc_config)),
-        register_semi_sync_context("desloc", desloc_semi_sync_context),
-    ]
     try:
         yield
     finally:
-        for unregister in reversed(unregister_callbacks):
-            unregister()
+        close_hook = getattr(optimizer, "close_desloc", None)
+        if callable(close_hook):
+            close_hook()

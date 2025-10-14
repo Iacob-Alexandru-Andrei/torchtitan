@@ -18,10 +18,6 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 
-from torchtitan.components.ft.extensions import (
-    get_semi_sync_context_factory,
-    iter_optimizer_extensions,
-)
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -118,32 +114,45 @@ _FT_OVERRIDE_SPEC.loader.exec_module(ft_override)
 configure_desloc = ft_override.configure_desloc
 
 
-def test_configure_desloc_registers_extensions(monkeypatch):
+def test_configure_desloc_installs_desloc_support(monkeypatch):
     monkeypatch.setattr("torchtitan.components.ft.has_torchft", True, raising=False)
     monkeypatch.setattr(ft_override, "has_torchft", True, raising=False)
+    monkeypatch.setattr("torchtitan.components.optimizer.has_torchft", True, raising=False)
+
+    class _DummyFTOptimizer:
+        def __init__(self, _manager, _container) -> None:  # pragma: no cover - stub
+            return None
+
+        def step(self, *args, **kwargs) -> None:  # pragma: no cover - stub
+            return None
+
+        def zero_grad(self, *args, **kwargs) -> None:  # pragma: no cover - stub
+            return None
+
+    monkeypatch.setattr(
+        "torchtitan.components.optimizer.ft",
+        SimpleNamespace(Optimizer=_DummyFTOptimizer),
+        raising=False,
+    )
 
     job_config = _build_job_config()
     model = nn.Linear(2, 2)
-    optimizer = optim.SGD(model.parameters(), lr=0.1)
-    container = SimpleNamespace(model_parts=[model], optimizers=[optimizer])
 
     with configure_desloc(job_config):
         assert job_config.fault_tolerance.semi_sync_method == "desloc"
-        extensions = iter_optimizer_extensions()
-        assert len(extensions) == 1
-        cleanup = extensions[0](container, _DummyManager())
-        assert callable(cleanup)
+        container = desloc_module.DesLocFTOptimizersContainer(
+            [model],
+            optim.SGD,
+            {"lr": 0.1},
+            _DummyManager(),
+            job_config.optimizer.desloc,
+        )
         assert getattr(container, "_desloc_controllers")
-        context_factory = get_semi_sync_context_factory("desloc")
-        assert context_factory is not None
 
-        # Closing controllers should clear the registered state.
-        cleanup()
+        with desloc_module.desloc_semi_sync_context(_DummyManager(), container):
+            pass
+
         assert container._desloc_controllers == []
-
-    # Registrations must be cleared once configuration context exits.
-    assert iter_optimizer_extensions() == ()
-    assert get_semi_sync_context_factory("desloc") is None
 
 
 def test_configure_desloc_requires_torchft(monkeypatch):

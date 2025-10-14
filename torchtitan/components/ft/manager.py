@@ -16,7 +16,6 @@ import torch.nn as nn
 from torch.distributed._composable.fsdp.fully_shard import FSDPModule
 from torch.distributed.distributed_c10d import ReduceOp
 from torchtitan.components.ft.config import FaultTolerance as FTConfig
-from torchtitan.components.ft.extensions import get_semi_sync_context_factory
 from torchtitan.tools.logging import logger
 
 if importlib.util.find_spec("torchft") is not None:
@@ -181,15 +180,19 @@ def maybe_semi_sync_training(
                 optimizer=optimizer,
                 sync_every=sync_steps,
             )
-        else:
-            context_factory = get_semi_sync_context_factory(method)
-            if context_factory is None:
+        elif method == "desloc":
+            try:
+                from torchtitan.experiments.fl.desloc import desloc_semi_sync_context
+            except ImportError:  # pragma: no cover - optional dependency path
                 logger.warning(
-                    "TorchFT semi-sync method '%s' requested but no extension was registered; "
-                    "falling back to async quorum.",
-                    semi_sync_method,
+                    "DES-LOC semi-sync requested but torchtitan.experiments.fl.desloc "
+                    "is unavailable; falling back to async quorum."
                 )
                 return nullcontext()
 
-            return context_factory(ft_manager=ft_manager, optimizer=optimizer)
+            return desloc_semi_sync_context(ft_manager=ft_manager, optimizer=optimizer)
+        else:
+            raise ValueError(
+                f"Unknown training method: {semi_sync_method}, only 'diloco', 'local_sgd', and 'desloc' are supported."
+            )
     return nullcontext()
