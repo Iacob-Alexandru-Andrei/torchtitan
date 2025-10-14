@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import logging
+import math
 from typing import Any, cast, ClassVar, TYPE_CHECKING
 
 import torch
@@ -298,6 +299,12 @@ class ADOPT(Optimizer):
                 state_steps,
             )
 
+            if grads:
+                pre_step_grad_norm = math.sqrt(
+                    sum(g.detach().float().pow(2).sum().item() for g in grads)
+                )
+                log.error("ADOPT pre-step grad norm: %.6f", pre_step_grad_norm)
+
             adopt(
                 params_with_grad,
                 grads,
@@ -321,6 +328,23 @@ class ADOPT(Optimizer):
                 found_inf=getattr(self, "found_inf", None),
                 has_complex=has_complex,
             )
+
+            if grads:
+                grad_norm = math.sqrt(
+                    sum(g.detach().float().pow(2).sum().item() for g in grads)
+                )
+                exp_avg_norm = math.sqrt(
+                    sum(m.detach().float().pow(2).sum().item() for m in exp_avgs)
+                )
+                exp_avg_sq_norm = math.sqrt(
+                    sum(v.detach().float().pow(2).sum().item() for v in exp_avg_sqs)
+                )
+                log.error(
+                    "ADOPT step stats - grad_norm: %.6f, moment_norm: %.6f, moment2_norm: %.6f",
+                    grad_norm,
+                    exp_avg_norm,
+                    exp_avg_sq_norm,
+                )
 
         return loss
 

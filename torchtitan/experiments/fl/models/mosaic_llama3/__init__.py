@@ -12,6 +12,7 @@ from torchtitan.experiments.fl.components import build_metrics_processor
 
 from torchtitan.experiments.fl.dataloader.dataloader import build_mosaic_dataloader
 from torchtitan.experiments.fl.dataloader.tokenizer import build_mosaic_tokenizer
+from torchtitan.experiments.fl.optimizer_builder import build_mosaic_optimizers
 from torchtitan.experiments.fl.validate import build_mosaic_validator
 
 from torchtitan.models.llama3 import get_train_spec as get_base_llama3_spec
@@ -29,7 +30,10 @@ def get_train_spec() -> TrainSpec:
     base_spec = get_base_llama3_spec()
 
     # Update all model configurations with larger vocab size for Mosaic tokenizer
-    model_args = {name: replace(config, vocab_size=50368) for name, config in base_spec.model_args.items()}
+    model_args = {
+        name: replace(config, vocab_size=50368)
+        for name, config in base_spec.model_args.items()
+    }
 
     # Return a new spec with the Mosaic components and updated vocab sizes
     return replace(
@@ -39,5 +43,6 @@ def get_train_spec() -> TrainSpec:
         build_dataloader_fn=build_mosaic_dataloader,
         build_tokenizer_fn=cast("TokenizerBuilder", build_mosaic_tokenizer),
         build_metrics_processor_fn=build_metrics_processor,
+        build_optimizers_fn=build_mosaic_optimizers,
         build_validator_fn=build_mosaic_validator,
     )

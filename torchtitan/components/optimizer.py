@@ -96,6 +96,7 @@ class OptimizersContainer(Optimizer, Stateful, Generic[T]):
     def __len__(self) -> int:
         return len(self.optimizers)
 
+    @Optimizer.profile_hook_step  # ensure optimizer step hooks (e.g. torchft LocalSGD) fire
     def step(self, *args, **kwargs) -> None:
         for optimizer in self.optimizers:
             optimizer.step(*args, **kwargs)
@@ -226,6 +227,7 @@ class FTOptimizersContainer(OptimizersContainer):
         super().load_state_dict(state_dict)
         self.init_cache_state_dict()
 
+    @Optimizer.profile_hook_step  # reuse step hooks under TorchFT wrappers
     def step(self, *args, **kwargs) -> None:
         """Calling the correct step() depending on the caller.
 

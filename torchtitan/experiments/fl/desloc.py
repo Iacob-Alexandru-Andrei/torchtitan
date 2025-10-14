@@ -33,7 +33,11 @@ logger = logging.getLogger(__name__)
 
 def _extract_local_tensor(tensor: torch.Tensor) -> torch.Tensor:
     """Return a detached clone of ``tensor`` on its local device."""
-    local = tensor.to_local() if DTensor is not None and isinstance(tensor, DTensor) else tensor
+    local = (
+        tensor.to_local()
+        if DTensor is not None and isinstance(tensor, DTensor)
+        else tensor
+    )
     return local.detach().clone()
 
 
@@ -108,16 +112,26 @@ class _ParameterFragment(_BaseFragment):
     def _init_backup_storage(self) -> None:
         for name, param in self._model.named_parameters():
             local_tensor = _extract_local_tensor(param.data)
-            device = self._backup_device if self._backup_device is not None else local_tensor.device
+            device = (
+                self._backup_device
+                if self._backup_device is not None
+                else local_tensor.device
+            )
             backup = torch.empty_like(local_tensor, device=device)
-            if self._pin_memory and backup.device.type == "cpu" and torch.cuda.is_available():
+            if (
+                self._pin_memory
+                and backup.device.type == "cpu"
+                and torch.cuda.is_available()
+            ):
                 backup = backup.pin_memory()
             self._original_parameters[name] = backup
 
     def save_state(self) -> None:
         with torch.no_grad():
             for name, param in self._model.named_parameters():
-                self._original_parameters[name].copy_(_extract_local_tensor(param.data), non_blocking=True)
+                self._original_parameters[name].copy_(
+                    _extract_local_tensor(param.data), non_blocking=True
+                )
 
     def restore_state(self) -> None:
         with torch.no_grad():
@@ -135,7 +149,9 @@ class _ParameterFragment(_BaseFragment):
 
     def perform_sync(self) -> None:
         with torch.no_grad():
-            for param, avg_param in zip(self._model.parameters(), self._averaged_parameters, strict=True):
+            for param, avg_param in zip(
+                self._model.parameters(), self._averaged_parameters, strict=True
+            ):
                 _copy_into_tensor(param.data, avg_param)
 
     def register_state_dict_fn(self) -> None:
@@ -187,8 +203,14 @@ class _OptimizerStateFragment(_BaseFragment):
             state = self._optimizer.state.get(param, {})
             tensor = state.get(self.state_key)
             if isinstance(tensor, torch.Tensor):
-                device = self._backup_device if self._backup_device is not None else tensor.device
-                self._original_state_tensors[name] = torch.empty_like(tensor, device=device)
+                device = (
+                    self._backup_device
+                    if self._backup_device is not None
+                    else tensor.device
+                )
+                self._original_state_tensors[name] = torch.empty_like(
+                    tensor, device=device
+                )
 
     def save_state(self) -> None:
         with torch.no_grad():
@@ -201,7 +223,10 @@ class _OptimizerStateFragment(_BaseFragment):
         with torch.no_grad():
             for name, backup in self._original_state_tensors.items():
                 param = self._param_map[name]
-                if param in self._optimizer.state and self.state_key in self._optimizer.state[param]:
+                if (
+                    param in self._optimizer.state
+                    and self.state_key in self._optimizer.state[param]
+                ):
                     self._optimizer.state[param][self.state_key].copy_(backup)
 
     def prepare_sync(self) -> list[Any]:
@@ -407,11 +432,7 @@ class DesLocController:
         for work in self._allreduce_work:
             work.wait()
 
-        commit_allowed = getattr(self._optimizer, "_torchft_last_commit_allowed", None)
-        if commit_allowed is None:
-            commit_allowed = self._manager.should_commit()
-        else:
-            self._optimizer._torchft_last_commit_allowed = None
+        commit_allowed = self._manager.should_commit()
 
         if commit_allowed:
             for fragment in fragments:
@@ -450,12 +471,13 @@ class DesLocFTOptimizersContainer(FTOptimizersContainer):
             param_groups=param_groups,
         )
 
-        self._ft_manager = ft_manager
         backup_device = desloc_config.resolved_backup_device()
         optimizer_sync = desloc_config.normalized_optimizer_sync()
 
         self._desloc_controllers: list[DesLocController] = []
-        for idx, (model, optimizer) in enumerate(zip(self.model_parts, self.optimizers, strict=True)):
+        for idx, (model, optimizer) in enumerate(
+            zip(self.model_parts, self.optimizers, strict=True)
+        ):
             controller = DesLocController(
                 manager=ft_manager,
                 model=model,
@@ -470,17 +492,12 @@ class DesLocFTOptimizersContainer(FTOptimizersContainer):
             self._desloc_controllers.append(controller)
 
     def zero_grad(self, *args, **kwargs) -> None:
-        """Ensure TorchFT quorum is established before each optimization step."""
-        # self._ft_manager.start_quorum()
+        """Defer to base zero_grad behavior; DES-LOC starts quorum during sync."""
         super().zero_grad(*args, **kwargs)
 
     def step(self, *args, **kwargs) -> None:
-        """Gate optimizer updates on TorchFT commit decisions."""
-        should_commit = self._ft_manager.should_commit()
-        for optimizer in self.optimizers:
-            optimizer._torchft_last_commit_allowed = should_commit
-        if should_commit:
-            super().step(*args, **kwargs)
+        """Apply local optimizer updates; DES-LOC handles commit rollback separately."""
+        super().step(*args, **kwargs)
 
     def close_desloc(self) -> None:
         """Detach any registered DES-LOC hooks from the wrapped optimizers."""

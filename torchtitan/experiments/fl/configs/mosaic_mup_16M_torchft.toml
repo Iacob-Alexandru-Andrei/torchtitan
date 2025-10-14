@@ -19,27 +19,27 @@ enable_wandb = true
 save_for_all_ranks = true
 
 [model]
-name = "mosaic_llama3_mup"
-flavor = "16M"
+name = "mosaic_llama3"
+flavor = "debugmodel"
 # test folder with tokenizer.json, for debug purpose only
 hf_assets_path = "./tests/assets/tokenizer"
 # converters = ["float8"]
 
 
 [optimizer]
-name = "ADOPT"
-lr = 4e-4
+name = "DecoupledAdamW"
+lr = 1e-4
 eps = 1e-8
-betas = [0.9,0.99]
-vs = [0.98]
-implementation = "foreach"
+weight_decay = 0.0
+# betas = [0.9,0.95]
+# implementation = "foreach"
 
-# [optimizer.desloc]
-# enabled = true
-# param_sync_every = 32
-# optimizer_sync_every = [64,128]
-# backup_device = "cpu"
-# pin_memory = true
+[optimizer.desloc]
+enabled = true
+param_sync_every = 32
+optimizer_sync_every = [64,128]
+backup_device = "cpu"
+pin_memory = true
 
 [fl_metrics.optimizer_monitor]
 interval = 1
@@ -51,13 +51,14 @@ interval = 1
 ignore_module_types = ["dropout", "ln"]
 
 [lr_scheduler]
-warmup_steps = 2  # lr scheduler warm up, normally 20% of the train steps
+warmup_steps = 50  # lr scheduler warm up, normally 20% of the train steps
 decay_ratio = 0.8  # lr scheduler decay ratio, 80% of the train steps
 decay_type = "linear"
 min_lr_factor = 0.0
 
 [training]
-local_batch_size = 8
+local_batch_size = 2
+global_batch_size = 8
 seq_len = 2048
 max_norm = 1.0  # grad norm clipping
 steps = 512
@@ -177,13 +178,13 @@ filter_fqns = ["output"]
 
 [fault_tolerance]
 enable = true
-process_group = "nccl"
+process_group = "gloo"
 process_group_timeout_ms = 10000
 replica_id = 0
 group_size = 2
 min_replica_size = 2
 sync_steps = 32
-semi_sync_method = "local_sgd"  # Options: "diloco", "local_sgd", or comment out for async quorum
+semi_sync_method = "desloc"  # Options: "diloco", "local_sgd", or comment out for async quorum
 
 [validation]
 enable = false
@@ -194,6 +195,6 @@ steps = 32
 [unigram_metric]
 enable = true
 download_missing = true
-allow_failures = true
+allow_failures = false
 ignore_index = -100
-num_attempts = 3
+num_attempts = 1
