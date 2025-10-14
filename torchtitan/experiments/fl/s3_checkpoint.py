@@ -170,6 +170,7 @@ class S3CheckpointWrapper:
         self._not_ready_steps: set[int] = set()
         self._orig_save = checkpointer.save
         self._orig_maybe_wait = checkpointer.maybe_wait_for_staging
+        self._orig_close = checkpointer.close
 
         if self._enable_uploads:
             self._start_remote_workers()
@@ -190,6 +191,21 @@ class S3CheckpointWrapper:
         """Replace ``trainer.checkpointer`` with this wrapper."""
 
         setattr(trainer, "checkpointer", self)
+
+    def install_onto_checkpointer(self) -> None:
+        """Patch the wrapped checkpointer for legacy compatibility."""
+
+        existing = getattr(self._checkpointer, "_s3_wrapper", None)
+        if existing is self:
+            return
+        if existing is not None and existing is not self:
+            logger.warning(
+                "Replacing existing S3 checkpoint wrapper on %s", type(self._checkpointer).__name__
+            )
+        setattr(self._checkpointer, "_s3_wrapper", self)
+        self._checkpointer.save = self.save  # type: ignore[assignment]
+        self._checkpointer.maybe_wait_for_staging = self.maybe_wait_for_staging  # type: ignore[assignment]
+        self._checkpointer.close = self.close  # type: ignore[assignment]
 
     def _start_remote_workers(self) -> None:
         """Start the RemoteUploaderDownloader background workers."""
@@ -323,7 +339,7 @@ class S3CheckpointWrapper:
             if self._enable_uploads:
                 self._process_pending(flush=True)
             # Note: RemoteUploaderDownloader cleanup is handled by Composer internally
-            self._checkpointer.close()
+            self._orig_close()
         finally:
             self._closed = True
 
@@ -626,19 +642,24 @@ def setup_s3_checkpointing(
 
     This helper is kept for backwards compatibility; new call sites should
     prefer :func:`get_s3_checkpoint_wrapper_factory` to obtain a wrapper
-    factory explicitly.
+    factory explicitly. When ``install`` is ``True`` the wrapper is also
+    patched onto the provided ``checkpointer`` so existing references keep the
+    S3 synchronisation behaviour.
     """
 
     factory = get_s3_checkpoint_wrapper_factory(job_config)
     if factory is None:
         return None
 
-    return factory(checkpointer, enable_uploads=install)
+    wrapper = factory(checkpointer, enable_uploads=install)
+    if install:
+        wrapper.install_onto_checkpointer()
+    return wrapper
 
 
 def get_s3_checkpoint_wrapper_factory(
     job_config: MosaicJobConfig,
-) -> (Callable[[CheckpointManager, bool], S3CheckpointWrapper] | None):
+) -> Callable[[CheckpointManager, bool], S3CheckpointWrapper] | None:
     """Return a factory producing :class:`S3CheckpointWrapper` instances.
 
     Args:

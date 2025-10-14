@@ -257,3 +257,70 @@ def test_torchft_uploads_flush_and_close_symmetrically(
     assert uploads, "Expected uploads to flush during close()"
     # Ensure the FT-specific directory is captured in remote keys.
     assert any("ft-replicat-0" in remote_key for remote_key, _ in uploads)
+
+
+def test_setup_helper_installs_wrapper_by_default(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    base = tmp_path / "ckpt"
+    base.mkdir()
+    checkpointer = _DummyCheckpointer(base)
+    job_config = _make_job_config(tmp_path)
+    config = job_config.s3_checkpoint
+
+    remote = _FakeRemoteUploaderDownloader()
+    monkeypatch.setattr(s3_module, "create_remote_up_down", lambda *args, **kwargs: remote)
+
+    started: list[bool] = []
+    monkeypatch.setattr(
+        s3_module.S3CheckpointWrapper,
+        "_start_remote_workers",
+        lambda self: started.append(True),
+    )
+
+    wrapper = s3_module.setup_s3_checkpointing(checkpointer, job_config)
+
+    assert wrapper is not None
+    assert started, "Uploads must start when helper installs the wrapper"
+    assert getattr(checkpointer, "_s3_wrapper", None) is wrapper
+    assert checkpointer.save.__self__ is wrapper  # type: ignore[attr-defined]
+    assert checkpointer.maybe_wait_for_staging.__self__ is wrapper  # type: ignore[attr-defined]
+    assert checkpointer.close.__self__ is wrapper  # type: ignore[attr-defined]
+
+    checkpointer.save(5)
+    checkpointer.maybe_wait_for_staging()
+
+    assert checkpointer.wait_calls == 1
+    assert remote.uploads, "Expected uploads after invoking maybe_wait_for_staging()"
+
+    checkpointer.close()
+    assert checkpointer.close_calls == 1
+
+
+def test_setup_helper_respects_install_flag(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    base = tmp_path / "ckpt"
+    base.mkdir()
+    checkpointer = _DummyCheckpointer(base)
+    job_config = _make_job_config(tmp_path)
+
+    remote = _FakeRemoteUploaderDownloader()
+    monkeypatch.setattr(s3_module, "create_remote_up_down", lambda *args, **kwargs: remote)
+
+    started: list[bool] = []
+    monkeypatch.setattr(
+        s3_module.S3CheckpointWrapper,
+        "_start_remote_workers",
+        lambda self: started.append(True),
+    )
+
+    wrapper = s3_module.setup_s3_checkpointing(checkpointer, job_config, install=False)
+
+    assert wrapper is not None
+    assert started == []
+    assert getattr(checkpointer, "_s3_wrapper", None) is None
+    assert checkpointer.save.__self__ is checkpointer  # type: ignore[attr-defined]
+    assert checkpointer.maybe_wait_for_staging.__self__ is checkpointer  # type: ignore[attr-defined]
+    assert checkpointer.close.__self__ is checkpointer  # type: ignore[attr-defined]
+    assert wrapper._enable_uploads is False  # noqa: SLF001
