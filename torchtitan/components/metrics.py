@@ -105,9 +105,8 @@ def _coerce_dataclass(value: T | Mapping[str, Any], cls: type[T]) -> T:
     if isinstance(value, cls):
         return value
     if isinstance(value, Mapping):
-        manager = ConfigManager()
-        # _dict_to_dataclass handles nested dataclasses and type coercion.
-        return manager._dict_to_dataclass(cls, dict(value))  # type: ignore[call-arg]
+        # ConfigManager.dict_to_dataclass handles nested dataclasses and type coercion.
+        return ConfigManager.dict_to_dataclass(cls, dict(value))  # type: ignore[call-arg]
     msg = f"Expected {cls.__name__} or mapping, but received {type(value)!r}."
     raise TypeError(msg)
 

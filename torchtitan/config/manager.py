@@ -50,7 +50,7 @@ class ConfigManager:
         config_cls = self._maybe_add_custom_args(args, toml_values)
 
         base_config = (
-            self._dict_to_dataclass(config_cls, toml_values)
+            self.dict_to_dataclass(config_cls, toml_values)
             if toml_values
             else config_cls()
         )
@@ -156,7 +156,8 @@ class ConfigManager:
 
         return make_dataclass(f"Merged{base.__name__}", result, bases=(base,))
 
-    def _dict_to_dataclass(self, cls, data: dict[str, Any]) -> Any:
+    @staticmethod
+    def dict_to_dataclass(cls, data: dict[str, Any]) -> Any:
         """Convert dictionary to dataclass, handling nested structures."""
         if not is_dataclass(cls):
             return data
@@ -175,11 +176,11 @@ class ConfigManager:
             if f.name in data:
                 value = data[f.name]
                 field_type = type_hints.get(f.name, f.type)
-                nested_cls = self._extract_dataclass_type(field_type)
+                nested_cls = ConfigManager._extract_dataclass_type(field_type)
                 if nested_cls and isinstance(value, dict):
-                    result[f.name] = self._dict_to_dataclass(nested_cls, value)
+                    result[f.name] = ConfigManager.dict_to_dataclass(nested_cls, value)
                 else:
-                    result[f.name] = self._coerce_value(field_type, value)
+                    result[f.name] = ConfigManager._coerce_value(field_type, value)
         return cls(**result)
 
     @staticmethod
