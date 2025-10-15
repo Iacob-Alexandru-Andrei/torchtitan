@@ -63,8 +63,8 @@ args.py→[] autoencoder.py→[forward((self,x))→{swish,swish},__init__((self,
 ## DEPENDENCY_PATTERNS
 
 ### EDGE_PATTERNS
-Contains: 51 edges
 Call: 13 edges
+Contains: 51 edges
 
 ### CROSS_CLUSTER_FLOW
 
