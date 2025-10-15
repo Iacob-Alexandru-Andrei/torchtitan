@@ -6,15 +6,7 @@
 """Mosaic Llama3 MuP model with Mosaic streaming support."""
 
 from dataclasses import replace
-from typing import Any, cast, TYPE_CHECKING
 
-from torch import nn
-
-from torchtitan.components.ft import FTManager
-from torchtitan.components.optimizer import OptimizersContainer
-from torchtitan.config import Optimizer as OptimizerConfig
-from torchtitan.distributed import ParallelDims
-from torchtitan.experiments.fl.configs.optimizers import MosaicOptimizerConfig
 from torchtitan.experiments.fl.models.constants import MOSAIC_LLAMA_VOCAB_SIZE
 from torchtitan.experiments.fl.models.mosaic_adapter import MosaicTrainSpecAdapter
 from torchtitan.experiments.fl.models.utils import MosaicSpecOverrides

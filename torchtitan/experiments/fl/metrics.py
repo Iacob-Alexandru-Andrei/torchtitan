@@ -249,6 +249,8 @@ class UnigramMetricManager:
 
         return bool(self._metrics)
 
+    def has_metrics(self) -> bool:
+        """Return ``True`` if any metrics are currently registered."""
 
 _UNIGRAM_MANAGER_ATTR = "_fl_unigram_manager"
 

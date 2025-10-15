@@ -58,7 +58,7 @@ ROOT: torchtitan/experiments/fl/models/mosaic_llama3_mup/
 ### DATA_MODELS
 NODES:17 CALL_DEPTH:1
 
-__init__.py→[build_mosaic_mup_optimizers((model_parts: list[nn.Module],optimizer_config: OptimizerConfig | dict[str,Any],parallel_dims: ParallelDims,ft_manager: FTManager | None = None,))[HOT],_update_vocab_sizes((base_spec: TrainSpec,mosaic_spec: TrainSpec)),get_train_spec(void)] 
+__init__.py→[_update_vocab_sizes((base_spec: TrainSpec,mosaic_spec: TrainSpec)),get_train_spec(void)] 
 
 ## DEPENDENCY_PATTERNS
 
