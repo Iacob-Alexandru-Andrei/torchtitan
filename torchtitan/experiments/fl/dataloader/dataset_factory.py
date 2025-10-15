@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import inspect
 from dataclasses import dataclass
-from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any
 
 try:
@@ -18,6 +17,7 @@ except ImportError as exc:  # pragma: no cover - optional dependency
     raise RuntimeError(msg) from exc
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
     from torchtitan.components.tokenizer import BaseTokenizer
     from torchtitan.experiments.fl.configs.config import MosaicJobConfig
 
@@ -53,6 +53,16 @@ class DatasetFactoryConfig:
 
 
 def _select_dataset_config(dataset_cfg: Mapping[str, Any] | None, split: str) -> dict[str, Any]:
+    """Extract configuration for the requested split.
+
+    Args:
+        dataset_cfg: Mapping of dataset split names to configuration payloads.
+        split: Name of the split being loaded.
+
+    Returns:
+        A dictionary containing the merged configuration for the split. When the
+        configuration is missing, an empty dictionary is returned.
+    """
     if not dataset_cfg:
         return {}
 
@@ -71,8 +81,17 @@ def _normalize_mosaic_dataloader_config(
     split: str,
     default_drop_last: bool,
 ) -> NormalizedMosaicConfig:
-    """Normalize high-level Mosaic dataloader configuration into typed payloads."""
+    """Normalize high-level Mosaic dataloader configuration into typed payloads.
 
+    Args:
+        job_config: Full Mosaic job configuration describing dataloaders.
+        split: Dataset split that is being prepared.
+        default_drop_last: Fallback flag determining whether batches should drop
+            incomplete final batches.
+
+    Returns:
+        The normalized dataset and runtime configuration for the requested split.
+    """
     mosaic_cfg = job_config.mosaic_dataloader
     if not mosaic_cfg:
         msg = "mosaic_dataloader config must be set."
@@ -110,8 +129,17 @@ def _prepare_dataset_kwargs(
     *,
     dataset_split_remote: str | None,
 ) -> DatasetFactoryConfig:
-    """Prepare keyword arguments for the streaming dataset factory."""
+    """Prepare keyword arguments for the streaming dataset factory.
 
+    Args:
+        dataset_cfg: Split-specific dataset configuration extracted from the job
+            configuration.
+        dataset_split_remote: Optional remote split name used by streaming
+            backends.
+
+    Returns:
+        A :class:`DatasetFactoryConfig` containing sanitized keyword arguments.
+    """
     valid_params = {
         *inspect.signature(StreamingTextDataset).parameters,
         *inspect.signature(StreamingDataset).parameters,
@@ -136,8 +164,20 @@ def create_streaming_dataset(
     batch_size: int,
     split: str,
 ) -> StatefulStreamingTextDataset:
-    """Instantiate the stateful streaming dataset for the resolved stream subset."""
+    """Instantiate the streaming dataset for the resolved stream subset.
 
+    Args:
+        assignment: Stream assignment describing the subset for this rank.
+        tokenizer: Tokenizer used to encode the dataset samples.
+        dataset_config: Normalized dataset configuration containing keyword
+            arguments accepted by the streaming dataset.
+        batch_size: Local batch size for the current rank.
+        split: Dataset split name. Present for API consistency with future hooks.
+
+    Returns:
+        A :class:`StatefulStreamingTextDataset` configured for the rank's subset.
+    """
+    del split  # split is reserved for future streaming dataset hooks
     hf_tokenizer = getattr(tokenizer, "tokenizer", tokenizer)
     return StatefulStreamingTextDataset(
         tokenizer=hf_tokenizer,
@@ -147,7 +187,7 @@ def create_streaming_dataset(
     )
 
 
-def build_dataset_for_rank(
+def build_dataset_for_rank(  # noqa: PLR0913
     normalized: NormalizedMosaicConfig,
     extraction: StreamExtractionResult,
     *,
@@ -156,8 +196,20 @@ def build_dataset_for_rank(
     tokenizer: BaseTokenizer,
     split: str,
 ) -> tuple[StatefulStreamingTextDataset, StreamAssignment]:
-    """Create a dataset for the current rank from normalized configuration."""
+    """Create a dataset for the current rank from normalized configuration.
 
+    Args:
+        normalized: Normalized Mosaic configuration for the job and split.
+        extraction: Stream extraction results derived from the dataset config.
+        dp_rank: Data parallel rank handled by the current process.
+        dp_world_size: Total number of data parallel ranks.
+        tokenizer: Tokenizer used to encode dataset samples.
+        split: Dataset split name.
+
+    Returns:
+        Tuple containing the instantiated dataset and the resolved stream
+        assignment.
+    """
     assignment = _select_stream_subset(
         extraction,
         dp_rank=dp_rank,
@@ -181,7 +233,7 @@ __all__ = [
     "DatasetFactoryConfig",
     "MosaicRuntimeConfig",
     "NormalizedMosaicConfig",
+    "_normalize_mosaic_dataloader_config",
     "build_dataset_for_rank",
     "create_streaming_dataset",
-    "_normalize_mosaic_dataloader_config",
 ]

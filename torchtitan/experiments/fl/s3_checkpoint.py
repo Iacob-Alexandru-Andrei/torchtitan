@@ -679,6 +679,7 @@ def get_s3_checkpoint_wrapper_factory(
 
     def factory(
         checkpointer: CheckpointManager,
+        *,
         enable_uploads: bool = True,
     ) -> S3CheckpointWrapper:
         return S3CheckpointWrapper(

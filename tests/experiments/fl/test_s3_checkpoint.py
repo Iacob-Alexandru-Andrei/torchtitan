@@ -10,7 +10,7 @@ import sys
 from dataclasses import dataclass, field
 
 from pathlib import Path
-from types import ModuleType, SimpleNamespace
+from types import SimpleNamespace
 
 import pytest
 
@@ -50,7 +50,7 @@ if _SPEC is None or _SPEC.loader is None:  # pragma: no cover - import guard
     raise RuntimeError(f"Unable to load s3_checkpoint module from {_S3_MODULE_PATH}")
 _MODULE = importlib.util.module_from_spec(_SPEC)
 _SPEC.loader.exec_module(_MODULE)
-s3_module = _MODULE  # type: ModuleType
+s3_module = _MODULE  # type: types.ModuleType
 
 
 class _FakeRemoteUploaderDownloader:
