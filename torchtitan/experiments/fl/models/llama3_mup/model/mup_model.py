@@ -8,7 +8,8 @@
 """Model components for Llama-3 MuP."""
 
 from collections.abc import Iterator
-from typing import Any, cast
+from dataclasses import dataclass
+from typing import Any, Protocol, cast, runtime_checkable
 
 import torch
 from torch import nn
@@ -24,6 +25,30 @@ from torchtitan.protocols.train_spec import ModelProtocol
 
 from .mup_args import TransformerModelArgs
 
+
+@dataclass(frozen=True)
+class MuPOptimizerOverride:
+    """MuP-specific optimizer adjustments returned by compatible models."""
+
+    param_groups: list[dict[str, Any]] | None
+    """Optional custom parameter groups to hand to the optimizer constructor."""
+
+    config_updates: dict[str, Any]
+    """Keyword overrides to apply when building the optimizer configuration."""
+
+
+@runtime_checkable
+class SupportsMuPOptimizerOverrides(Protocol):
+    """Protocol for models exposing MuP optimizer override information."""
+
+    def build_mup_optimizer_overrides(
+        self,
+        *,
+        lr: float,
+        eps: float,
+        weight_decay: float,
+    ) -> MuPOptimizerOverride | None:
+        """Return MuP-aware optimizer overrides, if any."""
 
 class Attention(BaseAttention):
     """Multi-head attention layer with MuP-specific weight initialization."""
@@ -324,24 +349,20 @@ class Transformer(nn.Module, ModelProtocol):
             )
         return width_lr_scaling, depth_lr_scaling
 
-    def _maybe_adjust_optimizer_eps(
+    def _resolve_optimizer_eps(
         self,
-        optimizer_config: dict[str, Any],
+        eps: float,
         *,
         width_lr_scaling: float,
-    ) -> None:
-        """Adjust optimizer epsilon when CompleteP epsilon scaling is enabled."""
+    ) -> float:
+        """Return MuP-adjusted epsilon when CompleteP scaling is enabled."""
         if not self.mup_config.completep_eps_scaling_enabled:
-            return
+            return eps
 
         depth_eps_scaling = self.mup_config.completep_depth_multiplier ** (
             -1.0 * self.mup_config.completep_depth_alpha_exp
         )
-        optimizer_config["eps"] = (
-            optimizer_config.get("eps", 1e-8)
-            * width_lr_scaling
-            * depth_eps_scaling
-        )
+        return eps * width_lr_scaling * depth_eps_scaling
 
     def _build_param_groups(
         self,
@@ -375,50 +396,70 @@ class Transformer(nn.Module, ModelProtocol):
 
         return [group for group in param_groups if group["params"]]
 
-    def get_optimizer_param_groups(
-        self, optimizer_config: dict[str, Any]
-    ) -> tuple[Iterator[Parameter] | list[dict[str, Any]], dict[str, Any]]:
-        """Get optimizer parameter groups with MuP-specific learning rates.
+    def build_mup_optimizer_overrides(
+        self,
+        *,
+        lr: float,
+        eps: float,
+        weight_decay: float,
+    ) -> MuPOptimizerOverride | None:
+        """Compute MuP optimizer overrides without mutating caller state."""
 
-        Args:
-            optimizer_config: Base optimizer configuration dictionary.
-
-        Returns:
-            Tuple containing either an iterator of parameters (when MuP is disabled)
-            or a list of parameter groups with custom learning rates (when MuP is enabled),
-            along with the updated optimizer config.
-        """
         if not (
             self.mup_config.mup_enabled
             and not self.mup_config.mup_disable_hidden_lr_scaling
         ):
-            return (
-                self.parameters(),
-                optimizer_config,
-            )
+            return None
 
         param_entries = self._iter_trainable_params()
         buckets = self._bucketize_parameters(param_entries)
         self._validate_bucket_counts(len(param_entries), buckets)
 
-        base_lr = optimizer_config["lr"]
-        weight_decay = optimizer_config.get("weight_decay", 0.0)
-
         width_lr_scaling, depth_lr_scaling = self._compute_lr_scaling()
-        self._maybe_adjust_optimizer_eps(
-            optimizer_config,
+        adjusted_eps = self._resolve_optimizer_eps(
+            eps,
             width_lr_scaling=width_lr_scaling,
         )
 
         param_groups = self._build_param_groups(
             buckets,
-            base_lr=base_lr,
+            base_lr=lr,
             weight_decay=weight_decay,
             width_lr_scaling=width_lr_scaling,
             depth_lr_scaling=depth_lr_scaling,
         )
 
-        return param_groups, optimizer_config
+        config_updates: dict[str, Any] = {}
+        if adjusted_eps != eps:
+            config_updates["eps"] = adjusted_eps
+
+        return MuPOptimizerOverride(
+            param_groups=param_groups or None,
+            config_updates=config_updates,
+        )
+
+    def get_optimizer_param_groups(
+        self, optimizer_config: dict[str, Any]
+    ) -> tuple[Iterator[Parameter] | list[dict[str, Any]], dict[str, Any]]:
+        """Get optimizer parameter groups with MuP-specific learning rates."""
+
+        overrides = self.build_mup_optimizer_overrides(
+            lr=optimizer_config["lr"],
+            eps=optimizer_config.get("eps", 1e-8),
+            weight_decay=optimizer_config.get("weight_decay", 0.0),
+        )
+
+        if overrides is None:
+            return self.parameters(), optimizer_config
+
+        updated_config = dict(optimizer_config)
+        updated_config.update(overrides.config_updates)
+
+        if overrides.param_groups is None:
+            return self.parameters(), updated_config
+
+        return overrides.param_groups, updated_config
+
     def forward(
         self,
         tokens: torch.Tensor,
