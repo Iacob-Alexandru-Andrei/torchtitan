@@ -6,6 +6,7 @@ from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, TYPE_CHECKING
+from urllib.parse import urljoin
 
 from torchtitan.tools.logging import logger
 
@@ -54,7 +55,9 @@ def _join_remote_path(root: str | None, path: str | None) -> str | None:
     if root is None:
         return path
     if _is_uri(root):
-        return f"{root.rstrip('/')}/{path.lstrip('/')}"
+        normalized_root = root.rstrip("/") + "/"
+        normalized_path = path.lstrip("/")
+        return urljoin(normalized_root, normalized_path)
     return "/".join(part.strip("/") for part in (root, path) if part)
 
 
@@ -76,6 +79,11 @@ def _flatten_stream_configs(streams_cfg: Any) -> dict[str, dict[str, Any]]:
 
     flattened: dict[str, dict[str, Any]] = {}
 
+    def _collect_sequence(items: Sequence[Any], key_prefix: str | None = None) -> None:
+        for index, item in enumerate(items):
+            child_key = f"{key_prefix}_{index}" if key_prefix else None
+            _collect(item, child_key)
+
     def _collect(config: Any, parent_key: str | None = None) -> None:
         if isinstance(config, Mapping):
             if "remote" in config or "local" in config:
@@ -87,15 +95,13 @@ def _flatten_stream_configs(streams_cfg: Any) -> dict[str, dict[str, Any]]:
             for key, value in config.items():
                 if key == "client_streams":
                     if isinstance(value, Sequence) and not isinstance(value, (str, bytes)):
-                        for idx, item in enumerate(value):
-                            _collect(item, f"{key}_{idx}")
+                        _collect_sequence(value, key)
                     else:
                         _collect(value, key)
                 else:
                     _collect(value, key)
         elif isinstance(config, (list, tuple)):
-            for item in config:
-                _collect(item)
+            _collect_sequence(config)
 
     _collect(streams_cfg)
     return flattened

@@ -4,13 +4,16 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import torch
 from torchdata.stateful_dataloader import StatefulDataLoader
 
 from torchtitan.components.dataloader import BaseDataLoader
 from torchtitan.tools.logging import logger
+
+if TYPE_CHECKING:
+    from torchtitan.experiments.fl.metrics import PureUnigramCrossEntropy
 
 try:
     from llmfoundry.data.text_data import StreamingTextDataset
@@ -61,6 +64,7 @@ class ParallelDataLoaderRequest:
     runtime: "MosaicRuntimeConfig"
     collate_fn: Any | None = None
     group_key: str | None = None
+    unigram_metric: "PureUnigramCrossEntropy" | None = None
 
 
 class MosaicParallelAwareDataloader(StatefulDataLoader, BaseDataLoader):
@@ -87,7 +91,7 @@ class MosaicParallelAwareDataloader(StatefulDataLoader, BaseDataLoader):
         )
         self._rank_id = f"dp_rank_{request.dp_rank}"
         self.unigram_group_key = request.group_key
-        self.unigram_metric = None
+        self.unigram_metric = request.unigram_metric
 
     def state_dict(self) -> dict[str, Any]:
         """Save dataloader state for checkpointing."""

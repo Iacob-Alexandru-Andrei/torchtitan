@@ -95,10 +95,9 @@ def _build_mosaic_dataloader(
         runtime=normalized.runtime,
         collate_fn=unigram_setup.collate_fn,
         group_key=unigram_setup.group_key,
+        unigram_metric=unigram_setup.metric,
     )
-    dataloader = MosaicParallelAwareDataloader(dataset, loader_request)
-    dataloader.unigram_metric = unigram_setup.metric  # type: ignore[attr-defined]
-    return dataloader
+    return MosaicParallelAwareDataloader(dataset, loader_request)
 
 
 def build_mosaic_dataloader(

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import ast
 import json
 import os
 import posixpath
@@ -267,7 +266,22 @@ def _load_stream_unigram_counts(
         try:
             token_id = int(key)
         except (ValueError, TypeError):
-            token_id = int(ast.literal_eval(key))
+            try:
+                parsed_key = json.loads(key)
+            except (json.JSONDecodeError, TypeError) as exc:
+                msg = f"Unigram file contains non-numeric token identifier: {key!r}"
+                raise ValueError(msg) from exc
+
+            if isinstance(parsed_key, float):
+                if not parsed_key.is_integer():
+                    msg = f"Unigram file contains non-integral token identifier: {parsed_key!r}"
+                    raise ValueError(msg)
+                token_id = int(parsed_key)
+            elif isinstance(parsed_key, int):
+                token_id = parsed_key
+            else:
+                msg = f"Unigram file contains unsupported token identifier type: {type(parsed_key)!r}"
+                raise ValueError(msg)
 
         freq = int(value[0]) if isinstance(value, (list, tuple)) else int(value)
         counts[token_id] += freq
@@ -281,7 +295,10 @@ def _build_unigram_metric_for_group(
     if not context.config.enable or not context.streams:
         return None
 
-    _ = context.tokenizer  # Tokenizer is unused; kept for API compatibility.
+    # The `tokenizer` attribute is currently unused in this function, but is retained in the context
+    # for API compatibility with other components that may expect it, and for potential future use.
+    # Do not remove without verifying downstream dependencies.
+    _ = context.tokenizer
 
     aggregate_counts: Counter = Counter()
     for stream in context.streams:
