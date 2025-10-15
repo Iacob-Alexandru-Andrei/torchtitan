@@ -27,20 +27,14 @@ import os
 
 import torch
 
-from torchtitan.experiments.fl.components import build_metrics_processor
 from torchtitan.experiments.fl.configs import MosaicConfigManager
-from torchtitan.experiments.fl.dataloader.dataloader import build_mosaic_dataloader
-from torchtitan.experiments.fl.dataloader.tokenizer import build_mosaic_tokenizer
 from torchtitan.experiments.fl.ft_override import configure_desloc
-from torchtitan.experiments.fl.models.utils import (
-    MosaicSpecOverrides,
-    ensure_mosaic_spec,
-)
 from torchtitan.experiments.fl.s3_checkpoint import (
     get_s3_checkpoint_wrapper_factory,
     S3CheckpointWrapper,
     setup_s3_checkpointing,
 )
+from torchtitan.protocols.train_spec import get_train_spec
 from torchtitan.tools.logging import init_logger, logger
 from torchtitan.train import Trainer
 
@@ -75,20 +69,24 @@ def main() -> None:  # noqa: C901, PLR0912, PLR0915
         job_config.s3_checkpoint.resume_from_run_step = resume_from_run_step  # type: ignore[attr-defined]
         logger.info(f"Will resume training from run step: {resume_from_run_step}")
 
-    # If the user has requested a specific mosaic spec (e.g. "mosaic_llama3"),
-    # it will have been registered already and get_train_spec will find it.
-    # Otherwise, we are in the generic case, where we take a standard model
-    # and wrap it with mosaic components.
-    if not job_config.model.name.startswith("mosaic_"):
-        mosaic_spec_name = ensure_mosaic_spec(
-            job_config.model.name,
-            overrides=MosaicSpecOverrides(
-                dataloader=build_mosaic_dataloader,
-                tokenizer=build_mosaic_tokenizer,
-                metrics_processor=build_metrics_processor,
-            ),
+    model_spec_name = job_config.model.name
+    if not model_spec_name.startswith("mosaic_"):
+        raise ValueError(
+            "TorchTitan FL training expects a Mosaic-enabled TrainSpec. "
+            f"Received job_config.model.name='{model_spec_name}'. "
+            "Import the desired Mosaic experiment module (e.g. "
+            "torchtitan.experiments.fl.models.mosaic_llama3) before launching "
+            "training to register the spec."
         )
-        job_config.model.name = mosaic_spec_name
+
+    try:
+        get_train_spec(model_spec_name)
+    except ValueError as exc:
+        raise ValueError(
+            "The requested Mosaic TrainSpec is not registered: "
+            f"'{model_spec_name}'. Ensure its module has been imported prior to "
+            "launching training."
+        ) from exc
 
     # Launch the trainer
     trainer: Trainer | None = None
