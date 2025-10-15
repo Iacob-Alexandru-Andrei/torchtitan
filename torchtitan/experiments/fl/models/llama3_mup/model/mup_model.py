@@ -459,6 +459,7 @@ class Transformer(nn.Module, ModelProtocol):
             return self.parameters(), updated_config
 
         return overrides.param_groups, updated_config
+
     def forward(
         self,
         tokens: torch.Tensor,

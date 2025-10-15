@@ -61,6 +61,15 @@ class TestMuPLlamaModel(unittest.TestCase):
         )
         self.model = Transformer(self.model_args)
 
+    def _get_expected_mup_eps(self, base_eps: float) -> float:
+        """Calculate the expected epsilon after MuP scaling."""
+
+        expected_eps = base_eps * (1 / self.mup_config["mup_width_multiplier"])
+        expected_eps *= self.mup_config["completep_depth_multiplier"] ** (
+            -1.0 * self.mup_config["completep_depth_alpha_exp"]
+        )
+        return expected_eps
+
     def test_model_initialization(self) -> None:
         """Ensure peri-norm layers and embedding norms are constructed."""
         assert isinstance(self.model, Transformer)
@@ -97,10 +106,7 @@ class TestMuPLlamaModel(unittest.TestCase):
         assert len(overrides.param_groups) > 1
         self.assertIn("eps", overrides.config_updates)
 
-        expected_eps = base_eps * (1 / self.mup_config["mup_width_multiplier"])
-        expected_eps *= self.mup_config["completep_depth_multiplier"] ** (
-            -1.0 * self.mup_config["completep_depth_alpha_exp"]
-        )
+        expected_eps = self._get_expected_mup_eps(base_eps)
         self.assertAlmostEqual(overrides.config_updates["eps"], expected_eps, places=12)
 
     def test_optimizer_overrides_disabled_when_hidden_scaling_off(self) -> None:
@@ -140,10 +146,7 @@ class TestMuPLlamaModel(unittest.TestCase):
         assert config.eps == 1e-8
         assert len(optimizer.param_groups) > 1
 
-        expected_eps = 1e-8 * (1 / self.mup_config["mup_width_multiplier"])
-        expected_eps *= self.mup_config["completep_depth_multiplier"] ** (
-            -1.0 * self.mup_config["completep_depth_alpha_exp"]
-        )
+        expected_eps = self._get_expected_mup_eps(1e-8)
         self.assertAlmostEqual(optimizer.defaults["eps"], expected_eps, places=12)
 
     def test_mosaic_builder_desloc_requires_ft(self) -> None:

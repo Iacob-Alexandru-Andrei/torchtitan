@@ -146,7 +146,7 @@ def _apply_mup_overrides(
     config: MosaicOptimizerConfig,
     param_groups: list[dict[str, Any]] | None,
 ) -> tuple[MosaicOptimizerConfig, list[dict[str, Any]] | None]:
-    """Inject MuP-aware overrides when the first model part exposes them."""
+    """Inject MuP-aware overrides from the first model part that provides them."""
 
     if param_groups is not None:
         return config, param_groups
