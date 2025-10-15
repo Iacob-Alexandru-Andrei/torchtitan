@@ -821,7 +821,7 @@ class MosaicJobConfig(JobConfig):
     def __post_init__(self) -> None:  # noqa: D401
         """Ensure nested Mosaic sections are always typed dataclasses."""
 
-        super_obj = super(MosaicJobConfig, self)
+        super_obj = super()
         if hasattr(super_obj, "__post_init__"):
             super_obj.__post_init__()  # type: ignore[misc]
 

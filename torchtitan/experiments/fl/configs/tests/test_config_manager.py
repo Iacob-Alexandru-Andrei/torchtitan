@@ -46,8 +46,6 @@ def teardown_module() -> None:
         sys.modules.pop("torchtitan.experiments.fl", None)
 
 
-
-
 def test_parse_args_produces_typed_dataclasses() -> None:
     """Parsing CLI args should return a config with typed nested sections."""
 
