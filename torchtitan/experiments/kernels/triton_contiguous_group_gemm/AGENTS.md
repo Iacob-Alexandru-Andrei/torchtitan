@@ -67,8 +67,8 @@ cg_backward.py→[verify_cg_gemm_backward((M_total=1024,N=512,K=512,num_experts=
 ## DEPENDENCY_PATTERNS
 
 ### EDGE_PATTERNS
-Call: 28 edges
 Contains: 13 edges
+Call: 28 edges
 
 ### CROSS_CLUSTER_FLOW
 TESTS→UTILITY_LAYER: 12

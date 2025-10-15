@@ -8,8 +8,10 @@
 
 from __future__ import annotations
 
+import warnings
 from collections.abc import Callable
 from dataclasses import dataclass, replace
+from functools import partial
 from typing import cast
 
 from torchtitan.experiments.fl.components import build_metrics_processor
@@ -17,16 +19,12 @@ from torchtitan.experiments.fl.dataloader.dataloader import build_mosaic_dataloa
 from torchtitan.experiments.fl.dataloader.tokenizer import build_mosaic_tokenizer
 from torchtitan.protocols.train_spec import (
     DataLoaderBuilder,
-    get_train_spec,
     MetricsProcessorBuilder,
     OptimizersBuilder,
-    register_train_spec,
     TokenizerBuilder,
     TrainSpec,
-    update_train_spec,
     ValidatorBuilder,
 )
-from torchtitan.tools.logging import logger
 
 
 PostTransform = Callable[[TrainSpec, TrainSpec], TrainSpec]
@@ -45,7 +43,7 @@ class MosaicSpecOverrides:
     post_transform: PostTransform | None = None
 
 
-def _build_mosaic_spec(
+def build_mosaic_spec(
     base_spec: TrainSpec,
     *,
     spec_name: str,
@@ -53,7 +51,9 @@ def _build_mosaic_spec(
 ) -> TrainSpec:
     overrides = overrides or MosaicSpecOverrides()
 
-    dataloader_builder = overrides.dataloader or build_mosaic_dataloader
+    dataloader_builder = overrides.dataloader or partial(
+        build_mosaic_dataloader,
+    )
     tokenizer_builder = overrides.tokenizer or cast(
         "TokenizerBuilder", build_mosaic_tokenizer
     )
@@ -87,47 +87,26 @@ def ensure_mosaic_spec(
     spec_name: str | None = None,
     overrides: MosaicSpecOverrides | None = None,
 ) -> str:
-    """Ensure that a Mosaic-wrapped train spec is registered.
-
-    Args:
-        base_spec_name: Name of the base train spec to wrap.
-        spec_name: Optional name for the Mosaic spec (defaults to ``mosaic_<base>``).
-        overrides: Collection of optional overrides (builders or transforms) to
-            customize the Mosaic spec.
-
-    Returns:
-        The name of the Mosaic-enabled train spec.
-    """
-    base_spec = get_train_spec(base_spec_name)
-    mosaic_spec_name = spec_name or f"mosaic_{base_spec.name}"
-
-    mosaic_spec = _build_mosaic_spec(
-        base_spec,
-        spec_name=mosaic_spec_name,
-        overrides=overrides,
+    """Deprecated wrapper around :class:`MosaicTrainSpecAdapter` registration."""
+    warnings.warn(
+        "ensure_mosaic_spec is deprecated; use MosaicTrainSpecAdapter instead.",
+        DeprecationWarning,
+        stacklevel=2,
     )
 
-    try:
-        existing_spec = get_train_spec(mosaic_spec_name)
-    except ValueError:
-        register_train_spec(mosaic_spec)
-        logger.info(f"Registered new TrainSpec: {mosaic_spec_name}")
-    else:
-        if existing_spec != mosaic_spec:
-            try:
-                update_train_spec(mosaic_spec)
-            except ValueError:
-                register_train_spec(mosaic_spec)
-                logger.info(
-                    "Registered new TrainSpec after import-time registration: %s",
-                    mosaic_spec_name,
-                )
-            else:
-                logger.info(f"Updated TrainSpec: {mosaic_spec_name}")
-        else:
-            logger.info(f"TrainSpec {mosaic_spec_name} already registered, reusing it")
+    from .mosaic_adapter import MosaicTrainSpecAdapter
 
-    return mosaic_spec_name
+    adapter = MosaicTrainSpecAdapter(
+        base_spec_name,
+        spec_name=spec_name,
+        overrides=overrides,
+    )
+    return adapter.register().name
 
 
-__all__ = ["ensure_mosaic_spec"]
+__all__ = [
+    "MosaicSpecOverrides",
+    "PostTransform",
+    "build_mosaic_spec",
+    "ensure_mosaic_spec",
+]

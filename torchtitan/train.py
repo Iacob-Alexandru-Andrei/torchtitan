@@ -33,13 +33,6 @@ from torchtitan.tools.profiling import (
     maybe_enable_profiling,
 )
 
-try:
-    from torchtitan.experiments.fl.metrics import update_unigram_metrics
-except ImportError:  # pragma: no cover - optional dependency
-
-    def update_unigram_metrics(labels: torch.Tensor) -> None:  # type: ignore[arg-type]
-        return
-
 
 class Trainer(torch.distributed.checkpoint.stateful.Stateful):
     # core configs
@@ -524,11 +517,15 @@ class Trainer(torch.distributed.checkpoint.stateful.Stateful):
         parallel_dims = self.parallel_dims
 
         accumulated_losses = []
+        unigram_updater = getattr(self.metrics_processor, "update_unigram_metrics", None)
+        if not callable(unigram_updater):
+            unigram_updater = None
         # If data runs out during gradient accumulation, that
         # entire step will not be executed.
         for _microbatch in range(self.gradient_accumulation_steps):
             input_dict, labels = next(data_iterator)
-            update_unigram_metrics(labels)
+            if unigram_updater is not None:
+                unigram_updater(labels)
             loss = self.forward_backward_step(input_dict, labels)
             accumulated_losses.append(loss.detach())
 

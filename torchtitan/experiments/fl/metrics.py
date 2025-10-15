@@ -39,6 +39,7 @@ if TYPE_CHECKING:
         BetasMonitorConfig,
         HyperparameterSwitchConfig,
         LRMonitorConfig,
+        MetricsConfig,
         OptimizerMonitorConfig,
         VSMonitorConfig,
     )
@@ -155,46 +156,111 @@ class PureUnigramCrossEntropy(Metric):
         return self.sum_loss / total_items
 
 
-_UNIGRAM_METRICS: list[PureUnigramCrossEntropy] = []
+class UnigramMetricHandle:
+    """Handle returned when registering a unigram metric with a manager."""
+
+    def __init__(self, manager: "UnigramMetricManager", metric: PureUnigramCrossEntropy) -> None:
+        self._manager = manager
+        self.metric = metric
+        self._active = True
+
+    def close(self) -> None:
+        """Unregister the associated metric from the manager."""
+        if not self._active:
+            return
+        self._manager.unregister(self.metric)
+        self._active = False
+
+    def __enter__(self) -> "UnigramMetricHandle":
+        return self
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        traceback: Any,
+    ) -> bool:
+        self.close()
+        # Do not suppress exceptions.
+        return False
 
 
-def add_unigram_metric(metric: PureUnigramCrossEntropy) -> None:
-    """Track a unigram cross-entropy metric for logging."""
-    _UNIGRAM_METRICS.append(metric)
+class UnigramMetricManager:
+    """Track and aggregate unigram cross-entropy metrics for a training run."""
 
+    def __init__(self) -> None:
+        self._metrics: list[PureUnigramCrossEntropy] = []
 
-def collect_unigram_metrics(*, reset: bool = True) -> tuple[float, int]:
-    """Return the local summed loss and token count for unigram metrics."""
-    total_loss = 0.0
-    total_items = 0
+    def register(
+        self, metric: PureUnigramCrossEntropy, group_key: str | None = None
+    ) -> UnigramMetricHandle:
+        """Register a metric and return a handle that can be closed to unregister it."""
 
-    for metric in _UNIGRAM_METRICS:
-        items = int(metric.total_items.item())
-        if items == 0:
-            continue
-        loss_value = float(metric.sum_loss.item())
-        total_loss += loss_value
-        total_items += items
+        del group_key  # group key is currently informational only
+        self._metrics.append(metric)
+        return UnigramMetricHandle(self, metric)
+
+    def unregister(self, metric: PureUnigramCrossEntropy) -> None:
+        """Remove a metric from the registry if present."""
+
+        with contextlib.suppress(ValueError):
+            self._metrics.remove(metric)
+
+    def collect(self, *, reset: bool = True) -> tuple[float, int]:
+        """Return the total accumulated loss and token count across all metrics."""
+
+        total_loss = 0.0
+        total_items = 0
+        for metric in self._metrics:
+            items = int(metric.total_items.item())
+            if items > 0:
+                total_loss += float(metric.sum_loss.item())
+                total_items += items
+
         if reset:
+            for metric in self._metrics:
+                metric.sum_loss.zero_()
+                metric.total_items.zero_()
+
+        return total_loss, total_items
+
+    def reset(self) -> None:
+        """Zero out the accumulators for all registered metrics."""
+
+        for metric in self._metrics:
             metric.sum_loss.zero_()
             metric.total_items.zero_()
 
-    return total_loss, total_items
+    def update(self, labels: Tensor) -> None:
+        """Update all registered metrics with a batch of labels."""
+
+        if not self._metrics:
+            return
+        for metric in self._metrics:
+            metric.update({}, labels)
+
+    def clear(self) -> None:
+        """Remove all registered metrics."""
+
+        self._metrics.clear()
+
+    def has_metrics(self) -> bool:
+        """Return ``True`` if any metrics are currently registered."""
+
+        return bool(self._metrics)
 
 
-def reset_unigram_metrics() -> None:
-    """Reset tracked unigram loss accumulators to zero."""
-    for metric in _UNIGRAM_METRICS:
-        metric.sum_loss.zero_()
-        metric.total_items.zero_()
+_UNIGRAM_MANAGER_ATTR = "_fl_unigram_manager"
 
 
-def update_unigram_metrics(labels: Tensor) -> None:
-    """Update registered unigram metrics with the latest batch labels."""
-    if not _UNIGRAM_METRICS:
-        return
-    for metric in _UNIGRAM_METRICS:
-        metric.update({}, labels)
+def get_or_create_unigram_manager(job_config: Any) -> UnigramMetricManager:
+    """Retrieve or initialize the unigram metric manager stored on a job config."""
+
+    manager = getattr(job_config, _UNIGRAM_MANAGER_ATTR, None)
+    if manager is None:
+        manager = UnigramMetricManager()
+        setattr(job_config, _UNIGRAM_MANAGER_ATTR, manager)
+    return manager
 
 
 def compute_skewness(value: torch.Tensor) -> torch.Tensor:
@@ -1070,31 +1136,97 @@ class HyperparameterSwitchCallback(Callback):
 class FLMetricsProcessor(MetricsProcessor):
     """Extension of MetricsProcessor that wires the FL callback stack."""
 
-    def __init__(self, *args: Any, **kwargs: Any) -> None:
-        super().__init__(*args, **kwargs)
+    def __init__(
+        self,
+        job_config: Any,
+        parallel_dims: Any,
+        metrics_config: "MetricsConfig" | None = None,
+        *,
+        unigram_manager: UnigramMetricManager | None = None,
+        callbacks: Sequence[Callback] | None = None,
+        tag: str | None = None,
+    ) -> None:
+        if metrics_config is None:
+            metrics_config = job_config.fl_metrics
 
-        # Get metrics config from fl_metrics field
-        fl_metrics_config = self.job_config.fl_metrics
+        super().__init__(job_config, parallel_dims, tag)
 
-        optimizer_config = fl_metrics_config.optimizer_monitor
-        activation_config = fl_metrics_config.activation_monitor
-        lr_config = fl_metrics_config.lr_monitor
-        betas_config = fl_metrics_config.betas_monitor
-        vs_config = fl_metrics_config.vs_monitor
-        hyper_switch_config = fl_metrics_config.hyperparameter_switch
+        assert metrics_config is not None
+        self.metrics_config = metrics_config
+        self.unigram_metrics = unigram_manager or UnigramMetricManager()
 
-        self.callbacks: list[Callback] = []
+        self.optimizer_monitor: OptimizerMonitor | None = None
+        self.activation_monitor: ActivationMonitor | None = None
+        self.lr_monitor: LRMonitor | None = None
+        self.betas_monitor: BetasMonitor | None = None
+        self.vs_monitor: VSMonitor | None = None
+        self.hyperparameter_switch: HyperparameterSwitchCallback | None = None
 
-        self.optimizer_monitor = self._init_optimizer_monitor(optimizer_config)
-        self.activation_monitor = self._init_activation_monitor(activation_config)
-        self.lr_monitor = self._init_lr_monitor(lr_config)
-        self.betas_monitor = self._init_betas_monitor(betas_config)
-        self.vs_monitor = self._init_vs_monitor(vs_config)
-        self.hyperparameter_switch = self._init_hyperparameter_switch(
-            hyper_switch_config
-        )
+        if callbacks is None:
+            self.callbacks = self._build_callbacks_from_config(metrics_config)
+        else:
+            self.callbacks = list(callbacks)
+            self._assign_known_callbacks(self.callbacks)
 
         self._callbacks_setup_done = False
+
+    def _build_callbacks_from_config(
+        self, metrics_config: "MetricsConfig"
+    ) -> list[Callback]:
+        callbacks: list[Callback] = []
+
+        self.optimizer_monitor = self._init_optimizer_monitor(
+            metrics_config.optimizer_monitor
+        )
+        if self.optimizer_monitor is not None:
+            callbacks.append(self.optimizer_monitor)
+
+        self.activation_monitor = self._init_activation_monitor(
+            metrics_config.activation_monitor
+        )
+        if self.activation_monitor is not None:
+            callbacks.append(self.activation_monitor)
+
+        self.lr_monitor = self._init_lr_monitor(metrics_config.lr_monitor)
+        if self.lr_monitor is not None:
+            callbacks.append(self.lr_monitor)
+
+        self.betas_monitor = self._init_betas_monitor(metrics_config.betas_monitor)
+        if self.betas_monitor is not None:
+            callbacks.append(self.betas_monitor)
+
+        self.vs_monitor = self._init_vs_monitor(metrics_config.vs_monitor)
+        if self.vs_monitor is not None:
+            callbacks.append(self.vs_monitor)
+
+        self.hyperparameter_switch = self._init_hyperparameter_switch(
+            metrics_config.hyperparameter_switch
+        )
+        if self.hyperparameter_switch is not None:
+            callbacks.append(self.hyperparameter_switch)
+
+        return callbacks
+
+    def _assign_known_callbacks(self, callbacks: Sequence[Callback]) -> None:
+        self.optimizer_monitor = next(
+            (cb for cb in callbacks if isinstance(cb, OptimizerMonitor)), None
+        )
+        self.activation_monitor = next(
+            (cb for cb in callbacks if isinstance(cb, ActivationMonitor)), None
+        )
+        self.lr_monitor = next(
+            (cb for cb in callbacks if isinstance(cb, LRMonitor)), None
+        )
+        self.betas_monitor = next(
+            (cb for cb in callbacks if isinstance(cb, BetasMonitor)), None
+        )
+        self.vs_monitor = next(
+            (cb for cb in callbacks if isinstance(cb, VSMonitor)), None
+        )
+        self.hyperparameter_switch = next(
+            (cb for cb in callbacks if isinstance(cb, HyperparameterSwitchCallback)),
+            None,
+        )
 
     def _init_optimizer_monitor(
         self, optimizer_config: OptimizerMonitorConfig
@@ -1106,7 +1238,6 @@ class FLMetricsProcessor(MetricsProcessor):
             only_global=optimizer_config.only_global,
             log_optimizer_metrics=optimizer_config.log_metrics,
         )
-        self.callbacks.append(monitor)
         return monitor
 
     def _init_activation_monitor(
@@ -1127,7 +1258,6 @@ class FLMetricsProcessor(MetricsProcessor):
             gradient_accumulation_steps=activation_config.gradient_accumulation_steps,
             enabled_metrics=activation_config.enabled_metrics,
         )
-        self.callbacks.append(monitor)
         return monitor
 
     def _init_lr_monitor(self, lr_config: LRMonitorConfig) -> LRMonitor | None:
@@ -1137,7 +1267,6 @@ class FLMetricsProcessor(MetricsProcessor):
             interval=lr_config.interval,
             enabled=lr_config.enabled,
         )
-        self.callbacks.append(monitor)
         return monitor
 
     def _init_betas_monitor(
@@ -1149,7 +1278,6 @@ class FLMetricsProcessor(MetricsProcessor):
             interval=betas_config.interval,
             enabled=betas_config.enabled,
         )
-        self.callbacks.append(monitor)
         return monitor
 
     def _init_vs_monitor(self, vs_config: VSMonitorConfig) -> VSMonitor | None:
@@ -1159,7 +1287,6 @@ class FLMetricsProcessor(MetricsProcessor):
             interval=vs_config.interval,
             enabled=vs_config.enabled,
         )
-        self.callbacks.append(monitor)
         return monitor
 
     def _init_hyperparameter_switch(
@@ -1186,7 +1313,6 @@ class FLMetricsProcessor(MetricsProcessor):
         switch_callback = HyperparameterSwitchCallback(params)
         if not switch_callback.enabled:
             return None
-        self.callbacks.append(switch_callback)
         return switch_callback
 
     def should_log(self, step: int) -> bool:
@@ -1204,9 +1330,9 @@ class FLMetricsProcessor(MetricsProcessor):
         return base_decision
 
     def _build_unigram_payload(self, mesh: DeviceMesh | None) -> dict[str, float]:
-        local_loss, local_items = collect_unigram_metrics(reset=False)
+        local_loss, local_items = self.unigram_metrics.collect(reset=False)
         if local_items == 0:
-            reset_unigram_metrics()
+            self.unigram_metrics.reset()
             return {"pure_unigram_cross_entropy": 0.0}
 
         device = torch.device("cpu")
@@ -1227,7 +1353,7 @@ class FLMetricsProcessor(MetricsProcessor):
 
         global_loss = float(loss_tensor)
         global_items = float(items_tensor)
-        reset_unigram_metrics()
+        self.unigram_metrics.reset()
 
         if global_items <= 0:
             return {"pure_unigram_cross_entropy": 0.0}
@@ -1236,6 +1362,13 @@ class FLMetricsProcessor(MetricsProcessor):
             "pure_unigram_cross_entropy": global_loss / global_items,
             "pure_unigram_cross_entropy/token_count": global_items,
         }
+
+    def update_unigram_metrics(self, labels: Tensor) -> None:
+        """Update tracked unigram metrics with the latest batch labels."""
+
+        if not self.unigram_metrics.has_metrics():
+            return
+        self.unigram_metrics.update(labels)
 
     def _ensure_callbacks_setup(self) -> None:
         if self._callbacks_setup_done:
