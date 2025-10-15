@@ -17,7 +17,6 @@ from typing import cast
 from torchtitan.experiments.fl.components import build_metrics_processor
 from torchtitan.experiments.fl.dataloader.dataloader import build_mosaic_dataloader
 from torchtitan.experiments.fl.dataloader.tokenizer import build_mosaic_tokenizer
-from torchtitan.experiments.fl.metrics import add_unigram_metric
 from torchtitan.protocols.train_spec import (
     DataLoaderBuilder,
     MetricsProcessorBuilder,
@@ -54,7 +53,6 @@ def build_mosaic_spec(
 
     dataloader_builder = overrides.dataloader or partial(
         build_mosaic_dataloader,
-        register_unigram_metric=add_unigram_metric,
     )
     tokenizer_builder = overrides.tokenizer or cast(
         "TokenizerBuilder", build_mosaic_tokenizer
@@ -83,7 +81,6 @@ def build_mosaic_spec(
     return mosaic_spec
 
 
-
 def ensure_mosaic_spec(
     base_spec_name: str,
     *,
@@ -91,7 +88,6 @@ def ensure_mosaic_spec(
     overrides: MosaicSpecOverrides | None = None,
 ) -> str:
     """Deprecated wrapper around :class:`MosaicTrainSpecAdapter` registration."""
-
     warnings.warn(
         "ensure_mosaic_spec is deprecated; use MosaicTrainSpecAdapter instead.",
         DeprecationWarning,
