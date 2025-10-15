@@ -13,8 +13,7 @@ import math
 from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from enum import Enum
-from types import TracebackType
-from typing import Any, TYPE_CHECKING
+from typing import Any, Self, TYPE_CHECKING
 
 import torch
 from torch import Tensor
@@ -31,6 +30,7 @@ from torchtitan.experiments.fl.callbacks import (
 
 if TYPE_CHECKING:
     from collections.abc import Callable
+    from types import TracebackType
 
     from torch.distributed.device_mesh import DeviceMesh
     from torch.optim import Optimizer
@@ -160,7 +160,9 @@ class PureUnigramCrossEntropy(Metric):
 class UnigramMetricHandle:
     """Handle returned when registering a unigram metric with a manager."""
 
-    def __init__(self, manager: "UnigramMetricManager", metric: PureUnigramCrossEntropy) -> None:
+    def __init__(
+        self, manager: UnigramMetricManager, metric: PureUnigramCrossEntropy
+    ) -> None:
         self._manager = manager
         self.metric = metric
         self._active = True
@@ -172,9 +174,8 @@ class UnigramMetricHandle:
         self._manager.unregister(self.metric)
         self._active = False
 
-    def __enter__(self) -> "UnigramMetricHandle":
+    def __enter__(self) -> Self:
         """Return this handle to support context manager usage."""
-
         return self
 
     def __exit__(
@@ -184,7 +185,6 @@ class UnigramMetricHandle:
         traceback: TracebackType | None,
     ) -> bool:
         """Close the metric handle upon exiting the context manager."""
-
         self.close()
         # Do not suppress exceptions.
         return False
@@ -200,20 +200,17 @@ class UnigramMetricManager:
         self, metric: PureUnigramCrossEntropy, group_key: str | None = None
     ) -> UnigramMetricHandle:
         """Register a metric and return a handle that can be closed to unregister it."""
-
         del group_key  # group key is currently informational only
         self._metrics.append(metric)
         return UnigramMetricHandle(self, metric)
 
     def unregister(self, metric: PureUnigramCrossEntropy) -> None:
         """Remove a metric from the registry if present."""
-
         with contextlib.suppress(ValueError):
             self._metrics.remove(metric)
 
     def collect(self, *, reset: bool = True) -> tuple[float, int]:
         """Return the total accumulated loss and token count across all metrics."""
-
         total_loss = 0.0
         total_items = 0
         for metric in self._metrics:
@@ -231,14 +228,12 @@ class UnigramMetricManager:
 
     def reset(self) -> None:
         """Zero out the accumulators for all registered metrics."""
-
         for metric in self._metrics:
             metric.sum_loss.zero_()
             metric.total_items.zero_()
 
     def update(self, labels: Tensor) -> None:
         """Update all registered metrics with a batch of labels."""
-
         if not self._metrics:
             return
         for metric in self._metrics:
@@ -246,19 +241,18 @@ class UnigramMetricManager:
 
     def clear(self) -> None:
         """Remove all registered metrics."""
-
         self._metrics.clear()
 
     def has_metrics(self) -> bool:
         """Return ``True`` if any metrics are currently registered."""
-
         return bool(self._metrics)
+
+
 _UNIGRAM_MANAGER_ATTR = "_fl_unigram_manager"
 
 
 def get_or_create_unigram_manager(job_config: Any) -> UnigramMetricManager:
     """Retrieve or initialize the unigram metric manager stored on a job config."""
-
     manager = getattr(job_config, _UNIGRAM_MANAGER_ATTR, None)
     if manager is None:
         manager = UnigramMetricManager()
@@ -1143,7 +1137,7 @@ class FLMetricsProcessor(MetricsProcessor):
         self,
         job_config: Any,
         parallel_dims: Any,
-        metrics_config: "MetricsConfig" | None = None,
+        metrics_config: MetricsConfig | None = None,
         *,
         unigram_manager: UnigramMetricManager | None = None,
         callbacks: Sequence[Callback] | None = None,
@@ -1174,7 +1168,7 @@ class FLMetricsProcessor(MetricsProcessor):
         self._callbacks_setup_done = False
 
     def _build_callbacks_from_config(
-        self, metrics_config: "MetricsConfig"
+        self, metrics_config: MetricsConfig
     ) -> list[Callback]:
         callbacks: list[Callback] = []
 
@@ -1236,12 +1230,11 @@ class FLMetricsProcessor(MetricsProcessor):
     ) -> OptimizerMonitor | None:
         if optimizer_config.interval <= 0:
             return None
-        monitor = OptimizerMonitor(
+        return OptimizerMonitor(
             interval=optimizer_config.interval,
             only_global=optimizer_config.only_global,
             log_optimizer_metrics=optimizer_config.log_metrics,
         )
-        return monitor
 
     def _init_activation_monitor(
         self, activation_config: ActivationMonitorConfig
@@ -1251,7 +1244,7 @@ class FLMetricsProcessor(MetricsProcessor):
         )
         if not activation_enabled:
             return None
-        monitor = ActivationMonitor(
+        return ActivationMonitor(
             interval=activation_config.interval,
             ignore_module_types=(
                 activation_config.ignore_module_types
@@ -1261,36 +1254,32 @@ class FLMetricsProcessor(MetricsProcessor):
             gradient_accumulation_steps=activation_config.gradient_accumulation_steps,
             enabled_metrics=activation_config.enabled_metrics,
         )
-        return monitor
 
     def _init_lr_monitor(self, lr_config: LRMonitorConfig) -> LRMonitor | None:
         if not (lr_config.enabled and lr_config.interval > 0):
             return None
-        monitor = LRMonitor(
+        return LRMonitor(
             interval=lr_config.interval,
             enabled=lr_config.enabled,
         )
-        return monitor
 
     def _init_betas_monitor(
         self, betas_config: BetasMonitorConfig
     ) -> BetasMonitor | None:
         if not (betas_config.enabled and betas_config.interval > 0):
             return None
-        monitor = BetasMonitor(
+        return BetasMonitor(
             interval=betas_config.interval,
             enabled=betas_config.enabled,
         )
-        return monitor
 
     def _init_vs_monitor(self, vs_config: VSMonitorConfig) -> VSMonitor | None:
         if not (vs_config.enabled and vs_config.interval > 0):
             return None
-        monitor = VSMonitor(
+        return VSMonitor(
             interval=vs_config.interval,
             enabled=vs_config.enabled,
         )
-        return monitor
 
     def _init_hyperparameter_switch(
         self, hyper_switch_config: HyperparameterSwitchConfig
@@ -1368,7 +1357,6 @@ class FLMetricsProcessor(MetricsProcessor):
 
     def update_unigram_metrics(self, labels: Tensor) -> None:
         """Update tracked unigram metrics with the latest batch labels."""
-
         if not self.unigram_metrics.has_metrics():
             return
         self.unigram_metrics.update(labels)

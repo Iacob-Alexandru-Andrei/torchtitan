@@ -65,8 +65,8 @@ __init__.py→[get_train_spec(void)] args.py→[] model.py→[apply_rotary_emb((
 ## DEPENDENCY_PATTERNS
 
 ### EDGE_PATTERNS
-Call: 8 edges
 Contains: 16 edges
+Call: 8 edges
 
 ### CROSS_CLUSTER_FLOW
 

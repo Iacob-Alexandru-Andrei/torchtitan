@@ -61,9 +61,7 @@ def _linear_warmup_stable_decay(
     elif params.lr_decay_type == "cosine":
         decay_value = 0.5 * (1.0 + math.cos(math.pi * progress))
     else:
-        msg = (
-            f"Unknown decay type '{params.lr_decay_type}'. Expected linear, sqrt, or cosine."
-        )
+        msg = f"Unknown decay type '{params.lr_decay_type}'. Expected linear, sqrt, or cosine."
         raise ValueError(msg)
 
     return params.min_lr_factor + (1 - params.min_lr_factor) * decay_value

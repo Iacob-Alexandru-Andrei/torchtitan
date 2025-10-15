@@ -517,7 +517,9 @@ class Trainer(torch.distributed.checkpoint.stateful.Stateful):
         parallel_dims = self.parallel_dims
 
         accumulated_losses = []
-        unigram_updater = getattr(self.metrics_processor, "update_unigram_metrics", None)
+        unigram_updater = getattr(
+            self.metrics_processor, "update_unigram_metrics", None
+        )
         if not callable(unigram_updater):
             unigram_updater = None
         # If data runs out during gradient accumulation, that

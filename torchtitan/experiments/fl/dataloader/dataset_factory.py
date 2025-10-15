@@ -1,10 +1,16 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+# All rights reserved.
+#
+# This source code is licensed under the BSD-style license found in the
+# LICENSE file in the root directory of this source tree.
+
 """Dataset factory helpers for Mosaic streaming dataloaders."""
 
 from __future__ import annotations
 
 import inspect
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import Any, TYPE_CHECKING
 
 try:
     from llmfoundry.data.text_data import StreamingTextDataset
@@ -18,11 +24,12 @@ except ImportError as exc:  # pragma: no cover - optional dependency
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
+
     from torchtitan.components.tokenizer import BaseTokenizer
     from torchtitan.experiments.fl.configs.config import MosaicJobConfig
 
 from .parallel import StatefulStreamingTextDataset
-from .streams import StreamAssignment, StreamExtractionResult, _select_stream_subset
+from .streams import _select_stream_subset, StreamAssignment, StreamExtractionResult
 
 
 @dataclass(frozen=True)
@@ -52,7 +59,9 @@ class DatasetFactoryConfig:
     kwargs: dict[str, Any]
 
 
-def _select_dataset_config(dataset_cfg: Mapping[str, Any] | None, split: str) -> dict[str, Any]:
+def _select_dataset_config(
+    dataset_cfg: Mapping[str, Any] | None, split: str
+) -> dict[str, Any]:
     """Extract configuration for the requested split.
 
     Args:

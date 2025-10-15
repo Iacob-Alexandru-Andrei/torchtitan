@@ -185,13 +185,17 @@ from torchtitan.experiments.fl.dataloader.dataset_factory import (  # noqa: E402
     _prepare_dataset_kwargs,
     create_streaming_dataset,
 )
-from torchtitan.experiments.fl.dataloader.parallel import titan_collate_fn  # noqa: E402  # isort: skip
+from torchtitan.experiments.fl.dataloader.parallel import (
+    titan_collate_fn,
+)  # noqa: E402  # isort: skip
 from torchtitan.experiments.fl.dataloader.streams import (  # noqa: E402  # isort: skip
     StreamAssignment,
     StreamExtractionResult,
     _select_stream_subset,
 )
-from torchtitan.experiments.fl.dataloader.unigram import setup_unigram_metric  # noqa: E402  # isort: skip
+from torchtitan.experiments.fl.dataloader.unigram import (
+    setup_unigram_metric,
+)  # noqa: E402  # isort: skip
 
 
 class _DummyTokenizerForTest:
@@ -389,7 +393,9 @@ def test_maybe_download_unigram_file_skips_non_s3(tmp_path: pathlib.Path) -> Non
     )
 
 
-def test_maybe_download_unigram_file_handles_missing_remote(monkeypatch: pytest.MonkeyPatch, tmp_path: pathlib.Path) -> None:
+def test_maybe_download_unigram_file_handles_missing_remote(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: pathlib.Path
+) -> None:
     from torchtitan.experiments.fl.dataloader import unigram as unigram_mod
 
     job_config = _make_job_config()

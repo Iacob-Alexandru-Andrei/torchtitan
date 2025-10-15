@@ -27,7 +27,9 @@ register_train_spec(_get_llama3_mup_spec())
 
 # Import Mosaic adapters after the base spec is registered to avoid circular dependency issues.
 from .mosaic_llama3 import get_train_spec as get_mosaic_llama3_train_spec  # noqa: E402
-from .mosaic_llama3_mup import get_train_spec as get_mosaic_llama3_mup_train_spec  # noqa: E402
+from .mosaic_llama3_mup import (  # noqa: E402
+    get_train_spec as get_mosaic_llama3_mup_train_spec,
+)
 
 
 # Register the Mosaic Llama3 spec

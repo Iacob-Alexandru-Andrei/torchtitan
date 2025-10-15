@@ -8,9 +8,9 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
-from typing import Any, Callable, Literal, TypeVar
+from typing import Any, Literal, TypeVar
 
 from torchtitan.components.ft.config import FaultTolerance as FTFaultTolerance
 
@@ -51,7 +51,6 @@ def _coerce_nested_dataclass(
     Raises:
         TypeError: If ``value`` cannot be converted into ``cls``.
     """
-
     if isinstance(value, cls):
         return value
     if value is None:
@@ -550,7 +549,6 @@ class MetricsConfig:
     @classmethod
     def from_dict(cls, data: Mapping[str, Any]) -> MetricsConfig:
         """Instantiate the metrics configuration from a mapping payload."""
-
         optimizer_monitor_dict = _as_dict(data.get("optimizer_monitor"))
         activation_monitor_dict = _as_dict(data.get("activation_monitor"))
         lr_monitor_dict = _as_dict(data.get("lr_monitor"))
@@ -818,9 +816,8 @@ class MosaicJobConfig(JobConfig):
         },
     )
 
-    def __post_init__(self) -> None:  # noqa: D401
+    def __post_init__(self) -> None:
         """Ensure nested Mosaic sections are always typed dataclasses."""
-
         super_obj = super()
         if hasattr(super_obj, "__post_init__"):
             super_obj.__post_init__()  # type: ignore[misc]
@@ -835,5 +832,3 @@ class MosaicJobConfig(JobConfig):
         self.s3_checkpoint = _coerce_nested_dataclass(
             self.s3_checkpoint, S3CheckpointingConfig
         )
-
-

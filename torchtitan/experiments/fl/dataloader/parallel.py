@@ -1,10 +1,16 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+# All rights reserved.
+#
+# This source code is licensed under the BSD-style license found in the
+# LICENSE file in the root directory of this source tree.
+
 """Parallel dataloader utilities tailored for Mosaic streaming datasets."""
 
 from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import Any, TYPE_CHECKING
 
 import torch
 from torchdata.stateful_dataloader import StatefulDataLoader
@@ -63,8 +69,12 @@ class StatefulStreamingTextDataset(StreamingTextDataset):
         Returns:
             Serialized dataset state, including the yielded sample count.
         """
-        effective_num_samples = num_samples if num_samples is not None else self._num_samples_yielded
-        parent_state = super().state_dict(num_samples=effective_num_samples, from_beginning=from_beginning)
+        effective_num_samples = (
+            num_samples if num_samples is not None else self._num_samples_yielded
+        )
+        parent_state = super().state_dict(
+            num_samples=effective_num_samples, from_beginning=from_beginning
+        )
         parent_state["_num_samples_yielded"] = self._num_samples_yielded
         return parent_state
 
@@ -111,7 +121,9 @@ class MosaicParallelAwareDataloader(StatefulDataLoader, BaseDataLoader):
     dp_world_size: int
     batch_size: int
 
-    def __init__(self, dataset: StatefulStreamingTextDataset, request: ParallelDataLoaderRequest) -> None:
+    def __init__(
+        self, dataset: StatefulStreamingTextDataset, request: ParallelDataLoaderRequest
+    ) -> None:
         runtime = request.runtime
         self.dp_world_size = request.dp_world_size
         self.dp_rank = request.dp_rank

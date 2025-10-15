@@ -1,3 +1,9 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+# All rights reserved.
+#
+# This source code is licensed under the BSD-style license found in the
+# LICENSE file in the root directory of this source tree.
+
 """Construction utilities for Mosaic-aware dataloaders used in FL experiments."""
 
 from __future__ import annotations
@@ -8,12 +14,16 @@ from typing import TYPE_CHECKING
 from torchtitan.experiments.fl.metrics import get_or_create_unigram_manager
 
 from .dataset_factory import (
+    _normalize_mosaic_dataloader_config,
+    build_dataset_for_rank,
     MosaicRuntimeConfig,
     NormalizedMosaicConfig,
-    build_dataset_for_rank,
-    _normalize_mosaic_dataloader_config,
 )
-from .parallel import MosaicParallelAwareDataloader, ParallelDataLoaderRequest, titan_collate_fn
+from .parallel import (
+    MosaicParallelAwareDataloader,
+    ParallelDataLoaderRequest,
+    titan_collate_fn,
+)
 from .streams import _extract_streams
 from .unigram import setup_unigram_metric
 
@@ -76,11 +86,15 @@ def _apply_split_overrides(
         num_workers=overrides.get("num_workers", runtime.num_workers),
         prefetch_factor=overrides.get("prefetch_factor", runtime.prefetch_factor),
         pin_memory=overrides.get("pin_memory", runtime.pin_memory),
-        persistent_workers=overrides.get("persistent_workers", runtime.persistent_workers),
+        persistent_workers=overrides.get(
+            "persistent_workers", runtime.persistent_workers
+        ),
         drop_last=overrides.get("drop_last", runtime.drop_last),
         batch_size=runtime.batch_size,
     )
-    return NormalizedMosaicConfig(dataset_config=normalized.dataset_config, runtime=updated_runtime)
+    return NormalizedMosaicConfig(
+        dataset_config=normalized.dataset_config, runtime=updated_runtime
+    )
 
 
 def _build_mosaic_dataloader(
@@ -103,7 +117,9 @@ def _build_mosaic_dataloader(
         split=request.split,
         default_drop_last=request.default_drop_last,
     )
-    normalized = _apply_split_overrides(normalized, job_config=request.job_config, split=request.split)
+    normalized = _apply_split_overrides(
+        normalized, job_config=request.job_config, split=request.split
+    )
 
     extraction = _extract_streams(dict(normalized.dataset_config))
     dataset, assignment = build_dataset_for_rank(
@@ -166,7 +182,9 @@ def build_mosaic_dataloader(
         split="train",
         default_drop_last=True,
     )
-    return _build_mosaic_dataloader(request, register_unigram_metric=register_unigram_metric)
+    return _build_mosaic_dataloader(
+        request, register_unigram_metric=register_unigram_metric
+    )
 
 
 def build_mosaic_validation_dataloader(  # noqa: PLR0913
@@ -200,7 +218,9 @@ def build_mosaic_validation_dataloader(  # noqa: PLR0913
         split="val",
         default_drop_last=False,
     )
-    return _build_mosaic_dataloader(request, register_unigram_metric=register_unigram_metric)
+    return _build_mosaic_dataloader(
+        request, register_unigram_metric=register_unigram_metric
+    )
 
 
 __all__ = [

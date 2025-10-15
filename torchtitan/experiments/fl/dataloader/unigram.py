@@ -1,3 +1,9 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+# All rights reserved.
+#
+# This source code is licensed under the BSD-style license found in the
+# LICENSE file in the root directory of this source tree.
+
 """Helpers for configuring unigram-aware metrics in Mosaic dataloaders."""
 
 from __future__ import annotations
@@ -15,16 +21,23 @@ from urllib.parse import urlparse
 
 import torch
 
-from torchtitan.experiments.fl.s3_checkpoint import create_remote_up_down, download_file_from_s3
+from torchtitan.experiments.fl.s3_checkpoint import (
+    create_remote_up_down,
+    download_file_from_s3,
+)
 from torchtitan.tools.logging import logger
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from torchtitan.components.tokenizer import BaseTokenizer
-    from torchtitan.experiments.fl.configs.config import MosaicJobConfig, UnigramMetricConfig
-    from torchtitan.experiments.fl.s3_checkpoint import RemoteUploaderDownloader
     from streaming import Stream
+
+    from torchtitan.components.tokenizer import BaseTokenizer
+    from torchtitan.experiments.fl.configs.config import (
+        MosaicJobConfig,
+        UnigramMetricConfig,
+    )
+    from torchtitan.experiments.fl.s3_checkpoint import RemoteUploaderDownloader
     from .streams import StreamAssignment
 else:
     from collections import abc as _abc
@@ -32,10 +45,10 @@ else:
     Callable = _abc.Callable
 
 from torchtitan.experiments.fl.metrics import (
+    get_or_create_unigram_manager,
     PureUnigramCrossEntropy,
     UnigramMetricHandle,
     UnigramMetricManager,
-    get_or_create_unigram_manager,
 )
 
 
@@ -157,7 +170,9 @@ def _create_remote_unigram_client(
         num_attempts=config.num_attempts,
         client_config=config.client_config,
     )
-    remote_up_down._run_name = "unigram_metrics"  # pyright: ignore[reportAttributeAccessIssue]
+    remote_up_down._run_name = (
+        "unigram_metrics"  # pyright: ignore[reportAttributeAccessIssue]
+    )
     return remote_up_down
 
 
@@ -183,7 +198,9 @@ def _maybe_download_unigram_file(
     if not remote_uri or not config.download_missing:
         return False
 
-    resolved = _resolve_unigram_remote_path(remote_uri, root_remote=root_remote, split=split)
+    resolved = _resolve_unigram_remote_path(
+        remote_uri, root_remote=root_remote, split=split
+    )
     if resolved is None:
         return False
 
@@ -244,7 +261,9 @@ def _resolve_unigram_cache_path(
     stream_split = getattr(stream, "split", None) or dataset_split or default_split
 
     if not local_root:
-        message = f"Stream '{getattr(stream, 'name', 'unknown')}' is missing a local path."
+        message = (
+            f"Stream '{getattr(stream, 'name', 'unknown')}' is missing a local path."
+        )
         raise RuntimeError(message)
 
     local_root_path = Path(local_root)
@@ -425,7 +444,9 @@ def _build_unigram_metric_for_group(
 
     total = probabilities.sum().item()
     if total <= 0:
-        message = f"Aggregate unigram counts sum to zero for group '{context.group_key}'."
+        message = (
+            f"Aggregate unigram counts sum to zero for group '{context.group_key}'."
+        )
         raise RuntimeError(message)
 
     probabilities /= total

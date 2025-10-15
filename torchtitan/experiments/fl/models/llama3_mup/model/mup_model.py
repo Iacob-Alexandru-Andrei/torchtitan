@@ -9,7 +9,7 @@
 
 from collections.abc import Iterator
 from dataclasses import dataclass
-from typing import Any, Protocol, cast, runtime_checkable
+from typing import Any, cast, Protocol, runtime_checkable
 
 import torch
 from torch import nn
@@ -49,6 +49,7 @@ class SupportsMuPOptimizerOverrides(Protocol):
         weight_decay: float,
     ) -> MuPOptimizerOverride | None:
         """Return MuP-aware optimizer overrides, if any."""
+
 
 class Attention(BaseAttention):
     """Multi-head attention layer with MuP-specific weight initialization."""
@@ -404,7 +405,6 @@ class Transformer(nn.Module, ModelProtocol):
         weight_decay: float,
     ) -> MuPOptimizerOverride | None:
         """Compute MuP optimizer overrides without mutating caller state."""
-
         if not (
             self.mup_config.mup_enabled
             and not self.mup_config.mup_disable_hidden_lr_scaling
@@ -442,7 +442,6 @@ class Transformer(nn.Module, ModelProtocol):
         self, optimizer_config: dict[str, Any]
     ) -> tuple[Iterator[Parameter] | list[dict[str, Any]], dict[str, Any]]:
         """Get optimizer parameter groups with MuP-specific learning rates."""
-
         overrides = self.build_mup_optimizer_overrides(
             lr=optimizer_config["lr"],
             eps=optimizer_config.get("eps", 1e-8),

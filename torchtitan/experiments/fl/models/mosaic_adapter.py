@@ -10,13 +10,13 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from torchtitan.experiments.fl.models.utils import (
-    MosaicSpecOverrides,
     build_mosaic_spec,
+    MosaicSpecOverrides,
 )
 from torchtitan.protocols.train_spec import (
-    TrainSpec,
     get_train_spec,
     register_train_spec,
+    TrainSpec,
     update_train_spec,
 )
 from torchtitan.tools.logging import logger
@@ -39,7 +39,6 @@ class MosaicTrainSpecAdapter:
 
     def build(self) -> TrainSpec:
         """Construct (but do not register) the Mosaic-enabled TrainSpec."""
-
         base_spec = get_train_spec(self.base_spec_name)
         spec_name = self.spec_name or f"mosaic_{base_spec.name}"
         mosaic_spec = build_mosaic_spec(
@@ -52,7 +51,6 @@ class MosaicTrainSpecAdapter:
 
     def register(self) -> TrainSpec:
         """Register the Mosaic TrainSpec, updating an existing entry if needed."""
-
         spec = self._cached_spec or self.build()
 
         try:

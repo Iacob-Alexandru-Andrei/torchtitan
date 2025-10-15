@@ -1,3 +1,9 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+# All rights reserved.
+#
+# This source code is licensed under the BSD-style license found in the
+# LICENSE file in the root directory of this source tree.
+
 """Tests covering the Mosaic config manager integration."""
 
 from __future__ import annotations
@@ -25,7 +31,8 @@ CONFIG_SPEC = importlib.util.spec_from_file_location(
     REPO_ROOT / "torchtitan" / "experiments" / "fl" / "configs" / "config.py",
 )
 if CONFIG_SPEC is None or CONFIG_SPEC.loader is None:
-    raise RuntimeError("Failed to load Mosaic config module spec")
+    msg = "Failed to load Mosaic config module spec"
+    raise RuntimeError(msg)
 config_module = importlib.util.module_from_spec(CONFIG_SPEC)
 sys.modules[CONFIG_SPEC.name] = config_module
 CONFIG_SPEC.loader.exec_module(config_module)
@@ -41,9 +48,9 @@ _OVERRIDE_INTERVAL = 42
 _EXPECTED_NUM_WORKERS = 3
 _EXPECTED_OPT_INTERVAL = 7
 
+
 def teardown_module() -> None:
     """Restore the original FL module registration after tests complete."""
-
     if ORIGINAL_FL_MODULE is not None:
         sys.modules["torchtitan.experiments.fl"] = ORIGINAL_FL_MODULE
     else:
@@ -52,7 +59,6 @@ def teardown_module() -> None:
 
 def test_parse_args_produces_typed_dataclasses() -> None:
     """Parsing CLI args should return a config with typed nested sections."""
-
     manager = ConfigManager(MosaicJobConfig)
     config = manager.parse_args([])
 
@@ -65,7 +71,6 @@ def test_parse_args_produces_typed_dataclasses() -> None:
 
 def test_cli_overrides_nested_metrics_field() -> None:
     """CLI overrides should land on the nested metrics dataclass."""
-
     manager = ConfigManager(MosaicJobConfig)
     config = manager.parse_args(
         [f"--fl_metrics.optimizer_monitor.interval={_OVERRIDE_INTERVAL}"]
@@ -76,7 +81,6 @@ def test_cli_overrides_nested_metrics_field() -> None:
 
 def test_toml_invalid_metrics_payload_rejected(tmp_path: Path) -> None:
     """TOML payloads with unknown metrics keys should raise a ValueError."""
-
     config_path = tmp_path / "invalid.toml"
     config_path.write_text("[fl_metrics]\ninvalid = 1\n", encoding="utf-8")
 
@@ -87,7 +91,6 @@ def test_toml_invalid_metrics_payload_rejected(tmp_path: Path) -> None:
 
 def test_manual_init_coerces_nested_sections() -> None:
     """Direct MosaicJobConfig construction should coerce nested mappings."""
-
     job_config = MosaicJobConfig(
         mosaic_dataloader={"dataset": {}, "num_workers": _EXPECTED_NUM_WORKERS},
         mosaic_tokenizer={"name": "meta-llama/Llama-3.1-8B"},
@@ -111,7 +114,6 @@ def test_manual_init_coerces_nested_sections() -> None:
 
 def test_manual_init_invalid_section_type_raises() -> None:
     """Invalid nested section payloads should raise a ``TypeError``."""
-
     with pytest.raises(TypeError):
         MosaicJobConfig(mosaic_tokenizer="bad-tokenizer")  # type: ignore[arg-type]
 

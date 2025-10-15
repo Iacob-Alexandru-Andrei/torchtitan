@@ -40,9 +40,7 @@ if "llmfoundry" not in sys.modules:
 
     _llmfoundry_registry_utils = ModuleType("llmfoundry.utils.registry_utils")
 
-    def construct_from_registry(
-        *_args: Any, **_kwargs: Any
-    ) -> Any:  # pragma: no cover - stub
+    def construct_from_registry(*_args: Any, **_kwargs: Any) -> Any:  # pragma: no cover - stub
         tokenizer = SimpleNamespace(eos_token="</s>", model_max_length=0)
         return tokenizer
 
@@ -131,8 +129,8 @@ if not hasattr(_schedules, "ScheduleZBVZeroBubble"):
     _schedules.ScheduleZBVZeroBubble = _ScheduleZBVZeroBubble
 
 from torchtitan.experiments.fl.models.utils import (
-    MosaicSpecOverrides,
     ensure_mosaic_spec,
+    MosaicSpecOverrides,
 )
 from torchtitan.protocols import train_spec as train_spec_module
 from torchtitan.protocols.train_spec import (
@@ -142,7 +140,7 @@ from torchtitan.protocols.train_spec import (
 )
 
 
-@dataclass(slots=True)
+@dataclass(slots=True, frozen=True)
 class _DummyModel:
     name: str = "dummy"
 
@@ -183,9 +181,7 @@ def test_ensure_mosaic_spec_is_idempotent_for_multiple_models() -> None:
 
     def _post_transform(base_spec: TrainSpec, mosaic_spec: TrainSpec) -> TrainSpec:
         model_args = {
-            name: SimpleNamespace(
-                **{**config.__dict__, "vocab_size": config.vocab_size + 5}
-            )
+            name: SimpleNamespace(**{**config.__dict__, "vocab_size": config.vocab_size + 5})
             for name, config in base_spec.model_args.items()
         }
         return replace(mosaic_spec, model_args=model_args)
@@ -321,10 +317,7 @@ def test_ensure_mosaic_spec_updates_existing_spec_with_new_overrides() -> None:
         assert updated_spec is not initial_spec
         assert updated_spec.build_optimizers_fn is not _dummy_builder
         assert updated_spec.build_validator_fn is _dummy_builder
-        assert (
-            updated_spec.model_args["cfg"].vocab_size
-            == base_spec.model_args["cfg"].vocab_size + 1
-        )
+        assert updated_spec.model_args["cfg"].vocab_size == base_spec.model_args["cfg"].vocab_size + 1
     finally:
         unregister_train_spec("mosaic_update")
         unregister_train_spec(base_spec.name)

@@ -58,7 +58,7 @@ ROOT: torchtitan/experiments/fl/tests/
 ### TESTS
 NODES:24 CALL_DEPTH:1
 
-test_unigram_metrics.py→[__init__((self,*args: object,**kwargs: object))[CTOR,DUNDER],add_state((self,name: str,default: torch.Tensor,dist_reduce_fx: str | None = None)),register_buffer((self,name: str,tensor: torch.Tensor)),__init__((self,*args: object,**kwargs: object))[CTOR,DUNDER],__init__((self,*args: object,**kwargs: object))[CTOR,DUNDER],get_peak_stats((self)),reset_peak_stats((self)),test_unigram_manager_aggregation_and_reset(void)[TEST],test_unigram_manager_teardown_removes_metric(void)[TEST],test_fl_metrics_processor_registers_expected_callbacks(void)[TEST]] 
+test_unigram_metrics.py→[__init__((self,*_args: object,**_kwargs: object))[CTOR,DUNDER],add_state((self,name: str,default: torch.Tensor,dist_reduce_fx: str | None = None,)),register_buffer((self,name: str,tensor: torch.Tensor)),__init__((self,*_args: object,**_kwargs: object))[CTOR,DUNDER],__init__((self,*_args: object,**_kwargs: object))[CTOR,DUNDER],get_peak_stats((self)),reset_peak_stats((self)),test_unigram_manager_aggregation_and_reset(void)[TEST],test_unigram_manager_teardown_removes_metric(void)[TEST],test_fl_metrics_processor_registers_expected_callbacks(void)[TEST]] 
 
 ## DEPENDENCY_PATTERNS
 

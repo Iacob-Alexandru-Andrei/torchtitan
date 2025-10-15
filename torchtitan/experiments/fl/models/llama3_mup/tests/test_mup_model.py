@@ -6,15 +6,18 @@
 
 """Unit tests covering the MuP-enabled LLaMA3 model variant."""
 
-from dataclasses import replace as dataclass_replace
 import math
 import unittest
+from dataclasses import replace as dataclass_replace
 
 import pytest
 import torch
 
 from torchtitan.distributed import ParallelDims
-from torchtitan.experiments.fl.configs.optimizers import DesLocConfig, MosaicOptimizerConfig
+from torchtitan.experiments.fl.configs.optimizers import (
+    DesLocConfig,
+    MosaicOptimizerConfig,
+)
 from torchtitan.experiments.fl.optimizer_builder import build_mosaic_optimizers
 
 try:  # pragma: no cover - optional dependencies may be unavailable in CI
@@ -66,7 +69,6 @@ class TestMuPLlamaModel(unittest.TestCase):
 
     def _get_expected_mup_eps(self, base_eps: float) -> float:
         """Calculate the expected epsilon after MuP scaling."""
-
         expected_eps = base_eps * (1 / self.mup_config["mup_width_multiplier"])
         expected_eps *= self.mup_config["completep_depth_multiplier"] ** (
             -1.0 * self.mup_config["completep_depth_alpha_exp"]
@@ -96,7 +98,6 @@ class TestMuPLlamaModel(unittest.TestCase):
 
     def test_optimizer_overrides_build_param_groups(self) -> None:
         """MuP override hook should return parameter groups and epsilon scaling."""
-
         base_eps = DEFAULT_EPS
         overrides = self.model.build_mup_optimizer_overrides(
             lr=0.01,
@@ -107,14 +108,15 @@ class TestMuPLlamaModel(unittest.TestCase):
         assert overrides is not None
         assert overrides.param_groups is not None
         assert len(overrides.param_groups) > 1
-        self.assertIn("eps", overrides.config_updates)
+        assert "eps" in overrides.config_updates
 
         expected_eps = self._get_expected_mup_eps(base_eps)
-        assert math.isclose(overrides.config_updates["eps"], expected_eps, rel_tol=0.0, abs_tol=1e-12)
+        assert math.isclose(
+            overrides.config_updates["eps"], expected_eps, rel_tol=0.0, abs_tol=1e-12
+        )
 
     def test_optimizer_overrides_disabled_when_hidden_scaling_off(self) -> None:
         """The override protocol should opt-out when hidden scaling is disabled."""
-
         disabled_args = dataclass_replace(
             self.model_args,
             mup_config={**self.mup_config, "mup_disable_hidden_lr_scaling": True},
@@ -130,7 +132,6 @@ class TestMuPLlamaModel(unittest.TestCase):
 
     def test_mosaic_builder_integrates_mup_overrides(self) -> None:
         """build_mosaic_optimizers should consume the MuP override protocol."""
-
         config = MosaicOptimizerConfig(
             name="AdamW",
             lr=0.01,
@@ -150,11 +151,12 @@ class TestMuPLlamaModel(unittest.TestCase):
         assert len(optimizer.param_groups) > 1
 
         expected_eps = self._get_expected_mup_eps(DEFAULT_EPS)
-        assert math.isclose(optimizer.defaults["eps"], expected_eps, rel_tol=0.0, abs_tol=1e-12)
+        assert math.isclose(
+            optimizer.defaults["eps"], expected_eps, rel_tol=0.0, abs_tol=1e-12
+        )
 
     def test_mosaic_builder_desloc_requires_ft(self) -> None:
         """DES-LOC validation should still trigger when overrides are present."""
-
         config = MosaicOptimizerConfig(
             name="AdamW",
             lr=0.01,
@@ -167,7 +169,7 @@ class TestMuPLlamaModel(unittest.TestCase):
         )
         dims = ParallelDims(1, -1, 1, 1, 1, 1, 1, world_size=1)
 
-        with self.assertRaisesRegex(ValueError, "DES-LOC requires TorchFT"):
+        with pytest.raises(ValueError, match="DES-LOC requires TorchFT"):
             build_mosaic_optimizers([self.model], config, dims)
 
 

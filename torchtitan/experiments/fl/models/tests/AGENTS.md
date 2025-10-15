@@ -58,7 +58,7 @@ ROOT: torchtitan/experiments/fl/models/tests/
 ### DATA_MODELS
 NODES:10 CALL_DEPTH:1
 
-test_mosaic_adapter.py→[_dummy_builder((*_args,**_kwargs))[HOT],tearDown((self)),test_build_uses_mosaic_name_by_default((self))[HOT,TEST],test_register_applies_builder_overrides((self))[HOT,TEST]] 
+test_mosaic_adapter.py→[_dummy_builder((*_args: object,**_kwargs: object))[HOT],tearDown((self)),test_build_uses_mosaic_name_by_default((self))[HOT,TEST],test_register_applies_builder_overrides((self))[HOT,TEST]] 
 
 ## DEPENDENCY_PATTERNS
 

@@ -9,7 +9,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import Any, TYPE_CHECKING
 
 from torchtitan.components.validate import Validator
 from torchtitan.experiments.fl.dataloader.dataloader import (

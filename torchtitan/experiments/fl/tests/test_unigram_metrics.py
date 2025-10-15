@@ -1,3 +1,9 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+# All rights reserved.
+#
+# This source code is licensed under the BSD-style license found in the
+# LICENSE file in the root directory of this source tree.
+
 """Tests for unigram metric plumbing in FL experiments."""
 
 from __future__ import annotations
@@ -66,14 +72,20 @@ _callbacks_stub.Callback = _StubCallback
 _callbacks_stub.CallbackSetupContext = _StubContext
 _callbacks_stub.CallbackStepContext = _StubContext
 _callbacks_stub.CallbackValidationContext = _StubContext
-sys.modules.setdefault("torchtitan.experiments", types.ModuleType("torchtitan.experiments"))
-sys.modules.setdefault("torchtitan.experiments.fl", types.ModuleType("torchtitan.experiments.fl"))
+sys.modules.setdefault(
+    "torchtitan.experiments", types.ModuleType("torchtitan.experiments")
+)
+sys.modules.setdefault(
+    "torchtitan.experiments.fl", types.ModuleType("torchtitan.experiments.fl")
+)
 sys.modules["torchtitan.experiments.fl.callbacks"] = _callbacks_stub
 
 _metrics_spec = importlib.util.spec_from_file_location(
     "torchtitan_experiments_fl_metrics", METRICS_PATH
 )
-if _metrics_spec is None or _metrics_spec.loader is None:  # pragma: no cover - sanity guard
+if (
+    _metrics_spec is None or _metrics_spec.loader is None
+):  # pragma: no cover - sanity guard
     message = f"Unable to load metrics module from {METRICS_PATH}"
     raise RuntimeError(message)
 _metrics_module = importlib.util.module_from_spec(_metrics_spec)

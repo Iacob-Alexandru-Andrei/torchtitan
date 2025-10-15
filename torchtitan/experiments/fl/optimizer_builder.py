@@ -8,7 +8,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
-from typing import TYPE_CHECKING, Any
+from typing import Any, TYPE_CHECKING
 
 import torch
 
@@ -46,6 +46,7 @@ if TYPE_CHECKING:
 
     from torchtitan.components.ft import FTManager
     from torchtitan.distributed import ParallelDims
+
 
 @dataclass(frozen=True)
 class OptimizerContainerRequest:
@@ -216,7 +217,9 @@ def _validate_optim_in_backward(request: OptimizerContainerRequest) -> None:
         raise NotImplementedError(msg)
 
 
-def _build_optimizer_container(request: OptimizerContainerRequest) -> OptimizersContainer:
+def _build_optimizer_container(
+    request: OptimizerContainerRequest,
+) -> OptimizersContainer:
     """Construct the appropriate optimizer container for the given request."""
     _validate_optim_in_backward(request)
 

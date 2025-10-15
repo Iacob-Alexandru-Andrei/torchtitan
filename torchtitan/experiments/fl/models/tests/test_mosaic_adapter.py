@@ -14,8 +14,8 @@ from tests.unit_tests import test_mosaic_spec_utils as _mosaic_spec_utils  # noq
 from torchtitan.experiments.fl.models.mosaic_adapter import MosaicTrainSpecAdapter
 from torchtitan.experiments.fl.models.utils import MosaicSpecOverrides
 from torchtitan.protocols.train_spec import (
-    TrainSpec,
     get_train_spec,
+    TrainSpec,
     unregister_train_spec,
 )
 
@@ -26,6 +26,7 @@ def _dummy_builder(*_args: object, **_kwargs: object) -> None:
 
 class MosaicTrainSpecAdapterTest(unittest.TestCase):
     """Validate deterministic registration through the adapter."""
+
     def tearDown(self) -> None:
         """Clean up any adapter-registered specs from the global registry."""
         unregister_train_spec("test_mosaic_llama3_adapter")

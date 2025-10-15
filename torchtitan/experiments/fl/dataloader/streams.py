@@ -1,3 +1,9 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+# All rights reserved.
+#
+# This source code is licensed under the BSD-style license found in the
+# LICENSE file in the root directory of this source tree.
+
 """Utilities for resolving Mosaic streaming datasets."""
 from __future__ import annotations
 
@@ -22,6 +28,7 @@ except ImportError as exc:  # pragma: no cover - optional dependency
 @dataclass(frozen=True)
 class StreamExtractionResult:
     """Container describing the resolved Mosaic streams and metadata."""
+
     streams: list[Stream] | None
     dataset_config: dict[str, Any]
     sampling_group_indices: list[list[int]] | None
@@ -32,6 +39,7 @@ class StreamExtractionResult:
 @dataclass(frozen=True)
 class StreamAssignment:
     """Stream subset assigned to the current rank after sampling-group selection."""
+
     streams: list[Stream] | None
     group_index: int | None
     dataset_root_remote: str | None
@@ -78,14 +86,18 @@ def _flatten_stream_configs(streams_cfg: Any) -> dict[str, dict[str, Any]]:
     def _collect(config: Any, parent_key: str | None = None) -> None:
         if isinstance(config, Mapping):
             if "remote" in config or "local" in config:
-                flattened_key = config.get("name") or parent_key or f"stream_{len(flattened)}"
+                flattened_key = (
+                    config.get("name") or parent_key or f"stream_{len(flattened)}"
+                )
                 flattened[flattened_key] = dict(config)
                 flattened[flattened_key].setdefault("name", flattened_key)
                 return
 
             for key, value in config.items():
                 if key == "client_streams":
-                    if isinstance(value, Sequence) and not isinstance(value, (str, bytes)):
+                    if isinstance(value, Sequence) and not isinstance(
+                        value, (str, bytes)
+                    ):
                         _collect_sequence(value, key)
                     else:
                         _collect(value, key)
@@ -294,11 +306,15 @@ def _materialize_streams(
     stream_names: list[str] = []
 
     for name, stream_cfg in flattened.items():
-        stream_kwargs = {key: value for key, value in dict(stream_cfg).items() if value is not None}
+        stream_kwargs = {
+            key: value for key, value in dict(stream_cfg).items() if value is not None
+        }
         stream_kwargs.pop("name", None)
 
         if "remote" in stream_kwargs:
-            stream_kwargs["remote"] = _join_remote_path(root_remote, stream_kwargs["remote"])
+            stream_kwargs["remote"] = _join_remote_path(
+                root_remote, stream_kwargs["remote"]
+            )
         elif root_remote is not None:
             logger.warning(
                 "Stream %s is missing a remote path; root_remote was provided.",
@@ -306,7 +322,9 @@ def _materialize_streams(
             )
 
         if "local" in stream_kwargs:
-            stream_kwargs["local"] = _join_local_path(root_local, stream_kwargs["local"])
+            stream_kwargs["local"] = _join_local_path(
+                root_local, stream_kwargs["local"]
+            )
         elif root_local is not None:
             logger.warning(
                 "Stream %s is missing a local path; root_local was provided.",
@@ -337,7 +355,9 @@ def _compute_group_indices(
     if not group_indices:
         return None
 
-    logger.info("Resolved %d sampling group(s) for grouped Mosaic streams.", len(group_indices))
+    logger.info(
+        "Resolved %d sampling group(s) for grouped Mosaic streams.", len(group_indices)
+    )
     for idx, indices in enumerate(group_indices):
         selected = [stream_names[i] for i in indices]
         logger.info("Group %d contains streams: %s", idx, selected)
@@ -367,7 +387,9 @@ def _extract_streams(dataset_cfg: dict[str, Any]) -> StreamExtractionResult:
     group_stream_names = None
 
     if _should_concat_sampling_groups(sampling_mode, sampling_groups_cfg):
-        flattened = _aggregate_sampling_groups(flattened, sampling_groups_cfg, sampling_groups_mode_raw)
+        flattened = _aggregate_sampling_groups(
+            flattened, sampling_groups_cfg, sampling_groups_mode_raw
+        )
     elif sampling_groups_cfg:
         group_stream_names = _resolve_group_stream_names(flattened, sampling_groups_cfg)
 

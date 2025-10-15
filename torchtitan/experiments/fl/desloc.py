@@ -10,10 +10,10 @@ from __future__ import annotations
 import logging
 import sys
 from contextlib import contextmanager
-from datetime import timedelta
 from dataclasses import dataclass
+from datetime import timedelta
 from types import ModuleType
-from typing import TYPE_CHECKING, Any
+from typing import Any, TYPE_CHECKING
 
 import torch
 from torch import nn
@@ -324,9 +324,7 @@ class DesLocController:
         self._pin_memory = config.pin_memory
         self._name_prefix = config.name_prefix
         self._raw_optimizer_sync_config = config.optimizer_sync_every
-        self._quorum_timeout = timedelta(
-            seconds=max(1, config.quorum_timeout_seconds)
-        )
+        self._quorum_timeout = timedelta(seconds=max(1, config.quorum_timeout_seconds))
 
         param_fragment_cfg = ParameterFragmentConfig(
             manager=config.manager,
@@ -380,9 +378,7 @@ class DesLocController:
         self, intervals: list[int], keys: list[str]
     ) -> list[int]:
         if len(intervals) != len(keys):
-            msg = (
-                "Length of optimizer_sync_every list does not match discovered optimizer states."
-            )
+            msg = "Length of optimizer_sync_every list does not match discovered optimizer states."
             raise ValueError(msg)
         normalized = [int(value) for value in intervals]
         for value in normalized:
@@ -447,9 +443,7 @@ class DesLocController:
         if not self._is_opt_init:
             self._lazy_init_optimizer_fragments()
 
-        ready_fragments = [
-            fragment for fragment in self._fragments if fragment.tick()
-        ]
+        ready_fragments = [fragment for fragment in self._fragments if fragment.tick()]
 
         if ready_fragments:
             self._sync(ready_fragments)

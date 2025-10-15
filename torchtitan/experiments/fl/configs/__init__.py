@@ -24,8 +24,7 @@ class MosaicConfigManager(ConfigManager):
 
     def parse_args(self, args: list[str] = sys.argv[1:]) -> MosaicJobConfig:
         """Return a type-stable Mosaic job config parsed from CLI arguments."""
-
-        return cast(MosaicJobConfig, super().parse_args(args))
+        return cast("MosaicJobConfig", super().parse_args(args))
 
 
 def load_mosaic_job_config(args: list[str] | None = None) -> MosaicJobConfig:
