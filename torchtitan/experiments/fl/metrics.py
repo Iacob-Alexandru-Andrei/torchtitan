@@ -213,16 +213,15 @@ class UnigramMetricManager:
         total_items = 0
         for metric in self._metrics:
             items = int(metric.total_items.item())
-            if items == 0:
-                if reset:
-                    metric.sum_loss.zero_()
-                    metric.total_items.zero_()
-                continue
-            total_loss += float(metric.sum_loss.item())
-            total_items += items
-            if reset:
+            if items > 0:
+                total_loss += float(metric.sum_loss.item())
+                total_items += items
+
+        if reset:
+            for metric in self._metrics:
                 metric.sum_loss.zero_()
                 metric.total_items.zero_()
+
         return total_loss, total_items
 
     def reset(self) -> None:
@@ -1141,14 +1140,22 @@ class FLMetricsProcessor(MetricsProcessor):
         self,
         job_config: Any,
         parallel_dims: Any,
-        metrics_config: "MetricsConfig",
+        metrics_config: "MetricsConfig" | None = None,
         *,
         unigram_manager: UnigramMetricManager | None = None,
         callbacks: Sequence[Callback] | None = None,
         tag: str | None = None,
     ) -> None:
+        if metrics_config is None:
+            from torchtitan.experiments.fl.configs.config import FLMetricsConfigEnvelope
+
+            envelope = FLMetricsConfigEnvelope.coerce(job_config.fl_metrics)
+            job_config.fl_metrics = envelope
+            metrics_config = envelope.unwrap()
+
         super().__init__(job_config, parallel_dims, tag)
 
+        assert metrics_config is not None
         self.metrics_config = metrics_config
         self.unigram_metrics = unigram_manager or UnigramMetricManager()
 
@@ -1217,7 +1224,9 @@ class FLMetricsProcessor(MetricsProcessor):
         self.betas_monitor = next(
             (cb for cb in callbacks if isinstance(cb, BetasMonitor)), None
         )
-        self.vs_monitor = next((cb for cb in callbacks if isinstance(cb, VSMonitor)), None)
+        self.vs_monitor = next(
+            (cb for cb in callbacks if isinstance(cb, VSMonitor)), None
+        )
         self.hyperparameter_switch = next(
             (cb for cb in callbacks if isinstance(cb, HyperparameterSwitchCallback)),
             None,

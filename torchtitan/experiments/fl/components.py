@@ -28,7 +28,12 @@ def build_metrics_processor(
     model_args: BaseModelArgs | None = None,  # noqa: ARG001
     tag: str | None = None,
 ) -> FLMetricsProcessor:
-    """Create a metrics processor for the FL experiment."""
+    """Create a metrics processor for the FL experiment.
+
+    Note: This function mutates ``job_config`` in-place by replacing
+    ``job_config.fl_metrics`` with an :class:`FLMetricsConfigEnvelope` and
+    attaching a :class:`UnigramMetricManager` instance for reuse.
+    """
     envelope = FLMetricsConfigEnvelope.coerce(job_config.fl_metrics)
     job_config.fl_metrics = envelope
     metrics_config = envelope.unwrap()

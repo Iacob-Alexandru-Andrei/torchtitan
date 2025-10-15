@@ -1086,7 +1086,7 @@ class MosaicParallelAwareDataloader(StatefulDataLoader, BaseDataLoader):
             drop_last=runtime.drop_last,
         )
         self._rank_id = f"dp_rank_{request.dp_rank}"
-        self.unigram_metric_handle = request.unigram_handle
+        self.unigram_metric_handle: UnigramMetricHandle | None = request.unigram_handle
         self.unigram_metric_group = request.group_key
 
     def state_dict(self) -> dict[str, Any]:
@@ -1112,6 +1112,13 @@ class MosaicParallelAwareDataloader(StatefulDataLoader, BaseDataLoader):
         ), "dp_degree is inconsistent before and after checkpoint, dataloader resharding is not supported yet."
         loader_state = state_dict[self._rank_id]
         super().load_state_dict(deepcopy(loader_state))
+
+    def close(self) -> None:
+        """Close the dataloader and release resources."""
+
+        if self.unigram_metric_handle is not None:
+            self.unigram_metric_handle.close()
+            self.unigram_metric_handle = None
 
 
 def titan_collate_fn(batch: list[Any]) -> tuple[dict[str, torch.Tensor], torch.Tensor]:
