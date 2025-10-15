@@ -34,7 +34,12 @@ if TYPE_CHECKING:
     from torchtitan.experiments.fl.configs.config import MosaicJobConfig, UnigramMetricConfig
     from torchtitan.experiments.fl.s3_checkpoint import RemoteUploaderDownloader
 
-from torchtitan.experiments.fl.metrics import PureUnigramCrossEntropy
+from torchtitan.experiments.fl.metrics import (
+    PureUnigramCrossEntropy,
+    UnigramMetricHandle,
+    UnigramMetricManager,
+    get_or_create_unigram_manager,
+)
 
 from .streams import StreamAssignment
 
@@ -58,7 +63,13 @@ class UnigramSetupResult:
 
     collate_fn: Callable
     group_key: str | None
-    metric: PureUnigramCrossEntropy | None
+    handle: UnigramMetricHandle | None = None
+
+    @property
+    def metric(self) -> PureUnigramCrossEntropy | None:
+        """Expose the underlying metric for compatibility with legacy call sites."""
+
+        return self.handle.metric if self.handle is not None else None
 
 
 def _resolve_unigram_remote_path(
@@ -353,11 +364,14 @@ def setup_unigram_metric(
     split: str,
     tokenizer: BaseTokenizer,
     collate_fn: Callable,
+    manager: UnigramMetricManager | None = None,
 ) -> UnigramSetupResult:
     """Build and return unigram metric wiring for the current stream subset."""
 
     if not job_config.unigram_metric.enable:
-        return UnigramSetupResult(collate_fn=collate_fn, group_key=None, metric=None)
+        return UnigramSetupResult(collate_fn=collate_fn, group_key=None)
+
+    unigram_manager = manager or get_or_create_unigram_manager(job_config)
 
     group_label = (
         f"group_{assignment.group_index}"
@@ -384,17 +398,18 @@ def setup_unigram_metric(
                 unigram_group_key,
                 exc,
             )
-            return UnigramSetupResult(collate_fn=collate_fn, group_key=None, metric=None)
+            return UnigramSetupResult(collate_fn=collate_fn, group_key=None)
         msg = f"Unable to construct unigram metric for {unigram_group_key}: {exc}"
         raise RuntimeError(msg) from exc
 
     if unigram_metric is None:
-        return UnigramSetupResult(collate_fn=collate_fn, group_key=None, metric=None)
+        return UnigramSetupResult(collate_fn=collate_fn, group_key=None)
 
+    handle = unigram_manager.register(unigram_metric, unigram_group_key)
     return UnigramSetupResult(
         collate_fn=collate_fn,
         group_key=unigram_group_key,
-        metric=unigram_metric,
+        handle=handle,
     )
 
 

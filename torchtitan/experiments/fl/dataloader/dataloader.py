@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Callable
 
+from torchtitan.experiments.fl.metrics import get_or_create_unigram_manager
+
 from .dataset_factory import (
     MosaicRuntimeConfig,
     NormalizedMosaicConfig,
@@ -59,7 +61,7 @@ def _apply_split_overrides(
 def _build_mosaic_dataloader(
     request: DataloaderBuildRequest,
     *,
-    register_unigram_metric: Callable[["PureUnigramCrossEntropy"], None] | None,
+    register_unigram_metric: Callable[["PureUnigramCrossEntropy"], None] | None = None,
 ) -> MosaicParallelAwareDataloader:
     normalized = _normalize_mosaic_dataloader_config(
         request.job_config,
@@ -78,16 +80,15 @@ def _build_mosaic_dataloader(
         split=request.split,
     )
 
+    unigram_manager = get_or_create_unigram_manager(request.job_config)
     unigram_setup = setup_unigram_metric(
         assignment,
         job_config=request.job_config,
         split=request.split,
         tokenizer=request.tokenizer,
         collate_fn=titan_collate_fn,
+        manager=unigram_manager,
     )
-
-    if unigram_setup.metric is not None and register_unigram_metric is not None:
-        register_unigram_metric(unigram_setup.metric)
 
     loader_request = ParallelDataLoaderRequest(
         dp_rank=request.dp_rank,
@@ -95,7 +96,7 @@ def _build_mosaic_dataloader(
         runtime=normalized.runtime,
         collate_fn=unigram_setup.collate_fn,
         group_key=unigram_setup.group_key,
-        unigram_metric=unigram_setup.metric,
+        unigram_handle=unigram_setup.handle,
     )
     return MosaicParallelAwareDataloader(dataset, loader_request)
 

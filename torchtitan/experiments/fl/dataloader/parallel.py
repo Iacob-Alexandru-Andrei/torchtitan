@@ -13,7 +13,7 @@ from torchtitan.components.dataloader import BaseDataLoader
 from torchtitan.tools.logging import logger
 
 if TYPE_CHECKING:
-    from torchtitan.experiments.fl.metrics import PureUnigramCrossEntropy
+    from torchtitan.experiments.fl.metrics import UnigramMetricHandle
 
 try:
     from llmfoundry.data.text_data import StreamingTextDataset
@@ -64,7 +64,7 @@ class ParallelDataLoaderRequest:
     runtime: "MosaicRuntimeConfig"
     collate_fn: Any | None = None
     group_key: str | None = None
-    unigram_metric: "PureUnigramCrossEntropy" | None = None
+    unigram_handle: "UnigramMetricHandle" | None = None
 
 
 class MosaicParallelAwareDataloader(StatefulDataLoader, BaseDataLoader):
@@ -91,7 +91,7 @@ class MosaicParallelAwareDataloader(StatefulDataLoader, BaseDataLoader):
         )
         self._rank_id = f"dp_rank_{request.dp_rank}"
         self.unigram_group_key = request.group_key
-        self.unigram_metric = request.unigram_metric
+        self.unigram_metric_handle = request.unigram_handle
 
     def state_dict(self) -> dict[str, Any]:
         """Save dataloader state for checkpointing."""
@@ -120,6 +120,13 @@ class MosaicParallelAwareDataloader(StatefulDataLoader, BaseDataLoader):
         ), "dp_degree is inconsistent before and after checkpoint, dataloader resharding is not supported yet."
         loader_state = state_dict[self._rank_id]
         super().load_state_dict(deepcopy(loader_state))
+
+    def close(self) -> None:
+        """Close the dataloader and release resources."""
+
+        if self.unigram_metric_handle is not None:
+            self.unigram_metric_handle.close()
+            self.unigram_metric_handle = None
 
 
 def titan_collate_fn(batch: list[Any]) -> tuple[dict[str, torch.Tensor], torch.Tensor]:
