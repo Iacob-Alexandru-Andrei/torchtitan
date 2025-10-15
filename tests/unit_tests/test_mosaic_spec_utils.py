@@ -142,7 +142,7 @@ from torchtitan.protocols.train_spec import (
 )
 
 
-@dataclass
+@dataclass(slots=True)
 class _DummyModel:
     name: str = "dummy"
 

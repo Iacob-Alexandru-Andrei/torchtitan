@@ -1,4 +1,4 @@
-"""Helpers for configuring unigram cross-entropy metrics."""
+"""Helpers for configuring unigram-aware metrics in Mosaic dataloaders."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ from collections import Counter
 from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 from urllib.parse import urlparse
 
 import torch
@@ -18,21 +18,18 @@ import torch
 from torchtitan.experiments.fl.s3_checkpoint import create_remote_up_down, download_file_from_s3
 from torchtitan.tools.logging import logger
 
-try:
-    from streaming import Stream
-except ImportError as exc:  # pragma: no cover - optional dependency
-    msg = (
-        "llm-foundry and streaming are required to build Mosaic dataloaders. "
-        "Please install llm-foundry, mosaicml-streaming, and composer to enable this integration."
-    )
-    raise RuntimeError(msg) from exc
-
 if TYPE_CHECKING:
     from collections.abc import Callable
 
     from torchtitan.components.tokenizer import BaseTokenizer
     from torchtitan.experiments.fl.configs.config import MosaicJobConfig, UnigramMetricConfig
     from torchtitan.experiments.fl.s3_checkpoint import RemoteUploaderDownloader
+    from streaming import Stream
+    from .streams import StreamAssignment
+else:
+    from collections import abc as _abc
+
+    Callable = _abc.Callable
 
 from torchtitan.experiments.fl.metrics import (
     PureUnigramCrossEntropy,
@@ -41,12 +38,20 @@ from torchtitan.experiments.fl.metrics import (
     get_or_create_unigram_manager,
 )
 
-from .streams import StreamAssignment
-
 
 @dataclass(frozen=True)
 class UnigramMetricContext:
-    """Aggregated context used to build unigram metrics."""
+    """Aggregated context used to build unigram metrics.
+
+    Args:
+        streams: Collection of streams assigned to the current data-parallel group.
+        default_split: Default dataset split to fall back to when none is provided.
+        tokenizer: Tokenizer instance used for the training job.
+        config: Configuration describing unigram metric behavior.
+        group_key: Identifier used to bucket metrics for logging.
+        dataset_root_remote: Optional remote root directory containing datasets.
+        dataset_split_remote: Optional remote split override for streaming.
+    """
 
     streams: list[Stream] | None
     default_split: str
@@ -59,7 +64,13 @@ class UnigramMetricContext:
 
 @dataclass(frozen=True)
 class UnigramSetupResult:
-    """Result of configuring unigram metrics for a stream subset."""
+    """Result of configuring unigram metrics for a stream subset.
+
+    Args:
+        collate_fn: Collate function to use for the dataloader.
+        group_key: Optional metric grouping key derived from the split and group.
+        handle: Optional handle to the registered unigram metric.
+    """
 
     collate_fn: Callable
     group_key: str | None
@@ -68,7 +79,6 @@ class UnigramSetupResult:
     @property
     def metric(self) -> PureUnigramCrossEntropy | None:
         """Expose the underlying metric for compatibility with legacy call sites."""
-
         return self.handle.metric if self.handle is not None else None
 
 
@@ -78,8 +88,17 @@ def _resolve_unigram_remote_path(
     root_remote: str | None,
     split: str,
 ) -> tuple[str, str] | None:
-    """Return the S3 bucket and key for a unigram statistics file."""
+    """Return the S3 bucket and key for a unigram statistics file.
 
+    Args:
+        remote_uri: URI pointing to the remote unigram file location.
+        root_remote: Optional override for the remote root directory.
+        split: Dataset split for which the unigram statistics apply.
+
+    Returns:
+        Tuple of bucket name and key when a valid S3 URI is provided, otherwise
+        ``None`` if the URI cannot be resolved.
+    """
     parsed = urlparse(remote_uri)
     if parsed.scheme != "s3":
         logger.warning(
@@ -123,8 +142,15 @@ def _resolve_unigram_remote_path(
 def _create_remote_unigram_client(
     bucket: str, config: UnigramMetricConfig
 ) -> RemoteUploaderDownloader:
-    """Create the remote uploader/downloader used for unigram metrics."""
+    """Create the remote uploader/downloader used for unigram metrics.
 
+    Args:
+        bucket: S3 bucket hosting the unigram frequency file.
+        config: Unigram metric configuration controlling downloads.
+
+    Returns:
+        Configured remote uploader/downloader instance used for transfers.
+    """
     remote_up_down = create_remote_up_down(
         bucket_name=bucket,
         prefix="",
@@ -142,6 +168,18 @@ def _maybe_download_unigram_file(
     destination: Path,
     config: UnigramMetricConfig,
 ) -> bool:
+    """Download remote unigram frequencies if required.
+
+    Args:
+        remote_uri: Remote URI pointing to the unigram frequency file.
+        root_remote: Optional remote root override for dataset assets.
+        split: Dataset split associated with the requested unigram file.
+        destination: Local path where the unigram data should be stored.
+        config: Unigram metric configuration.
+
+    Returns:
+        ``True`` when the file is successfully downloaded, otherwise ``False``.
+    """
     if not remote_uri or not config.download_missing:
         return False
 
@@ -163,7 +201,7 @@ def _maybe_download_unigram_file(
             exc,
         )
         return False
-    except Exception as exc:  # noqa: BLE001
+    except (OSError, RuntimeError) as exc:
         logger.warning(
             "Failed to download unigram frequency file %s from %s: %s",
             remote_key,
@@ -187,8 +225,21 @@ def _resolve_unigram_cache_path(
     default_split: str,
     config: UnigramMetricConfig,
 ) -> tuple[Path, Path]:
-    """Determine the cache and split-specific unigram file locations."""
+    """Determine the cache and split-specific unigram file locations.
 
+    Args:
+        stream: Streaming dataset entry being materialized.
+        root_remote: Optional remote root override.
+        dataset_split: Remote split associated with the stream.
+        default_split: Split to use when none is specified.
+        config: Unigram metric configuration.
+
+    Returns:
+        Tuple with the canonical cache path and the split-specific cache path.
+
+    Raises:
+        RuntimeError: If the stream does not provide a local cache location.
+    """
     local_root = getattr(stream, "local", None)
     stream_split = getattr(stream, "split", None) or dataset_split or default_split
 
@@ -224,8 +275,12 @@ def _resolve_unigram_cache_path(
 
 
 def _materialize_split_cache(cache_path: Path, split_path: Path) -> None:
-    """Ensure split-specific unigram files reuse the global cache when possible."""
+    """Ensure split-specific unigram files reuse the global cache when possible.
 
+    Args:
+        cache_path: Path to the canonical unigram frequency file.
+        split_path: Path to the split-specific cache that may be linked or copied.
+    """
     if split_path == cache_path:
         return
 
@@ -237,7 +292,7 @@ def _materialize_split_cache(cache_path: Path, split_path: Path) -> None:
             os.link(cache_path, split_path)
         except OSError:
             shutil.copy2(cache_path, split_path)
-    except Exception as exc:  # noqa: BLE001
+    except (OSError, shutil.Error) as exc:
         logger.debug(
             "Unable to materialize split-specific unigram cache at %s: %s",
             split_path,
@@ -253,6 +308,23 @@ def _load_stream_unigram_counts(
     default_split: str,
     config: UnigramMetricConfig,
 ) -> Counter:
+    """Load unigram token counts for the provided stream.
+
+    Args:
+        stream: Streaming dataset entry to read frequencies from.
+        root_remote: Optional remote root override for assets.
+        dataset_split: Remote split associated with the stream.
+        default_split: Split to use when none is specified.
+        config: Unigram metric configuration controlling downloads.
+
+    Returns:
+        Counter mapping token identifiers to their observed frequencies.
+
+    Raises:
+        RuntimeError: If the unigram file cannot be read.
+        ValueError: If a token identifier cannot be coerced to an integer.
+        TypeError: If an unsupported token identifier type is encountered.
+    """
     cache_path, split_path = _resolve_unigram_cache_path(
         stream,
         root_remote=root_remote,
@@ -276,7 +348,7 @@ def _load_stream_unigram_counts(
     for key, value in payload.items():
         try:
             token_id = int(key)
-        except (ValueError, TypeError):
+        except (ValueError, TypeError) as parse_err:
             try:
                 parsed_key = json.loads(key)
             except (json.JSONDecodeError, TypeError) as exc:
@@ -286,13 +358,13 @@ def _load_stream_unigram_counts(
             if isinstance(parsed_key, float):
                 if not parsed_key.is_integer():
                     msg = f"Unigram file contains non-integral token identifier: {parsed_key!r}"
-                    raise ValueError(msg)
+                    raise ValueError(msg) from parse_err
                 token_id = int(parsed_key)
             elif isinstance(parsed_key, int):
                 token_id = parsed_key
             else:
                 msg = f"Unigram file contains unsupported token identifier type: {type(parsed_key)!r}"
-                raise ValueError(msg)
+                raise TypeError(msg) from parse_err
 
         freq = int(value[0]) if isinstance(value, (list, tuple)) else int(value)
         counts[token_id] += freq
@@ -303,6 +375,18 @@ def _load_stream_unigram_counts(
 def _build_unigram_metric_for_group(
     context: UnigramMetricContext,
 ) -> PureUnigramCrossEntropy | None:
+    """Construct a unigram metric for the provided stream group.
+
+    Args:
+        context: Context describing the stream subset and configuration.
+
+    Returns:
+        Instantiated :class:`PureUnigramCrossEntropy` metric or ``None`` when the
+        metric is disabled or no streams are provided.
+
+    Raises:
+        RuntimeError: If unigram counts are missing or invalid.
+    """
     if not context.config.enable or not context.streams:
         return None
 
@@ -357,7 +441,7 @@ def _build_unigram_metric_for_group(
     )
 
 
-def setup_unigram_metric(
+def setup_unigram_metric(  # noqa: PLR0913
     assignment: StreamAssignment,
     *,
     job_config: MosaicJobConfig,
@@ -365,9 +449,22 @@ def setup_unigram_metric(
     tokenizer: BaseTokenizer,
     collate_fn: Callable,
     manager: UnigramMetricManager | None = None,
+    register_unigram_metric: Callable[[PureUnigramCrossEntropy], None] | None = None,
 ) -> UnigramSetupResult:
-    """Build and return unigram metric wiring for the current stream subset."""
+    """Build and return unigram metric wiring for the current stream subset.
 
+    Args:
+        assignment: Stream assignment resolved for the current data parallel rank.
+        job_config: Full Mosaic job configuration for the training run.
+        split: Dataset split currently being processed.
+        tokenizer: Tokenizer associated with the dataset.
+        collate_fn: Collate function provided to the dataloader.
+        manager: Optional metric manager used to register unigram metrics.
+        register_unigram_metric: Optional callback invoked when a metric is built.
+
+    Returns:
+        :class:`UnigramSetupResult` describing collate and metric registration.
+    """
     if not job_config.unigram_metric.enable:
         return UnigramSetupResult(collate_fn=collate_fn, group_key=None)
 
@@ -391,7 +488,7 @@ def setup_unigram_metric(
             dataset_split_remote=assignment.dataset_split_remote,
         )
         unigram_metric = _build_unigram_metric_for_group(context)
-    except Exception as exc:  # noqa: BLE001
+    except (RuntimeError, ValueError, TypeError) as exc:
         if job_config.unigram_metric.allow_failures:
             logger.warning(
                 "Unable to construct unigram metric for %s: %s",
@@ -404,6 +501,9 @@ def setup_unigram_metric(
 
     if unigram_metric is None:
         return UnigramSetupResult(collate_fn=collate_fn, group_key=None)
+
+    if register_unigram_metric is not None:
+        register_unigram_metric(unigram_metric)
 
     handle = unigram_manager.register(unigram_metric, unigram_group_key)
     return UnigramSetupResult(

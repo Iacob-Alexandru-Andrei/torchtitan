@@ -7,19 +7,12 @@
 """Unit tests covering the MuP-enabled LLaMA3 model variant."""
 
 from dataclasses import replace as dataclass_replace
-import importlib
+import math
 import unittest
 
 import pytest
-
-_schedule_module = pytest.importorskip(
-    "torch.distributed.pipelining.schedules",
-    reason="MuP tests require torch.distributed.pipelining",
-)
-if not hasattr(_schedule_module, "ScheduleDualPipeV"):
-    pytest.skip("MuP tests require ScheduleDualPipeV support")
-
 import torch
+
 from torchtitan.distributed import ParallelDims
 from torchtitan.experiments.fl.configs.optimizers import DesLocConfig, MosaicOptimizerConfig
 from torchtitan.experiments.fl.optimizer_builder import build_mosaic_optimizers
@@ -31,6 +24,16 @@ try:  # pragma: no cover - optional dependencies may be unavailable in CI
     from torchtitan.experiments.fl.models.llama3_mup.model.mup_model import Transformer
 except ImportError as exc:  # pragma: no cover - skip when PyTorch lacks pipeline support
     pytest.skip(f"MuP tests require pipeline schedules: {exc}")
+
+_schedule_module = pytest.importorskip(
+    "torch.distributed.pipelining.schedules",
+    reason="MuP tests require torch.distributed.pipelining",
+)
+if not hasattr(_schedule_module, "ScheduleDualPipeV"):
+    pytest.skip("MuP tests require ScheduleDualPipeV support")
+
+
+DEFAULT_EPS = 1e-8
 
 
 class TestMuPLlamaModel(unittest.TestCase):
@@ -94,7 +97,7 @@ class TestMuPLlamaModel(unittest.TestCase):
     def test_optimizer_overrides_build_param_groups(self) -> None:
         """MuP override hook should return parameter groups and epsilon scaling."""
 
-        base_eps = 1e-8
+        base_eps = DEFAULT_EPS
         overrides = self.model.build_mup_optimizer_overrides(
             lr=0.01,
             eps=base_eps,
@@ -107,7 +110,7 @@ class TestMuPLlamaModel(unittest.TestCase):
         self.assertIn("eps", overrides.config_updates)
 
         expected_eps = self._get_expected_mup_eps(base_eps)
-        self.assertAlmostEqual(overrides.config_updates["eps"], expected_eps, places=12)
+        assert math.isclose(overrides.config_updates["eps"], expected_eps, rel_tol=0.0, abs_tol=1e-12)
 
     def test_optimizer_overrides_disabled_when_hidden_scaling_off(self) -> None:
         """The override protocol should opt-out when hidden scaling is disabled."""
@@ -120,7 +123,7 @@ class TestMuPLlamaModel(unittest.TestCase):
         model = Transformer(disabled_args)
         overrides = model.build_mup_optimizer_overrides(
             lr=0.01,
-            eps=1e-8,
+            eps=DEFAULT_EPS,
             weight_decay=0.1,
         )
         assert overrides is None
@@ -133,7 +136,7 @@ class TestMuPLlamaModel(unittest.TestCase):
             lr=0.01,
             beta1=0.9,
             beta2=0.95,
-            eps=1e-8,
+            eps=DEFAULT_EPS,
             weight_decay=0.1,
             implementation="for-loop",
         )
@@ -143,11 +146,11 @@ class TestMuPLlamaModel(unittest.TestCase):
         optimizer = next(iter(container))
 
         # Original config remains untouched and the optimizer picks up MuP epsilon scaling.
-        assert config.eps == 1e-8
+        assert config.eps == DEFAULT_EPS
         assert len(optimizer.param_groups) > 1
 
-        expected_eps = self._get_expected_mup_eps(1e-8)
-        self.assertAlmostEqual(optimizer.defaults["eps"], expected_eps, places=12)
+        expected_eps = self._get_expected_mup_eps(DEFAULT_EPS)
+        assert math.isclose(optimizer.defaults["eps"], expected_eps, rel_tol=0.0, abs_tol=1e-12)
 
     def test_mosaic_builder_desloc_requires_ft(self) -> None:
         """DES-LOC validation should still trigger when overrides are present."""

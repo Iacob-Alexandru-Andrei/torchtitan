@@ -13,6 +13,7 @@ import math
 from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from enum import Enum
+from types import TracebackType
 from typing import Any, TYPE_CHECKING
 
 import torch
@@ -172,14 +173,18 @@ class UnigramMetricHandle:
         self._active = False
 
     def __enter__(self) -> "UnigramMetricHandle":
+        """Return this handle to support context manager usage."""
+
         return self
 
     def __exit__(
         self,
         exc_type: type[BaseException] | None,
         exc: BaseException | None,
-        traceback: Any,
+        traceback: TracebackType | None,
     ) -> bool:
+        """Close the metric handle upon exiting the context manager."""
+
         self.close()
         # Do not suppress exceptions.
         return False
@@ -248,10 +253,6 @@ class UnigramMetricManager:
         """Return ``True`` if any metrics are currently registered."""
 
         return bool(self._metrics)
-
-    def has_metrics(self) -> bool:
-        """Return ``True`` if any metrics are currently registered."""
-
 _UNIGRAM_MANAGER_ATTR = "_fl_unigram_manager"
 
 
@@ -1138,7 +1139,7 @@ class HyperparameterSwitchCallback(Callback):
 class FLMetricsProcessor(MetricsProcessor):
     """Extension of MetricsProcessor that wires the FL callback stack."""
 
-    def __init__(
+    def __init__(  # noqa: PLR0913 - initializer wires multiple optional dependencies
         self,
         job_config: Any,
         parallel_dims: Any,

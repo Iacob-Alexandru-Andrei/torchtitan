@@ -49,6 +49,7 @@ def build_mosaic_spec(
     spec_name: str,
     overrides: MosaicSpecOverrides | None = None,
 ) -> TrainSpec:
+    """Construct a Mosaic-enabled :class:`TrainSpec` from a base specification."""
     overrides = overrides or MosaicSpecOverrides()
 
     dataloader_builder = overrides.dataloader or partial(
@@ -94,7 +95,7 @@ def ensure_mosaic_spec(
         stacklevel=2,
     )
 
-    from .mosaic_adapter import MosaicTrainSpecAdapter
+    from .mosaic_adapter import MosaicTrainSpecAdapter  # noqa: PLC0415
 
     adapter = MosaicTrainSpecAdapter(
         base_spec_name,

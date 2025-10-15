@@ -1,11 +1,10 @@
 """Utilities for resolving Mosaic streaming datasets."""
-
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, TYPE_CHECKING
+from typing import Any
 from urllib.parse import urljoin
 
 from torchtitan.tools.logging import logger
@@ -20,14 +19,9 @@ except ImportError as exc:  # pragma: no cover - optional dependency
     raise RuntimeError(msg) from exc
 
 
-if TYPE_CHECKING:
-    from collections.abc import Callable
-
-
 @dataclass(frozen=True)
 class StreamExtractionResult:
     """Container describing the resolved Mosaic streams and metadata."""
-
     streams: list[Stream] | None
     dataset_config: dict[str, Any]
     sampling_group_indices: list[list[int]] | None
@@ -38,7 +32,6 @@ class StreamExtractionResult:
 @dataclass(frozen=True)
 class StreamAssignment:
     """Stream subset assigned to the current rank after sampling-group selection."""
-
     streams: list[Stream] | None
     group_index: int | None
     dataset_root_remote: str | None
@@ -63,7 +56,6 @@ def _join_remote_path(root: str | None, path: str | None) -> str | None:
 
 def _join_local_path(root: str | None, path: str | None) -> str | None:
     """Join ``root`` and ``path`` using :class:`pathlib.Path` semantics."""
-
     if path is None or root is None:
         return path
 
@@ -76,7 +68,6 @@ def _join_local_path(root: str | None, path: str | None) -> str | None:
 
 def _flatten_stream_configs(streams_cfg: Any) -> dict[str, dict[str, Any]]:
     """Flatten nested stream configurations into a simple mapping."""
-
     flattened: dict[str, dict[str, Any]] = {}
 
     def _collect_sequence(items: Sequence[Any], key_prefix: str | None = None) -> None:
@@ -109,7 +100,6 @@ def _flatten_stream_configs(streams_cfg: Any) -> dict[str, dict[str, Any]]:
 
 def _normalize_sampling_groups(config: Any) -> list[dict[str, Any]]:
     """Normalize sampling group definitions into a list of mappings."""
-
     if not config:
         return []
 
@@ -137,7 +127,6 @@ def _normalize_sampling_groups(config: Any) -> list[dict[str, Any]]:
 
 def _collect_group_stream_entries(group: Mapping[str, Any]) -> list[Any]:
     """Extract the raw stream entries referenced by a sampling group."""
-
     raw_streams = group.get("streams") or group.get("client_streams")
     if raw_streams is None:
         msg = f"Sampling group '{group.get('name')}' must define a 'streams' section"
@@ -156,13 +145,11 @@ def _collect_group_stream_entries(group: Mapping[str, Any]) -> list[Any]:
 
 def _normalize_sampling_mode(mode_raw: Any) -> str:
     """Normalize the sampling group mode into a lowercase string."""
-
     return str(mode_raw or "grouped").lower()
 
 
 def _should_concat_sampling_groups(mode: str, sampling_groups_cfg: Any) -> bool:
     """Return ``True`` when sampling groups should be concatenated."""
-
     return bool(sampling_groups_cfg) and mode in {
         "concat",
         "concatenate",
@@ -182,7 +169,6 @@ def _resolve_group_candidate(
     entry_index: int,
 ) -> dict[str, Any]:
     """Resolve a sampling group entry into a concrete stream mapping."""
-
     if isinstance(entry, str):
         if entry not in flattened:
             msg = f"Sampling group '{group.get('name')}' references unknown stream '{entry}'"
@@ -220,7 +206,6 @@ def _aggregate_sampling_groups(
     mode_raw: Any,
 ) -> dict[str, dict[str, Any]]:
     """Concatenate sampling groups into a unified stream catalog."""
-
     sampling_groups = _normalize_sampling_groups(sampling_groups_cfg)
     aggregated: list[dict[str, Any]] = []
     seen: set[tuple[Any, ...]] = set()
@@ -265,7 +250,6 @@ def _resolve_group_stream_names(
     flattened: dict[str, dict[str, Any]], sampling_groups_cfg: Any
 ) -> list[list[str]] | None:
     """Resolve stream names referenced by sampling groups."""
-
     sampling_groups = _normalize_sampling_groups(sampling_groups_cfg)
     group_stream_names: list[list[str]] = []
 
@@ -306,7 +290,6 @@ def _materialize_streams(
     root_local: str | None,
 ) -> tuple[list[Stream], list[str]]:
     """Instantiate :class:`Stream` objects from flattened configuration maps."""
-
     streams: list[Stream] = []
     stream_names: list[str] = []
 
@@ -341,7 +324,6 @@ def _compute_group_indices(
     group_stream_names: list[list[str]] | None, stream_names: list[str]
 ) -> list[list[int]] | None:
     """Map group stream names to indices in the instantiated stream list."""
-
     if not group_stream_names:
         return None
 
@@ -409,7 +391,6 @@ def _select_stream_subset(
     dp_world_size: int,
 ) -> StreamAssignment:
     """Select the stream subset for the current rank based on sampling groups."""
-
     streams = extraction.streams
     sampling_group_indices = extraction.sampling_group_indices
 

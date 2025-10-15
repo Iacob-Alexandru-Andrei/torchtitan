@@ -1,4 +1,4 @@
-"""Tests for the Mosaic FL configuration manager."""
+"""Tests covering the Mosaic config manager integration."""
 
 from __future__ import annotations
 
@@ -6,6 +6,10 @@ import importlib.util
 import sys
 import types
 from pathlib import Path
+
+import pytest
+
+from torchtitan.config import ConfigManager
 
 REPO_ROOT = Path(__file__).resolve().parents[5]
 if str(REPO_ROOT) not in sys.path:
@@ -15,10 +19,6 @@ ORIGINAL_FL_MODULE = sys.modules.get("torchtitan.experiments.fl")
 FL_STUB = types.ModuleType("torchtitan.experiments.fl")
 FL_STUB.__path__ = [str(REPO_ROOT / "torchtitan" / "experiments" / "fl")]
 sys.modules["torchtitan.experiments.fl"] = FL_STUB
-
-import pytest
-
-from torchtitan.config import ConfigManager
 
 CONFIG_SPEC = importlib.util.spec_from_file_location(
     "mosaic_config",
@@ -36,6 +36,10 @@ MosaicJobConfig = config_module.MosaicJobConfig
 MosaicTokenizerConfig = config_module.MosaicTokenizerConfig
 S3CheckpointingConfig = config_module.S3CheckpointingConfig
 
+
+_OVERRIDE_INTERVAL = 42
+_EXPECTED_NUM_WORKERS = 3
+_EXPECTED_OPT_INTERVAL = 7
 
 def teardown_module() -> None:
     """Restore the original FL module registration after tests complete."""
@@ -63,9 +67,11 @@ def test_cli_overrides_nested_metrics_field() -> None:
     """CLI overrides should land on the nested metrics dataclass."""
 
     manager = ConfigManager(MosaicJobConfig)
-    config = manager.parse_args(["--fl_metrics.optimizer_monitor.interval=42"])
+    config = manager.parse_args(
+        [f"--fl_metrics.optimizer_monitor.interval={_OVERRIDE_INTERVAL}"]
+    )
 
-    assert config.fl_metrics.optimizer_monitor.interval == 42
+    assert config.fl_metrics.optimizer_monitor.interval == _OVERRIDE_INTERVAL
 
 
 def test_toml_invalid_metrics_payload_rejected(tmp_path: Path) -> None:
@@ -75,7 +81,7 @@ def test_toml_invalid_metrics_payload_rejected(tmp_path: Path) -> None:
     config_path.write_text("[fl_metrics]\ninvalid = 1\n", encoding="utf-8")
 
     manager = ConfigManager(MosaicJobConfig)
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="unknown key"):
         manager.parse_args(["--job.config-file", str(config_path)])
 
 
@@ -83,21 +89,21 @@ def test_manual_init_coerces_nested_sections() -> None:
     """Direct MosaicJobConfig construction should coerce nested mappings."""
 
     job_config = MosaicJobConfig(
-        mosaic_dataloader={"dataset": {}, "num_workers": 3},
+        mosaic_dataloader={"dataset": {}, "num_workers": _EXPECTED_NUM_WORKERS},
         mosaic_tokenizer={"name": "meta-llama/Llama-3.1-8B"},
         fl_metrics={
-            "optimizer_monitor": {"interval": 7},
+            "optimizer_monitor": {"interval": _EXPECTED_OPT_INTERVAL},
             "activation_monitor": {"enabled": True},
         },
         s3_checkpoint={"enable": True, "bucket": "bucket", "prefix": "prefix"},
     )
 
     assert isinstance(job_config.mosaic_dataloader, MosaicDataLoaderConfig)
-    assert job_config.mosaic_dataloader.num_workers == 3
+    assert job_config.mosaic_dataloader.num_workers == _EXPECTED_NUM_WORKERS
     assert isinstance(job_config.mosaic_tokenizer, MosaicTokenizerConfig)
     assert job_config.mosaic_tokenizer.name == "meta-llama/Llama-3.1-8B"
     assert isinstance(job_config.fl_metrics, MetricsConfig)
-    assert job_config.fl_metrics.optimizer_monitor.interval == 7
+    assert job_config.fl_metrics.optimizer_monitor.interval == _EXPECTED_OPT_INTERVAL
     assert job_config.fl_metrics.activation_monitor.enabled is True
     assert isinstance(job_config.s3_checkpoint, S3CheckpointingConfig)
     assert job_config.s3_checkpoint.enable is True

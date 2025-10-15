@@ -1,9 +1,9 @@
-"""Public entry points for constructing Mosaic streaming dataloaders."""
+"""Construction utilities for Mosaic-aware dataloaders used in FL experiments."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Callable
+from typing import TYPE_CHECKING
 
 from torchtitan.experiments.fl.metrics import get_or_create_unigram_manager
 
@@ -18,14 +18,29 @@ from .streams import _extract_streams
 from .unigram import setup_unigram_metric
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from torchtitan.components.tokenizer import BaseTokenizer
     from torchtitan.experiments.fl.configs.config import MosaicJobConfig
     from torchtitan.experiments.fl.metrics import PureUnigramCrossEntropy
+else:
+    from collections import abc as _abc
+
+    Callable = _abc.Callable
 
 
 @dataclass(frozen=True)
 class DataloaderBuildRequest:
-    """Input parameters required to build a Mosaic dataloader."""
+    """Input parameters required to build a Mosaic dataloader.
+
+    Args:
+        job_config: Parsed Mosaic job configuration describing dataset settings.
+        tokenizer: Tokenizer instance used to encode text samples.
+        dp_world_size: Total number of data parallel ranks.
+        dp_rank: Data parallel rank handled by the current process.
+        split: Dataset split to load (for example ``"train"`` or ``"val"``).
+        default_drop_last: Whether batches should drop the remainder by default.
+    """
 
     job_config: MosaicJobConfig
     tokenizer: BaseTokenizer
@@ -38,6 +53,16 @@ class DataloaderBuildRequest:
 def _apply_split_overrides(
     normalized: NormalizedMosaicConfig, *, job_config: MosaicJobConfig, split: str
 ) -> NormalizedMosaicConfig:
+    """Apply per-split runtime overrides from the job configuration.
+
+    Args:
+        normalized: Normalized dataloader configuration produced for the split.
+        job_config: Full Mosaic job configuration with optional overrides.
+        split: Dataset split for which overrides should be resolved.
+
+    Returns:
+        The normalized configuration updated with any matching overrides.
+    """
     mosaic_cfg = job_config.mosaic_dataloader
     if not mosaic_cfg:
         return normalized
@@ -61,8 +86,18 @@ def _apply_split_overrides(
 def _build_mosaic_dataloader(
     request: DataloaderBuildRequest,
     *,
-    register_unigram_metric: Callable[["PureUnigramCrossEntropy"], None] | None = None,
+    register_unigram_metric: Callable[[PureUnigramCrossEntropy], None] | None = None,
 ) -> MosaicParallelAwareDataloader:
+    """Construct a :class:`MosaicParallelAwareDataloader` for the request.
+
+    Args:
+        request: Fully-populated dataloader build request.
+        register_unigram_metric: Optional callback used to register the unigram
+            metric that powers the tokenizer-aware loss monitor.
+
+    Returns:
+        A dataloader configured for the requested split and data parallel rank.
+    """
     normalized = _normalize_mosaic_dataloader_config(
         request.job_config,
         split=request.split,
@@ -88,6 +123,7 @@ def _build_mosaic_dataloader(
         tokenizer=request.tokenizer,
         collate_fn=titan_collate_fn,
         manager=unigram_manager,
+        register_unigram_metric=register_unigram_metric,
     )
 
     loader_request = ParallelDataLoaderRequest(
@@ -107,10 +143,21 @@ def build_mosaic_dataloader(
     dp_rank: int,
     tokenizer: BaseTokenizer,
     job_config: MosaicJobConfig,
-    register_unigram_metric: Callable[["PureUnigramCrossEntropy"], None] | None = None,
+    register_unigram_metric: Callable[[PureUnigramCrossEntropy], None] | None = None,
 ) -> MosaicParallelAwareDataloader:
-    """Build a Mosaic dataloader for the training split."""
+    """Build a Mosaic dataloader for the training split.
 
+    Args:
+        dp_world_size: Total number of data parallel ranks.
+        dp_rank: Data parallel rank handled by the current process.
+        tokenizer: Tokenizer used to encode text samples.
+        job_config: Full Mosaic job configuration containing dataset options.
+        register_unigram_metric: Optional callback used to register the unigram
+            metric for monitoring loss skew.
+
+    Returns:
+        A :class:`MosaicParallelAwareDataloader` configured for training.
+    """
     request = DataloaderBuildRequest(
         job_config=job_config,
         tokenizer=tokenizer,
@@ -122,17 +169,29 @@ def build_mosaic_dataloader(
     return _build_mosaic_dataloader(request, register_unigram_metric=register_unigram_metric)
 
 
-def build_mosaic_validation_dataloader(
+def build_mosaic_validation_dataloader(  # noqa: PLR0913
     *,
     dp_world_size: int,
     dp_rank: int,
     tokenizer: BaseTokenizer,
     job_config: MosaicJobConfig,
     infinite: bool = False,  # noqa: ARG001 - kept for compatibility
-    register_unigram_metric: Callable[["PureUnigramCrossEntropy"], None] | None = None,
+    register_unigram_metric: Callable[[PureUnigramCrossEntropy], None] | None = None,
 ) -> MosaicParallelAwareDataloader:
-    """Build a Mosaic dataloader for the validation split."""
+    """Build a Mosaic dataloader for the validation split.
 
+    Args:
+        dp_world_size: Total number of data parallel ranks.
+        dp_rank: Data parallel rank handled by the current process.
+        tokenizer: Tokenizer used to encode text samples.
+        job_config: Full Mosaic job configuration containing dataset options.
+        infinite: Historical parameter retained for compatibility; ignored.
+        register_unigram_metric: Optional callback used to register the unigram
+            metric for monitoring loss skew.
+
+    Returns:
+        A :class:`MosaicParallelAwareDataloader` configured for validation.
+    """
     request = DataloaderBuildRequest(
         job_config=job_config,
         tokenizer=tokenizer,

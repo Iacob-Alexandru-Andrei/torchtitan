@@ -153,7 +153,7 @@ def test_configure_desloc_installs_desloc_support(monkeypatch):
                 desloc_config=job_config.optimizer.desloc,
             )
         )
-        assert getattr(container, "_desloc_controllers")
+        assert container._desloc_controllers
 
         with desloc_module.desloc_semi_sync_context(_DummyManager(), container):
             pass

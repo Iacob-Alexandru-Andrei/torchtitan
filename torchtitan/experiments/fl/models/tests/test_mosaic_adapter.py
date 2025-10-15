@@ -20,29 +20,25 @@ from torchtitan.protocols.train_spec import (
 )
 
 
-def _dummy_builder(*_args, **_kwargs):  # noqa: ANN001, ANN002 - test helper
+def _dummy_builder(*_args: object, **_kwargs: object) -> None:
     return None
 
 
 class MosaicTrainSpecAdapterTest(unittest.TestCase):
     """Validate deterministic registration through the adapter."""
-
-    def tearDown(self) -> None:  # noqa: D401
+    def tearDown(self) -> None:
         """Clean up any adapter-registered specs from the global registry."""
-
         unregister_train_spec("test_mosaic_llama3_adapter")
 
     def test_build_uses_mosaic_name_by_default(self) -> None:
         """Adapter derives a stable mosaic-prefixed spec name when omitted."""
-
         adapter = MosaicTrainSpecAdapter("llama3")
         spec = adapter.build()
-        self.assertIsInstance(spec, TrainSpec)
-        self.assertEqual(spec.name, "mosaic_llama3")
+        assert isinstance(spec, TrainSpec)
+        assert spec.name == "mosaic_llama3"
 
     def test_register_applies_builder_overrides(self) -> None:
         """Adapter registration wires provided builders deterministically."""
-
         overrides = MosaicSpecOverrides(
             dataloader=_dummy_builder,
             tokenizer=_dummy_builder,
@@ -59,12 +55,12 @@ class MosaicTrainSpecAdapterTest(unittest.TestCase):
         registered_spec = adapter.register()
         try:
             fetched_spec = get_train_spec("test_mosaic_llama3_adapter")
-            self.assertEqual(fetched_spec.name, "test_mosaic_llama3_adapter")
-            self.assertIs(fetched_spec.build_dataloader_fn, _dummy_builder)
-            self.assertIs(fetched_spec.build_tokenizer_fn, _dummy_builder)
-            self.assertIs(fetched_spec.build_metrics_processor_fn, _dummy_builder)
-            self.assertIs(fetched_spec.build_optimizers_fn, _dummy_builder)
-            self.assertIs(fetched_spec.build_validator_fn, _dummy_builder)
+            assert fetched_spec.name == "test_mosaic_llama3_adapter"
+            assert fetched_spec.build_dataloader_fn is _dummy_builder
+            assert fetched_spec.build_tokenizer_fn is _dummy_builder
+            assert fetched_spec.build_metrics_processor_fn is _dummy_builder
+            assert fetched_spec.build_optimizers_fn is _dummy_builder
+            assert fetched_spec.build_validator_fn is _dummy_builder
         finally:
             unregister_train_spec(registered_spec.name)
 
