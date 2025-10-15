@@ -27,10 +27,13 @@ import os
 
 import torch
 
+from functools import partial
+
 from torchtitan.experiments.fl.components import build_metrics_processor
 from torchtitan.experiments.fl.configs import MosaicConfigManager
 from torchtitan.experiments.fl.dataloader.dataloader import build_mosaic_dataloader
 from torchtitan.experiments.fl.dataloader.tokenizer import build_mosaic_tokenizer
+from torchtitan.experiments.fl.metrics import add_unigram_metric
 from torchtitan.experiments.fl.ft_override import configure_desloc
 from torchtitan.experiments.fl.models.utils import (
     MosaicSpecOverrides,
@@ -83,7 +86,10 @@ def main() -> None:  # noqa: C901, PLR0912, PLR0915
         mosaic_spec_name = ensure_mosaic_spec(
             job_config.model.name,
             overrides=MosaicSpecOverrides(
-                dataloader=build_mosaic_dataloader,
+                dataloader=partial(
+                    build_mosaic_dataloader,
+                    register_unigram_metric=add_unigram_metric,
+                ),
                 tokenizer=build_mosaic_tokenizer,
                 metrics_processor=build_metrics_processor,
             ),

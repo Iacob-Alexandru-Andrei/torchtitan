@@ -6,8 +6,11 @@
 
 from __future__ import annotations
 
+import pathlib
 import sys
 import types
+
+import pytest
 
 
 schedules_module = types.ModuleType("torch.distributed.pipelining.schedules")
@@ -173,33 +176,44 @@ def _install_streaming_stubs() -> None:
 _install_streaming_stubs()
 
 from torchtitan.experiments.fl.dataloader.dataloader import (  # noqa: E402  # isort: skip
+    _apply_split_overrides,
+)
+from torchtitan.experiments.fl.dataloader.dataset_factory import (  # noqa: E402  # isort: skip
     DatasetFactoryConfig,
     MosaicRuntimeConfig,
-    StreamAssignment,
-    StreamExtractionResult,
-    _create_streaming_dataset,
     _normalize_mosaic_dataloader_config,
     _prepare_dataset_kwargs,
-    _select_stream_subset,
-    _setup_unigram_metric,
-    titan_collate_fn,
+    create_streaming_dataset,
 )
+from torchtitan.experiments.fl.dataloader.parallel import titan_collate_fn  # noqa: E402  # isort: skip
+from torchtitan.experiments.fl.dataloader.streams import (  # noqa: E402  # isort: skip
+    StreamAssignment,
+    StreamExtractionResult,
+    _select_stream_subset,
+)
+from torchtitan.experiments.fl.dataloader.unigram import setup_unigram_metric  # noqa: E402  # isort: skip
 
 
 class _DummyTokenizerForTest:
     tokenizer = object()
 
 
+class _DummyMosaicConfig(types.SimpleNamespace):
+    def get_split_overrides(self, split: str) -> dict[str, object]:
+        override = getattr(self, split, None)
+        return override if isinstance(override, dict) else {}
+
+
 def _make_job_config():
     return types.SimpleNamespace(
-        mosaic_dataloader={
-            "num_workers": 8,
-            "prefetch_factor": 2,
-            "pin_memory": True,
-            "persistent_workers": True,
-            "drop_last": True,
-            "dataset": {},
-        },
+        mosaic_dataloader=_DummyMosaicConfig(
+            num_workers=8,
+            prefetch_factor=2,
+            pin_memory=True,
+            persistent_workers=True,
+            drop_last=True,
+            dataset={},
+        ),
         training=types.SimpleNamespace(local_batch_size=8),
         validation=types.SimpleNamespace(local_batch_size=8),
         unigram_metric=types.SimpleNamespace(
@@ -215,24 +229,24 @@ def _make_job_config():
 
 def test_normalize_mosaic_dataloader_config_applies_split_overrides() -> None:
     job_config = _make_job_config()
-    job_config.mosaic_dataloader.update(
-        {
-            "dataset": {
-                "common": {"foo": 1},
-                "train": {"bar": 2},
-            },
-            "train": {
-                "num_workers": 2,
-                "prefetch_factor": 4,
-                "drop_last": False,
-            },
-        }
-    )
+    job_config.mosaic_dataloader.dataset = {
+        "common": {"foo": 1},
+        "train": {"bar": 2},
+    }
+    job_config.mosaic_dataloader.train = {
+        "num_workers": 2,
+        "prefetch_factor": 4,
+        "drop_last": False,
+    }
 
     normalized = _normalize_mosaic_dataloader_config(
         job_config,
         split="train",
         default_drop_last=True,
+    )
+
+    normalized = _apply_split_overrides(
+        normalized, job_config=job_config, split="train"
     )
 
     assert normalized.dataset_config["foo"] == 1
@@ -281,15 +295,17 @@ def test_setup_unigram_metric_allows_failures_when_missing_counts() -> None:
         dataset_split_remote=None,
     )
 
-    setup = _setup_unigram_metric(
+    setup = setup_unigram_metric(
         assignment,
         job_config=job_config,
         split="train",
         tokenizer=_DummyTokenizerForTest(),
+        collate_fn=titan_collate_fn,
     )
 
     assert setup.collate_fn is titan_collate_fn
     assert setup.group_key is None
+    assert setup.metric is None
 
 
 def test_prepare_dataset_kwargs_sets_epoch_and_split() -> None:
@@ -333,7 +349,7 @@ def test_create_streaming_dataset_uses_resolved_kwargs() -> None:
     )
 
     _DummyStreamingTextDataset.last_init = None
-    dataset = _create_streaming_dataset(
+    dataset = create_streaming_dataset(
         assignment=assignment,
         tokenizer=_DummyTokenizerForTest(),
         dataset_config=dataset_config,
@@ -350,3 +366,63 @@ def test_create_streaming_dataset_uses_resolved_kwargs() -> None:
         "shuffle": False,
         "kwargs": {},
     }
+
+
+def test_maybe_download_unigram_file_skips_non_s3(tmp_path: pathlib.Path) -> None:
+    from torchtitan.experiments.fl.dataloader import unigram as unigram_mod
+
+    job_config = _make_job_config()
+    metric_config = job_config.unigram_metric
+    metric_config.download_missing = True
+
+    destination = tmp_path / "1_gram.json"
+
+    assert (
+        unigram_mod._maybe_download_unigram_file(
+            "http://example.com/file",
+            None,
+            "train",
+            destination,
+            metric_config,
+        )
+        is False
+    )
+
+
+def test_maybe_download_unigram_file_handles_missing_remote(monkeypatch: pytest.MonkeyPatch, tmp_path: pathlib.Path) -> None:
+    from torchtitan.experiments.fl.dataloader import unigram as unigram_mod
+
+    job_config = _make_job_config()
+    metric_config = job_config.unigram_metric
+    metric_config.download_missing = True
+
+    closed = {"value": False}
+
+    class DummyRemote:
+        def close(self) -> None:
+            closed["value"] = True
+
+    dummy_remote = DummyRemote()
+
+    monkeypatch.setattr(
+        unigram_mod,
+        "_create_remote_unigram_client",
+        lambda *args, **kwargs: dummy_remote,
+    )
+
+    def raise_missing(*args: object, **kwargs: object) -> None:  # noqa: ARG001
+        raise FileNotFoundError("missing")
+
+    monkeypatch.setattr(unigram_mod, "download_file_from_s3", raise_missing)
+
+    destination = tmp_path / "1_gram.json"
+    result = unigram_mod._maybe_download_unigram_file(
+        "s3://bucket/path/file",
+        None,
+        "train",
+        destination,
+        metric_config,
+    )
+
+    assert result is False
+    assert closed["value"] is True
