@@ -14,24 +14,26 @@ from torchtitan.components.ft import FTManager
 from torchtitan.components.optimizer import OptimizersContainer
 from torchtitan.config import Optimizer as OptimizerConfig
 from torchtitan.distributed import ParallelDims
-from torchtitan.experiments.fl.components import build_metrics_processor
-
-from torchtitan.experiments.fl.dataloader.dataloader import build_mosaic_dataloader
-from torchtitan.experiments.fl.dataloader.tokenizer import build_mosaic_tokenizer
-from torchtitan.experiments.fl.models.llama3_mup.train_configs import (
-    get_train_spec as get_llama3_mup_train_spec,
+from torchtitan.experiments.fl.configs.optimizers import MosaicOptimizerConfig
+from torchtitan.experiments.fl.models.constants import MOSAIC_LLAMA_VOCAB_SIZE
+from torchtitan.experiments.fl.models.utils import (
+    MosaicSpecOverrides,
+    ensure_mosaic_spec,
 )
 from torchtitan.experiments.fl.optimizer_builder import build_mosaic_optimizers
-from torchtitan.protocols.train_spec import TokenizerBuilder, TrainSpec
+from torchtitan.experiments.fl.validate import build_mosaic_validator
+from torchtitan.protocols.train_spec import (
+    get_train_spec as get_registered_train_spec,
+    TrainSpec,
+)
 
 if TYPE_CHECKING:
-    from torchtitan.experiments.fl.configs.optimizers import MosaicOptimizerConfig
     from torchtitan.experiments.fl.models.llama3_mup.model.mup_model import Transformer
 
 
 def build_mosaic_mup_optimizers(
     model_parts: list[nn.Module],
-    optimizer_config: OptimizerConfig,
+    optimizer_config: OptimizerConfig | dict[str, Any],
     parallel_dims: ParallelDims,
     ft_manager: FTManager | None = None,
 ) -> OptimizersContainer:
@@ -42,15 +44,18 @@ def build_mosaic_mup_optimizers(
 
     Args:
         model_parts: List of model parts to optimize.
-        optimizer_config: Optimizer configuration.
+        optimizer_config: Optimizer configuration (or dict to be converted).
         parallel_dims: Parallel dimensions for distributed training.
         ft_manager: Optional fault tolerance manager.
 
     Returns:
         OptimizersContainer: Container with optimizers for each model part.
     """
-    # Cast to Transformer to access MuP-specific methods
+    # Convert dict to MosaicOptimizerConfig if needed
+    if isinstance(optimizer_config, dict):
+        optimizer_config = MosaicOptimizerConfig(**optimizer_config)
 
+    # Cast to Transformer to access MuP-specific methods
     model = cast("Transformer", model_parts[0])
 
     # Construct the initial kwargs dict from the config object.
@@ -85,29 +90,23 @@ def build_mosaic_mup_optimizers(
     )
 
 
-def get_train_spec() -> TrainSpec:
-    """Get the training specification for Llama3 MuP with Mosaic streaming support.
-
-    This function wraps the base Llama3 MuP TrainSpec to make it compatible with
-    Mosaic streaming by replacing the dataloader, tokenizer, and optimizer builders
-    to support Mosaic-specific optimizers like DecoupledAdamW.
-    """
-    # Get the base Llama3 MuP spec
-    base_spec = get_llama3_mup_train_spec()
-
-    # Update all model configurations with larger vocab size for Mosaic tokenizer
+def _update_vocab_sizes(base_spec: TrainSpec, mosaic_spec: TrainSpec) -> TrainSpec:
     model_args = {
-        name: replace(config, vocab_size=50368)
+        name: replace(config, vocab_size=MOSAIC_LLAMA_VOCAB_SIZE)
         for name, config in base_spec.model_args.items()
     }
+    return replace(mosaic_spec, model_args=model_args)
 
-    # Return a new spec with Mosaic components and updated vocab sizes
-    return replace(
-        base_spec,
-        name="mosaic_llama3_mup",
-        model_args=model_args,
-        build_dataloader_fn=build_mosaic_dataloader,
-        build_tokenizer_fn=cast("TokenizerBuilder", build_mosaic_tokenizer),
-        build_optimizers_fn=build_mosaic_mup_optimizers,
-        build_metrics_processor_fn=build_metrics_processor,
+
+def get_train_spec() -> TrainSpec:
+    """Get the training specification for Llama3 MuP with Mosaic streaming support."""
+    spec_name = ensure_mosaic_spec(
+        "llama3_mup",
+        spec_name="mosaic_llama3_mup",
+        overrides=MosaicSpecOverrides(
+            optimizers=build_mosaic_mup_optimizers,
+            validator=build_mosaic_validator,
+            post_transform=_update_vocab_sizes,
+        ),
     )
+    return get_registered_train_spec(spec_name)

@@ -58,7 +58,7 @@ ROOT: torchtitan/experiments/fl/models/mosaic_llama3/
 ### DATA_MODELS
 NODES:8 CALL_DEPTH:1
 
-__init__.py→[get_train_spec(void)] 
+__init__.py→[_update_vocab_sizes((base_spec: TrainSpec,mosaic_spec: TrainSpec)),get_train_spec(void)] 
 
 ## DEPENDENCY_PATTERNS
 

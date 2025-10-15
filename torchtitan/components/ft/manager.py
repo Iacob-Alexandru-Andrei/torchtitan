@@ -129,7 +129,8 @@ def maybe_semi_sync_training(
         logger.info(
             f"using fragment function to split model: {fragment_fn is not None}"
         )
-        if semi_sync_method.lower() == "diloco":
+        method = semi_sync_method.lower()
+        if method == "diloco":
             if fragment_fn:
                 model_parts = fragment_fn(model, ft_config, n_layers)
             else:
@@ -144,25 +145,54 @@ def maybe_semi_sync_training(
                 )
                 outer_optimizers.append(outer_optimizer)
 
+            sync_steps = getattr(ft_config, "sync_steps", None)
+            if sync_steps is None:
+                logger.warning(
+                    "TorchFT semi-sync method '%s' requested but fault_tolerance.sync_steps is unset; "
+                    "falling back to async quorum.",
+                    semi_sync_method,
+                )
+                return nullcontext()
+
             return local_sgd.DiLoCo(
                 manager=ft_manager._manager,
                 model_fragments=model_parts,
                 inner_optimizer=optimizer,
                 outer_optimizer=outer_optimizers,
-                sync_every=ft_config.sync_steps,
+                sync_every=sync_steps,
                 should_quantize=ft_config.should_quantize,
                 fragment_sync_delay=ft_config.fragment_sync_delay,
                 fragment_update_alpha=ft_config.fragment_update_alpha,
             )
-        elif semi_sync_method.lower() == "local_sgd":
+        elif method == "local_sgd":
+            sync_steps = getattr(ft_config, "sync_steps", None)
+            if sync_steps is None:
+                logger.warning(
+                    "TorchFT semi-sync method '%s' requested but fault_tolerance.sync_steps is unset; "
+                    "falling back to async quorum.",
+                    semi_sync_method,
+                )
+                return nullcontext()
+
             return local_sgd.LocalSGD(
                 manager=ft_manager._manager,
                 model=model,
                 optimizer=optimizer,
-                sync_every=ft_config.sync_steps,
+                sync_every=sync_steps,
             )
+        elif method == "desloc":
+            try:
+                from torchtitan.experiments.fl.desloc import desloc_semi_sync_context
+            except ImportError:  # pragma: no cover - optional dependency path
+                logger.warning(
+                    "DES-LOC semi-sync requested but torchtitan.experiments.fl.desloc "
+                    "is unavailable; falling back to async quorum."
+                )
+                return nullcontext()
+
+            return desloc_semi_sync_context(ft_manager=ft_manager, optimizer=optimizer)
         else:
             raise ValueError(
-                f"Unknown training method: {semi_sync_method}, only 'diloco' and 'local_sgd' are supported."
+                f"Unknown training method: {semi_sync_method}, only 'diloco', 'local_sgd', and 'desloc' are supported."
             )
     return nullcontext()

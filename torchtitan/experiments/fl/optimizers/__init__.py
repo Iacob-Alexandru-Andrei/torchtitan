@@ -7,8 +7,17 @@
 """New optimizers for FL experiments."""
 
 from .adopt import ADOPT
+from .aggmo_adamw import AggMoAdamW
+from .aggmo_adopt import AggMoAdopt
 from .decoupled_adamw import DecoupledAdamW
 from .qhadamw import QHAdamW
 from .qhadopt import QHADOPT
 
-__all__ = ["ADOPT", "QHADOPT", "DecoupledAdamW", "QHAdamW"]
+__all__ = [
+    "ADOPT",
+    "QHADOPT",
+    "AggMoAdamW",
+    "AggMoAdopt",
+    "DecoupledAdamW",
+    "QHAdamW",
+]

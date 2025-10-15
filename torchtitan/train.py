@@ -33,6 +33,13 @@ from torchtitan.tools.profiling import (
     maybe_enable_profiling,
 )
 
+try:
+    from torchtitan.experiments.fl.metrics import update_unigram_metrics
+except ImportError:  # pragma: no cover - optional dependency
+
+    def update_unigram_metrics(labels: torch.Tensor) -> None:  # type: ignore[arg-type]
+        return
+
 
 class Trainer(torch.distributed.checkpoint.stateful.Stateful):
     # core configs
@@ -227,8 +234,7 @@ class Trainer(torch.distributed.checkpoint.stateful.Stateful):
         if parallel_dims.pp_enabled:
             if not self.train_spec.pipelining_fn:
                 raise RuntimeError(
-                    f"Pipeline Parallel is enabled but {self.train_spec.name} "
-                    f"does not support pipelining"
+                    f"Pipeline Parallel is enabled but {self.train_spec.name} does not support pipelining"
                 )
 
             # apply both PT-D Pipeline Parallel and SPMD-style PT-D techniques
@@ -407,6 +413,37 @@ class Trainer(torch.distributed.checkpoint.stateful.Stateful):
 
             yield input_dict, labels
 
+    def _resolve_eos_id(self) -> int | None:
+        """Infer an EOS token id from the configured tokenizer."""
+        tokenizer = self.tokenizer
+        if tokenizer is None:
+            return None
+
+        def _first_int(value: Any) -> int | None:
+            if isinstance(value, int):
+                return value
+            if isinstance(value, (list, tuple)) and value:
+                head = value[0]
+                return head if isinstance(head, int) else None
+            return None
+
+        eos_id = _first_int(getattr(tokenizer, "eos_id", None))
+        if eos_id is not None:
+            return eos_id
+
+        eos_id = _first_int(getattr(tokenizer, "eos_token_id", None))
+        if eos_id is not None:
+            return eos_id
+
+        eos_token = getattr(tokenizer, "eos_token", None)
+        convert = getattr(tokenizer, "convert_tokens_to_ids", None)
+        if eos_token is not None and callable(convert):
+            eos_id = _first_int(convert(eos_token))
+            if eos_id is not None:
+                return eos_id
+
+        return None
+
     def forward_backward_step(
         self, input_dict: dict[str, torch.Tensor], labels: torch.Tensor
     ) -> torch.Tensor:
@@ -417,7 +454,7 @@ class Trainer(torch.distributed.checkpoint.stateful.Stateful):
         extra_inputs = {k: v for k, v in input_dict.items() if k != "input"}
         # Create the FlexAttention mask according to the input
         if getattr(self.model_args, "use_flex_attn", False):
-            init_attention_mask(inputs, self.tokenizer.eos_id)
+            init_attention_mask(inputs, self._resolve_eos_id())
 
         # apply context parallelism if cp is enabled
         # ensure CP handles the separate freqs_cis buffer for each pp stage
@@ -491,6 +528,7 @@ class Trainer(torch.distributed.checkpoint.stateful.Stateful):
         # entire step will not be executed.
         for _microbatch in range(self.gradient_accumulation_steps):
             input_dict, labels = next(data_iterator)
+            update_unigram_metrics(labels)
             loss = self.forward_backward_step(input_dict, labels)
             accumulated_losses.append(loss.detach())
 
@@ -514,6 +552,8 @@ class Trainer(torch.distributed.checkpoint.stateful.Stateful):
         if not self.metrics_processor.should_log(self.step):
             return
 
+        local_loss = loss.detach().item()
+
         if parallel_dims.dp_cp_enabled:
             loss = loss.detach()
             ft_pg = self.ft_manager.loss_sync_pg
@@ -535,6 +575,7 @@ class Trainer(torch.distributed.checkpoint.stateful.Stateful):
         extra_metrics = {
             "n_tokens_seen": global_ntokens_seen,
             "lr": lr,
+            "local_loss": local_loss,
         }
         self.metrics_processor.log(
             self.step,
@@ -548,7 +589,16 @@ class Trainer(torch.distributed.checkpoint.stateful.Stateful):
     def train(self):
         job_config = self.job_config
 
-        self.checkpointer.load(step=job_config.checkpoint.load_step)
+        logger.info(f"[RESUME DEBUG] Before checkpoint load: self.step = {self.step}")
+        logger.info(
+            f"[RESUME DEBUG] Checkpoint config: load_step={job_config.checkpoint.load_step}, folder={job_config.checkpoint.folder}"
+        )
+
+        loaded = self.checkpointer.load(step=job_config.checkpoint.load_step)
+
+        logger.info(
+            f"[RESUME DEBUG] After checkpoint load: loaded={loaded}, self.step = {self.step}"
+        )
         logger.info(f"Training starts at step {self.step + 1}")
 
         leaf_folder = (
@@ -637,8 +687,15 @@ class Trainer(torch.distributed.checkpoint.stateful.Stateful):
         return {"step": self.step, "ntokens_seen": self.ntokens_seen}
 
     def load_state_dict(self, state_dict: dict[str, Any]):
+        logger.info(f"[RESUME DEBUG] Trainer.load_state_dict called with: {state_dict}")
+        logger.info(
+            f"[RESUME DEBUG] Before load: self.step = {self.step}, self.ntokens_seen = {self.ntokens_seen}"
+        )
         self.step = state_dict["step"]
         self.ntokens_seen = state_dict["ntokens_seen"]
+        logger.info(
+            f"[RESUME DEBUG] After load: self.step = {self.step}, self.ntokens_seen = {self.ntokens_seen}"
+        )
 
     def close(self) -> None:
         if self.checkpointer:

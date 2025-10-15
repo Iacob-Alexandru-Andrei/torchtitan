@@ -28,6 +28,8 @@ from torch.optim.optimizer import (
 )
 from torch.types import Number
 
+from ._decoupled_decay import _compute_decay_factor
+
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -489,7 +491,7 @@ class QHADOPT(Optimizer):
 
             # Apply weight decay adjustment if decoupled
             if weight_decay != 0 and decouple:
-                decay_factor = (lr / initial_lr) if initial_lr else 1.0  # type: ignore[operator]
+                decay_factor = _compute_decay_factor(lr, initial_lr)
                 scaling_factor = (decay_factor * weight_decay) / (
                     1 - decay_factor * weight_decay
                 )
@@ -566,7 +568,7 @@ def _single_tensor_qhadopt(  # noqa: PLR0913
             continue
 
         if weight_decay != 0 and decouple:
-            decay_factor = (lr / initial_lr) if initial_lr != 0 else 1.0  # type: ignore[operator]
+            decay_factor = _compute_decay_factor(lr, initial_lr)
             param.mul_(1 - decay_factor * weight_decay)
 
         denom = torch.clamp(exp_avg_sq.sqrt(), eps)
@@ -663,7 +665,7 @@ def _multi_tensor_qhadopt(  # noqa: C901, PLR0912, PLR0913, PLR0915
             device_grads = torch._foreach_neg(device_grads)
 
         if weight_decay != 0 and not decouple:
-            decay_factor = (lr / initial_lr) if initial_lr != 0 else 1.0  # type: ignore[operator]
+            decay_factor = _compute_decay_factor(lr, initial_lr)
             weight_decay_unscaled = decay_factor * weight_decay
             if maximize:
                 torch._foreach_add_(
@@ -692,7 +694,7 @@ def _multi_tensor_qhadopt(  # noqa: C901, PLR0912, PLR0913, PLR0915
             continue
 
         if weight_decay != 0 and decouple:
-            decay_factor = (lr / initial_lr) if initial_lr != 0 else 1.0  # type: ignore[operator]
+            decay_factor = _compute_decay_factor(lr, initial_lr)
             weight_decay_unscaled = decay_factor * weight_decay
             torch._foreach_add_(
                 device_params,
@@ -701,13 +703,14 @@ def _multi_tensor_qhadopt(  # noqa: C901, PLR0912, PLR0913, PLR0915
             )
 
         exp_avg_sq_sqrt = torch._foreach_sqrt(device_exp_avg_sqs)
-        torch._foreach_maximum_(exp_avg_sq_sqrt, eps)
+        # Use clamp instead of maximum_ to avoid DTensor dispatch issues with scalars
+        exp_avg_sq_sqrt = [torch.clamp(t, min=eps) for t in exp_avg_sq_sqrt]
 
         normed_grad = torch._foreach_div(device_grads, exp_avg_sq_sqrt)
         if clip_lambda is not None:
             clip = clip_lambda(_get_value(device_state_steps[0]))
-            torch._foreach_maximum_(normed_grad, -clip)
-            torch._foreach_minimum_(normed_grad, clip)
+            # Use clamp instead of maximum_/minimum_ to avoid DTensor dispatch issues
+            normed_grad = [torch.clamp(t, min=-clip, max=clip) for t in normed_grad]
 
         torch._foreach_lerp_(device_exp_avgs, normed_grad, 1 - beta1)
 

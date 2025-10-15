@@ -75,8 +75,8 @@ __init__.py→[] attn_mask_utils.py→[_prepare_4d_causal_attention_mask((attent
 ## DEPENDENCY_PATTERNS
 
 ### EDGE_PATTERNS
-Contains: 64 edges
 Call: 74 edges
+Contains: 64 edges
 
 ### CROSS_CLUSTER_FLOW
 TESTS→UTILITY_LAYER: 27

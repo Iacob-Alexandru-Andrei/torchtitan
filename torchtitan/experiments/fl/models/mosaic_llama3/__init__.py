@@ -6,39 +6,37 @@
 """Mosaic Llama3 model with Mosaic streaming support."""
 
 from dataclasses import replace
-from typing import cast
 
-from torchtitan.experiments.fl.components import build_metrics_processor
+from torchtitan.experiments.fl.models.constants import MOSAIC_LLAMA_VOCAB_SIZE
+from torchtitan.experiments.fl.models.utils import (
+    MosaicSpecOverrides,
+    ensure_mosaic_spec,
+)
+from torchtitan.experiments.fl.optimizer_builder import build_mosaic_optimizers
+from torchtitan.experiments.fl.validate import build_mosaic_validator
+from torchtitan.protocols.train_spec import (
+    get_train_spec as get_registered_train_spec,
+    TrainSpec,
+)
 
-from torchtitan.experiments.fl.dataloader.dataloader import build_mosaic_dataloader
-from torchtitan.experiments.fl.dataloader.tokenizer import build_mosaic_tokenizer
 
-from torchtitan.models.llama3 import get_train_spec as get_base_llama3_spec
-from torchtitan.protocols.train_spec import TokenizerBuilder, TrainSpec
+def _update_vocab_sizes(base_spec: TrainSpec, mosaic_spec: TrainSpec) -> TrainSpec:
+    model_args = {
+        name: replace(config, vocab_size=MOSAIC_LLAMA_VOCAB_SIZE)
+        for name, config in base_spec.model_args.items()
+    }
+    return replace(mosaic_spec, model_args=model_args)
 
 
 def get_train_spec() -> TrainSpec:
-    """Get the training specification for Llama3 with Mosaic streaming support.
-
-    This function wraps the base Llama3 TrainSpec to make it compatible with
-    Mosaic streaming. It also adds a new model configuration with a larger
-    vocab size (50368) to match the Mosaic tokenizer.
-    """
-    # Get the base Llama3 spec
-    base_spec = get_base_llama3_spec()
-
-    # Update all model configurations with larger vocab size for Mosaic tokenizer
-    model_args = {
-        name: replace(config, vocab_size=50368)
-        for name, config in base_spec.model_args.items()
-    }
-
-    # Return a new spec with the Mosaic components and updated vocab sizes
-    return replace(
-        base_spec,
-        name="mosaic_llama3",
-        model_args=model_args,
-        build_dataloader_fn=build_mosaic_dataloader,
-        build_tokenizer_fn=cast("TokenizerBuilder", build_mosaic_tokenizer),
-        build_metrics_processor_fn=build_metrics_processor,
+    """Get the training specification for Llama3 with Mosaic streaming support."""
+    spec_name = ensure_mosaic_spec(
+        "llama3",
+        spec_name="mosaic_llama3",
+        overrides=MosaicSpecOverrides(
+            optimizers=build_mosaic_optimizers,
+            validator=build_mosaic_validator,
+            post_transform=_update_vocab_sizes,
+        ),
     )
+    return get_registered_train_spec(spec_name)

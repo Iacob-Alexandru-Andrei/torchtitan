@@ -8,8 +8,10 @@ import importlib
 import os
 import sys
 
+import types
+
 from dataclasses import field, fields, is_dataclass, make_dataclass
-from typing import Any, Type
+from typing import Any, get_args, get_origin, get_type_hints, Type, Union
 
 import tyro
 
@@ -167,15 +169,96 @@ class ConfigManager:
                 "Run `NGPU=1 ./run_train.sh --help` to read all valid fields."
             )
 
+        type_hints = get_type_hints(cls)
         result = {}
         for f in fields(cls):
             if f.name in data:
                 value = data[f.name]
-                if is_dataclass(f.type) and isinstance(value, dict):
-                    result[f.name] = self._dict_to_dataclass(f.type, value)
+                field_type = type_hints.get(f.name, f.type)
+                nested_cls = self._extract_dataclass_type(field_type)
+                if nested_cls and isinstance(value, dict):
+                    result[f.name] = self._dict_to_dataclass(nested_cls, value)
                 else:
-                    result[f.name] = value
+                    result[f.name] = self._coerce_value(field_type, value)
         return cls(**result)
+
+    @staticmethod
+    def _extract_dataclass_type(field_type: Any) -> Type[Any] | None:
+        """Return the dataclass type embedded in field_type, if any."""
+        if is_dataclass(field_type):
+            return field_type
+
+        origin = get_origin(field_type)
+        if origin is None:
+            return None
+
+        for arg in get_args(field_type):
+            if arg is type(None):
+                continue
+            nested = ConfigManager._extract_dataclass_type(arg)
+            if nested is not None:
+                return nested
+        return None
+
+    @staticmethod
+    def _coerce_value(field_type: Any, value: Any) -> Any:
+        """Best-effort coercion of TOML-loaded values into annotated field types."""
+        if value is None:
+            return None
+
+        origin = get_origin(field_type)
+        if origin is Union or origin is types.UnionType:
+            args = get_args(field_type)
+            for arg in args:
+                if arg is type(None):
+                    continue
+                coerced = ConfigManager._coerce_value(arg, value)
+                if ConfigManager._is_instance_of(arg, coerced):
+                    return coerced
+            return value
+
+        origin = get_origin(field_type)
+        if origin is tuple:
+            args = get_args(field_type)
+            if len(args) == 2 and args[1] is Ellipsis:
+                elem_type = args[0]
+                if isinstance(value, list):
+                    return tuple(
+                        ConfigManager._coerce_value(elem_type, v) for v in value
+                    )
+                if isinstance(value, tuple):
+                    return tuple(
+                        ConfigManager._coerce_value(elem_type, v) for v in value
+                    )
+        return value
+
+    @staticmethod
+    def _is_instance_of(field_type: Any, value: Any) -> bool:
+        """Check whether value matches the typing annotation field_type."""
+        if value is None:
+            return field_type is type(None)
+
+        origin = get_origin(field_type)
+        if origin is None:
+            try:
+                return isinstance(value, field_type)
+            except TypeError:
+                return False
+
+        if origin is tuple:
+            args = get_args(field_type)
+            if len(args) == 2 and args[1] is Ellipsis:
+                elem_type = args[0]
+                if not isinstance(value, tuple):
+                    return False
+                return all(ConfigManager._is_instance_of(elem_type, v) for v in value)
+        if origin is Union or origin is types.UnionType:
+            return any(
+                ConfigManager._is_instance_of(arg, value)
+                for arg in get_args(field_type)
+                if arg is not type(None)
+            )
+        return False
 
     def _validate_config(self) -> None:
         # TODO: temporary mitigation of BC breaking change in hf_assets_path

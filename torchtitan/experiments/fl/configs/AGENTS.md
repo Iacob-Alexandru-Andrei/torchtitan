@@ -48,7 +48,7 @@ You are analyzing a codebase dependency graph optimized for AI understanding. Th
 ---
 
 # CODE_GRAPH
-NODES:5 EDGES:0
+NODES:18 EDGES:3
 
 ## DIRECTORY_TREE
 ROOT: torchtitan/experiments/fl/configs/
@@ -56,13 +56,15 @@ ROOT: torchtitan/experiments/fl/configs/
 ## ARCHITECTURAL_CLUSTERS
 
 ### UTILITY_LAYER
-NODES:5 CALL_DEPTH:1
+NODES:18 CALL_DEPTH:2
 
-config.py→[] optimizers.py→[] 
+__init__.py→[parse_args((self,args: list[str] = sys.argv[1:]))→{config::ensure_mosaic_job_config_types},__init__((self))[CTOR,DUNDER],load_mosaic_job_config((args: list[str] | None = None))] config.py→[_as_dict((value: Mapping[str,Any] | None)),ensure_mosaic_job_config_types((job_config: MosaicJobConfig))] optimizers.py→[] 
 
 ## DEPENDENCY_PATTERNS
 
 ### EDGE_PATTERNS
+Call: 1 edges
+Contains: 2 edges
 
 ### CROSS_CLUSTER_FLOW
 
