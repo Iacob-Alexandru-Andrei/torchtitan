@@ -48,23 +48,21 @@ You are analyzing a codebase dependency graph optimized for AI understanding. Th
 ---
 
 # CODE_GRAPH
-NODES:29 EDGES:9
+NODES:12 EDGES:0
 
 ## DIRECTORY_TREE
-ROOT: torchtitan/experiments/vlm/datasets/utils/
+ROOT: torchtitan/experiments/fl/configs/tests/
 
 ## ARCHITECTURAL_CLUSTERS
 
-### UTILS
-NODES:29 CALL_DEPTH:3
+### TESTS
+NODES:12 CALL_DEPTH:1
 
-image.py→[_resize_image_by_patch_count((image: Image.Image,max_patch_per_image: int,patch_size: int,merge_size: int,min_patch_per_image: int = 1,))→{_smart_resize,_smart_resize,_smart_resize},process_image((image: str | bytes | Image.Image,patch_size: int = 16,merge_size: int = 1,max_patch_per_image: int = 256,min_patch_per_image: int = 1,))→{_resize_image_by_patch_count},_smart_resize((height: int,width: int,factor: int,# should be equal patch_size * merge_size max_patch_per_image: int,min_patch_per_image: int = 1,)),calculate_image_tokens((image: Image.Image | torch.Tensor,patch_size: int,spatial_merge_size: int,)),convert_to_patches((pixel_values: torch.Tensor,patch_size: int,temporal_patch_size: int = 1,)),pad_patches((patches: torch.Tensor,grids: torch.Tensor,max_patches: int,)),pad_empty_images_to_target_batch_size((patches: torch.Tensor,grids: torch.Tensor,max_images: int,))] packing.py→[__init__((self,max_seq_length: int,buffer_size: int = 100,batch_size: int = 8,))[CTOR,DUNDER],_pack_buffered_samples((self)),add_sample((self,sample: dict[str,Any])),has_batch_ready((self)),get_next_batch((self))] text.py→[pad_text_batch((input_ids: torch.Tensor,labels: torch.Tensor,seq_len: int,padding_idx: int = 0,ignore_idx: int = -100,)),pad_input_ids_and_labels_to_target_batch_size((input_ids: torch.Tensor,labels: torch.Tensor,target_batch_size: int,padding_idx: int = 0,ignore_idx: int = -100,)),process_text_with_images((text: list[str],image_tokens: list[tuple[int,int,int]],# [(total,width,height),...] tokenizer,special_tokens,add_eos: bool = True,))] 
+test_config_manager.py→[teardown_module(void),test_parse_args_produces_typed_dataclasses(void)[TEST],test_cli_overrides_nested_metrics_field(void)[TEST],test_toml_invalid_metrics_payload_rejected((tmp_path: Path))[TEST],test_manual_init_coerces_nested_sections(void)[TEST],test_manual_init_invalid_section_type_raises(void)[TEST]] 
 
 ## DEPENDENCY_PATTERNS
 
 ### EDGE_PATTERNS
-Contains: 5 edges
-Call: 4 edges
 
 ### CROSS_CLUSTER_FLOW
 

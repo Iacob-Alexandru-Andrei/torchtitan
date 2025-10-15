@@ -48,7 +48,7 @@ You are analyzing a codebase dependency graph optimized for AI understanding. Th
 ---
 
 # CODE_GRAPH
-NODES:17 EDGES:0
+NODES:9 EDGES:0
 
 ## DIRECTORY_TREE
 ROOT: torchtitan/experiments/fl/models/mosaic_llama3_mup/
@@ -56,7 +56,7 @@ ROOT: torchtitan/experiments/fl/models/mosaic_llama3_mup/
 ## ARCHITECTURAL_CLUSTERS
 
 ### DATA_MODELS
-NODES:17 CALL_DEPTH:1
+NODES:9 CALL_DEPTH:1
 
 __init__.py→[_update_vocab_sizes((base_spec: TrainSpec,mosaic_spec: TrainSpec)),get_train_spec(void)] 
 

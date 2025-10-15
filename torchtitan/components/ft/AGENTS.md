@@ -65,8 +65,8 @@ __init__.py→[] job_config.py→[] manager.py→[__init__((self,ft_config: FTCo
 ## DEPENDENCY_PATTERNS
 
 ### EDGE_PATTERNS
-Contains: 3 edges
 Call: 1 edges
+Contains: 3 edges
 
 ### CROSS_CLUSTER_FLOW
 

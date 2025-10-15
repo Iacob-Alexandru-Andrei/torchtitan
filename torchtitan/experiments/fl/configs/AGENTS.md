@@ -48,22 +48,26 @@ You are analyzing a codebase dependency graph optimized for AI understanding. Th
 ---
 
 # CODE_GRAPH
-NODES:18 EDGES:3
+NODES:31 EDGES:2
 
 ## DIRECTORY_TREE
 ROOT: torchtitan/experiments/fl/configs/
+└─ tests/ → TST[1]
 
 ## ARCHITECTURAL_CLUSTERS
 
-### UTILITY_LAYER
-NODES:18 CALL_DEPTH:2
+### TESTS
+NODES:12 CALL_DEPTH:1
 
-__init__.py→[parse_args((self,args: list[str] = sys.argv[1:]))→{config::ensure_mosaic_job_config_types},__init__((self))[CTOR,DUNDER],load_mosaic_job_config((args: list[str] | None = None))] config.py→[_as_dict((value: Mapping[str,Any] | None)),ensure_mosaic_job_config_types((job_config: MosaicJobConfig))] optimizers.py→[] 
+test_config_manager.py→[teardown_module(void),test_parse_args_produces_typed_dataclasses(void)[TEST],test_cli_overrides_nested_metrics_field(void)[TEST],test_toml_invalid_metrics_payload_rejected((tmp_path: Path))[TEST],test_manual_init_coerces_nested_sections(void)[TEST],test_manual_init_invalid_section_type_raises(void)[TEST]] 
+### UTILITY_LAYER
+NODES:19 CALL_DEPTH:1
+
+__init__.py→[__init__((self))[CTOR,DUNDER],parse_args((self,args: list[str] = sys.argv[1:])),load_mosaic_job_config((args: list[str] | None = None))] config.py→[_as_dict((value: Mapping[str,Any] | None)),_coerce_nested_dataclass((value: Any,cls: type[T],*,factory: Callable[[Mapping[str,Any]],T] | None = None,))] optimizers.py→[] 
 
 ## DEPENDENCY_PATTERNS
 
 ### EDGE_PATTERNS
-Call: 1 edges
 Contains: 2 edges
 
 ### CROSS_CLUSTER_FLOW
