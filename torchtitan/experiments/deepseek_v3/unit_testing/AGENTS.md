@@ -67,8 +67,8 @@ benchmark_kernels.py→[benchmark_quant_kernels((shapes,dtype=torch.bfloat16,war
 ## DEPENDENCY_PATTERNS
 
 ### EDGE_PATTERNS
-Contains: 7 edges
 Call: 17 edges
+Contains: 7 edges
 
 ### CROSS_CLUSTER_FLOW
 TESTS→UTILITY_LAYER: 17

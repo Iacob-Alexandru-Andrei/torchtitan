@@ -7,27 +7,53 @@
 
 from __future__ import annotations
 
+import contextlib
+
 import math
-from collections.abc import Sequence
+from collections.abc import Iterator, Mapping, Sequence
+from dataclasses import dataclass
 from enum import Enum
 from typing import Any, TYPE_CHECKING
 
 import torch
+from torch import Tensor
+from torchmetrics import Metric
 
 from torchtitan.components.metrics import MetricsProcessor
 from torchtitan.distributed import utils as dist_utils
-from torchtitan.experiments.fl.configs.config import (
-    ActivationMonitorConfig,
-    MetricsConfig,
-    OptimizerMonitorConfig,
+from torchtitan.experiments.fl.callbacks import (
+    Callback,
+    CallbackSetupContext,
+    CallbackStepContext,
+    CallbackValidationContext,
 )
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
     from torch.distributed.device_mesh import DeviceMesh
+    from torch.optim import Optimizer
 
-    from torchtitan.components.optimizer import OptimizersContainer
+    from torchtitan.experiments.fl.configs.config import (
+        ActivationMonitorConfig,
+        BetasMonitorConfig,
+        HyperparameterSwitchConfig,
+        LRMonitorConfig,
+        OptimizerMonitorConfig,
+        VSMonitorConfig,
+    )
+
+
+@dataclass(frozen=True)
+class HyperparameterSwitchParams:
+    """Configuration payload for :class:`HyperparameterSwitchCallback`."""
+
+    enabled: bool
+    steps: Sequence[int]
+    new_vs: Sequence[float] | None
+    new_betas: Sequence[float] | None
+    reset_momenta: Sequence[str]
+    log_metrics: bool
 
 
 class AggregationType(Enum):
@@ -36,6 +62,139 @@ class AggregationType(Enum):
     L2_NORM = "l2_norm"
     MIN = "min"
     MAX = "max"
+
+
+class PureUnigramCrossEntropy(Metric):
+    """TorchMetric that computes unigram cross entropy for LM targets.
+
+    This metric accumulates the per-token cross entropy between the provided
+    targets and a pre-computed unigram distribution. Ignored indices are
+    excluded from both the loss and item count.
+    """
+
+    full_state_update = False
+
+    def __init__(
+        self,
+        unigram_probabilities: Tensor,
+        ignore_index: int = -100,
+        *,
+        dist_sync_on_step: bool = False,
+    ) -> None:
+        super().__init__(dist_sync_on_step=dist_sync_on_step)
+
+        if unigram_probabilities.dim() != 1:
+            msg = "unigram_probabilities must be a 1D tensor."
+            raise ValueError(msg)
+
+        if torch.any(unigram_probabilities < 0):
+            msg = "unigram_probabilities must contain non-negative values."
+            raise ValueError(msg)
+
+        if not torch.any(unigram_probabilities > 0):
+            msg = "unigram_probabilities must include at least one positive value."
+            raise ValueError(msg)
+
+        prob_dtype = (
+            unigram_probabilities.dtype
+            if unigram_probabilities.is_floating_point()
+            else torch.float32
+        )
+        self.ignore_index = ignore_index
+        # Store as buffer so it moves with the metric across devices.
+        self.register_buffer(
+            "unigram_probabilities",
+            unigram_probabilities.clone().detach().to(dtype=prob_dtype),
+        )
+        self.add_state(
+            "sum_loss",
+            default=torch.tensor(0.0, dtype=prob_dtype),
+            dist_reduce_fx="sum",
+        )
+        self.add_state(
+            "total_items",
+            default=torch.tensor(0, dtype=torch.long),
+            dist_reduce_fx="sum",
+        )
+
+    def update(self, output: Mapping | Tensor, target: Tensor) -> None:  # noqa: ARG002
+        """Update the metric state with a batch of targets."""
+        target = target.view(-1).to(torch.long)
+
+        valid_mask = target != self.ignore_index
+        if not torch.any(valid_mask):
+            return
+
+        target_filtered = target[valid_mask]
+        vocab_size = self.unigram_probabilities.shape[0]
+        in_vocab_mask = (target_filtered >= 0) & (target_filtered < vocab_size)
+        if not torch.any(in_vocab_mask):
+            return
+
+        # Use the unigram probabilities corresponding to the valid targets.
+        unigram_probs = self.unigram_probabilities
+        if unigram_probs.device != target.device:
+            unigram_probs = unigram_probs.to(target.device)
+
+        target_in_vocab = target_filtered[in_vocab_mask]
+        selected_probs = unigram_probs[target_in_vocab]
+        eps = torch.finfo(selected_probs.dtype).tiny
+        losses = -torch.log(selected_probs.clamp_min(eps))
+
+        loss_sum = losses.sum().to(self.sum_loss.device)
+        self.sum_loss += loss_sum
+
+        items = int(in_vocab_mask.sum().item())
+        self.total_items += items
+
+    def compute(self) -> Tensor:
+        """Return the average unigram cross entropy across all updates."""
+        if int(self.total_items.item()) == 0:
+            return self.sum_loss.new_zeros(())
+        total_items = self.total_items.to(self.sum_loss.dtype)
+        return self.sum_loss / total_items
+
+
+_UNIGRAM_METRICS: list[PureUnigramCrossEntropy] = []
+
+
+def add_unigram_metric(metric: PureUnigramCrossEntropy) -> None:
+    """Track a unigram cross-entropy metric for logging."""
+    _UNIGRAM_METRICS.append(metric)
+
+
+def collect_unigram_metrics(*, reset: bool = True) -> tuple[float, int]:
+    """Return the local summed loss and token count for unigram metrics."""
+    total_loss = 0.0
+    total_items = 0
+
+    for metric in _UNIGRAM_METRICS:
+        items = int(metric.total_items.item())
+        if items == 0:
+            continue
+        loss_value = float(metric.sum_loss.item())
+        total_loss += loss_value
+        total_items += items
+        if reset:
+            metric.sum_loss.zero_()
+            metric.total_items.zero_()
+
+    return total_loss, total_items
+
+
+def reset_unigram_metrics() -> None:
+    """Reset tracked unigram loss accumulators to zero."""
+    for metric in _UNIGRAM_METRICS:
+        metric.sum_loss.zero_()
+        metric.total_items.zero_()
+
+
+def update_unigram_metrics(labels: Tensor) -> None:
+    """Update registered unigram metrics with the latest batch labels."""
+    if not _UNIGRAM_METRICS:
+        return
+    for metric in _UNIGRAM_METRICS:
+        metric.update({}, labels)
 
 
 def compute_skewness(value: torch.Tensor) -> torch.Tensor:
@@ -74,7 +233,7 @@ def compute_kurtosis(value: torch.Tensor) -> torch.Tensor:
     return (m_4 / (var**2)).mean()
 
 
-class ActivationMonitor:
+class ActivationMonitor(Callback):
     """Collects activation statistics across the full model.
 
     By default, only the following metrics are collected:
@@ -125,6 +284,37 @@ class ActivationMonitor:
         self._microbatch_counter = 0
         self._device: torch.device | None = None
         self._registered = False
+        self._model_ref: torch.nn.Module | None = None
+
+    def setup(self, context: CallbackSetupContext) -> None:
+        """Register activation hooks when the first model shard is available."""
+        if not self.enabled or self._registered:
+            return
+        if not context.model_parts:
+            return
+        model = context.model_parts[0]
+        self.register(model)
+        self._model_ref = model
+
+    def on_step_end(self, context: CallbackStepContext) -> None:
+        """Finalize metrics at the end of each logging interval."""
+        if not self.enabled or not self._registered:
+            return
+        self.finalize(context.step, context.logger, context.mesh)
+
+    def close(self) -> None:
+        """Remove hooks and release references when training ends."""
+        if self._pre_handle is not None:
+            self._pre_handle.remove()
+            self._pre_handle = None
+        for handle in self._handles:
+            handle.remove()
+        self._handles.clear()
+        self._module_names.clear()
+        self._metrics.clear()
+        self._collect_this_step = False
+        self._registered = False
+        self._model_ref = None
 
     def _is_metric_enabled(self, metric_key: str) -> bool:
         """Check if a metric is enabled for collection."""
@@ -446,7 +636,7 @@ class ActivationMonitor:
         self._metrics = {}
 
 
-class OptimizerMonitor:
+class OptimizerMonitor(Callback):
     """Compute and log the L2 norm of gradients.
 
     Args:
@@ -465,6 +655,12 @@ class OptimizerMonitor:
         self.log_optimizer_metrics = log_optimizer_metrics
         self.only_global = only_global
         self.interval = interval
+        self._model_ref: torch.nn.Module | None = None
+
+    def setup(self, context: CallbackSetupContext) -> None:
+        """Store a reference to the first model shard for later logging."""
+        if context.model_parts:
+            self._model_ref = context.model_parts[0]
 
     def _reduce_metrics_across_ranks(
         self, optimizer_metrics: dict[str, torch.Tensor], mesh: DeviceMesh
@@ -500,15 +696,27 @@ class OptimizerMonitor:
 
         return reduced_metrics
 
-    def batch_end(  # noqa: C901, PLR0912, PLR0915
+    def on_step_end(  # noqa: C901, PLR0912, PLR0915
         self,
-        step: int,
-        model: torch.nn.Module,
-        optimizers: OptimizersContainer,
-        logger: Any,
-        mesh: DeviceMesh | None = None,
+        context: CallbackStepContext,
     ) -> None:
         """Calculate the statistics at the end of the batch."""
+        optimizers = context.optimizers
+        if optimizers is None:
+            return
+        if optimizers.optimizers is None:
+            return
+        if len(optimizers.optimizers) == 0:
+            return
+
+        model = context.model_parts[0] if context.model_parts else self._model_ref
+        if model is None:
+            return
+
+        step = context.step
+        mesh = context.mesh
+        logger = context.logger
+
         # Early exit if monitoring is disabled (interval <= 0)
         if self.interval <= 0:
             return
@@ -623,53 +831,363 @@ class OptimizerMonitor:
         logger.log(optimizer_metrics, step)
 
 
+class LRMonitor(Callback):
+    """Logs the learning rate of each optimizer parameter group."""
+
+    def __init__(self, *, interval: int = 1, enabled: bool = True) -> None:
+        self.interval = interval
+        self.enabled = enabled
+
+    def on_step_end(self, context: CallbackStepContext) -> None:
+        """Log the current learning rates when the interval is reached."""
+        if not self.enabled or self.interval <= 0:
+            return
+        if context.optimizers is None:
+            return
+        if context.step % self.interval != 0:
+            return
+
+        metrics: dict[str, float] = {}
+        for optimizer in context.optimizers:
+            name = optimizer.__class__.__name__
+            for idx, group in enumerate(optimizer.param_groups):
+                lr = group.get("lr")
+                if lr is None:
+                    continue
+                metrics[f"lr-{name}/group{idx}"] = float(lr)
+
+        if metrics:
+            context.logger.log(metrics, context.step)
+
+
+class BetasMonitor(Callback):
+    """Logs optimizer beta hyperparameters."""
+
+    def __init__(self, *, interval: int = 0, enabled: bool = False) -> None:
+        self.interval = interval
+        self.enabled = enabled
+
+    def on_step_end(self, context: CallbackStepContext) -> None:
+        """Record beta hyperparameters for each optimizer group when enabled."""
+        if not self._should_log(context):
+            return
+
+        metrics = dict(self._collect_metrics(context.optimizers))
+        if metrics:
+            context.logger.log(metrics, context.step)
+
+    def _should_log(self, context: CallbackStepContext) -> bool:
+        """Return ``True`` when beta metrics should be emitted for the step."""
+        if not self.enabled or self.interval <= 0:
+            return False
+        if context.optimizers is None:
+            return False
+        return context.step % self.interval == 0
+
+    def _collect_metrics(
+        self, optimizers: Sequence[torch.optim.Optimizer]
+    ) -> Iterator[tuple[str, float]]:
+        for name, group_idx, group in self._iter_param_groups(optimizers):
+            betas = group.get("betas")
+            if betas is None:
+                continue
+            for beta_idx, beta_value in enumerate(self._iter_values(betas), start=1):
+                yield (
+                    f"beta{beta_idx}-{name}/group{group_idx}",
+                    self._as_float(beta_value),
+                )
+
+    def _iter_param_groups(
+        self, optimizers: Sequence[torch.optim.Optimizer]
+    ) -> Iterator[tuple[str, int, dict[str, Any]]]:
+        for optimizer in optimizers:
+            name = optimizer.__class__.__name__
+            for group_idx, group in enumerate(optimizer.param_groups):
+                yield name, group_idx, group
+
+    def _iter_values(self, betas: Any) -> Iterator[Any]:
+        if isinstance(betas, Sequence) and not isinstance(betas, (str, bytes)):
+            yield from betas
+        else:
+            yield betas
+
+    def _as_float(self, value: Any) -> float:
+        if isinstance(value, torch.Tensor):
+            return float(value.detach().item())
+        return float(value)
+
+
+class VSMonitor(Callback):
+    """Logs quasi-hyperbolic v parameters if available."""
+
+    def __init__(self, *, interval: int = 0, enabled: bool = False) -> None:
+        self.interval = interval
+        self.enabled = enabled
+
+    def on_step_end(self, context: CallbackStepContext) -> None:
+        """Log quasi-hyperbolic ``v`` parameters at the configured cadence."""
+        if not self.enabled or self.interval <= 0:
+            return
+        if context.optimizers is None:
+            return
+        if context.step % self.interval != 0:
+            return
+
+        metrics: dict[str, float] = {}
+        for optimizer in context.optimizers:
+            name = optimizer.__class__.__name__
+            for idx, group in enumerate(optimizer.param_groups):
+                vs = group.get("vs")
+                if vs is None:
+                    continue
+                v_values = (
+                    list(vs)
+                    if isinstance(vs, Sequence) and not isinstance(vs, (str, bytes))
+                    else [vs]
+                )
+                for v_idx, v_value in enumerate(v_values):
+                    v_scalar = (
+                        float(v_value.detach().item())
+                        if isinstance(v_value, torch.Tensor)
+                        else float(v_value)
+                    )
+                    metrics[f"v{v_idx}-{name}/group{idx}"] = v_scalar
+
+        if metrics:
+            context.logger.log(metrics, context.step)
+
+
+class HyperparameterSwitchCallback(Callback):
+    """Switch optimizer betas/vs at configured steps and optionally reset momenta."""
+
+    def __init__(self, params: HyperparameterSwitchParams) -> None:
+        self.enabled = params.enabled and bool(params.steps)
+        self.steps = {int(step) for step in params.steps if step >= 0}
+        self.new_vs = (
+            tuple(float(v) for v in params.new_vs)
+            if params.new_vs is not None
+            else None
+        )
+        self.new_betas = (
+            tuple(float(b) for b in params.new_betas)
+            if params.new_betas is not None
+            else None
+        )
+        self.reset_momenta = tuple(params.reset_momenta)
+        self.log_metrics = params.log_metrics
+        self._applied_steps: set[int] = set()
+
+    def on_step_end(self, context: CallbackStepContext) -> None:
+        """Apply configured hyperparameter switches when their step is reached."""
+        if not self._should_apply(context.step):
+            return
+
+        optimizers = context.optimizers
+        if optimizers is None:
+            return
+
+        self._apply_switches(optimizers)
+        self._log_switch_metrics(context)
+        self._applied_steps.add(context.step)
+
+    def _should_apply(self, step: int) -> bool:
+        """Return ``True`` if the switch logic should run for the given step."""
+        if not self.enabled:
+            return False
+        if step not in self.steps:
+            return False
+        return step not in self._applied_steps
+
+    def _apply_switches(self, optimizers: Sequence[Optimizer]) -> None:
+        """Mutate optimizer hyperparameters according to the configured switches."""
+        for optimizer in optimizers:
+            if self.new_vs is not None:
+                self._update_group_values(optimizer.param_groups, "vs", self.new_vs)
+            if self.new_betas is not None:
+                self._update_group_values(
+                    optimizer.param_groups, "betas", self.new_betas
+                )
+            if self.reset_momenta:
+                self._reset_momenta(optimizer.state)
+
+    def _log_switch_metrics(self, context: CallbackStepContext) -> None:
+        """Emit logging payload summarizing the applied hyperparameter switches."""
+        if not self.log_metrics:
+            return
+
+        payload: dict[str, float] = {}
+        if self.new_vs is not None:
+            for idx, value in enumerate(self.new_vs):
+                payload[f"hyper_switch/v{idx}"] = value
+        if self.new_betas is not None:
+            for idx, value in enumerate(self.new_betas, start=1):
+                payload[f"hyper_switch/beta{idx}"] = value
+        if payload:
+            context.logger.log(payload, context.step)
+
+    def _update_group_values(
+        self, param_groups: list[dict[str, Any]], key: str, values: tuple[float, ...]
+    ) -> None:
+        for group in param_groups:
+            if key not in group:
+                continue
+            current_value = group[key]
+            if isinstance(current_value, torch.Tensor):
+                target = torch.tensor(
+                    values, device=current_value.device, dtype=current_value.dtype
+                )
+                if current_value.shape == target.shape:
+                    current_value.copy_(target)
+                else:
+                    group[key] = target
+            elif isinstance(current_value, Sequence) and not isinstance(
+                current_value, (str, bytes)
+            ):
+                group[key] = tuple(values)
+            elif isinstance(current_value, (float, int)):
+                group[key] = float(values[0])
+            else:
+                group[key] = tuple(values)
+
+    def _reset_momenta(self, optimizer_state: dict[Any, dict[str, Any]]) -> None:
+        for state in optimizer_state.values():
+            for name in self.reset_momenta:
+                if name not in state:
+                    continue
+                self._zero_state_value(state[name])
+
+    def _zero_state_value(self, value: Any) -> None:
+        if isinstance(value, torch.Tensor):
+            value.zero_()
+        elif isinstance(value, dict):
+            for inner in value.values():
+                self._zero_state_value(inner)
+        elif isinstance(value, (list, tuple)):
+            for inner in value:
+                self._zero_state_value(inner)
+
+
 class FLMetricsProcessor(MetricsProcessor):
-    """Extension of MetricsProcessor to include optimizer monitoring."""
+    """Extension of MetricsProcessor that wires the FL callback stack."""
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
 
         # Get metrics config from fl_metrics field
-        fl_metrics_raw = self.job_config.fl_metrics  # type: ignore[attr-defined]
-
-        # Convert dict to dataclass if needed
-        if isinstance(fl_metrics_raw, dict):
-            optimizer_monitor_dict = fl_metrics_raw.get("optimizer_monitor", {})
-            activation_monitor_dict = fl_metrics_raw.get("activation_monitor", {})
-
-            optimizer_config = OptimizerMonitorConfig(**optimizer_monitor_dict)
-            activation_config = ActivationMonitorConfig(**activation_monitor_dict)
-            fl_metrics_config = MetricsConfig(
-                optimizer_monitor=optimizer_config, activation_monitor=activation_config
-            )
-        else:
-            fl_metrics_config = fl_metrics_raw
+        fl_metrics_config = self.job_config.fl_metrics.unwrap()  # type: ignore[attr-defined]
 
         optimizer_config = fl_metrics_config.optimizer_monitor
-        interval = optimizer_config.interval
-        only_global = optimizer_config.only_global
-        log_optimizer_metrics = optimizer_config.log_metrics
-
         activation_config = fl_metrics_config.activation_monitor
-        activation_enabled = activation_config.enabled
-        activation_interval = activation_config.interval
-        ignore_types = activation_config.ignore_module_types
+        lr_config = fl_metrics_config.lr_monitor
+        betas_config = fl_metrics_config.betas_monitor
+        vs_config = fl_metrics_config.vs_monitor
+        hyper_switch_config = fl_metrics_config.hyperparameter_switch
 
-        self.optimizer_monitor = OptimizerMonitor(
-            interval=interval,
-            only_global=only_global,
-            log_optimizer_metrics=log_optimizer_metrics,
+        self.callbacks: list[Callback] = []
+
+        self.optimizer_monitor = self._init_optimizer_monitor(optimizer_config)
+        self.activation_monitor = self._init_activation_monitor(activation_config)
+        self.lr_monitor = self._init_lr_monitor(lr_config)
+        self.betas_monitor = self._init_betas_monitor(betas_config)
+        self.vs_monitor = self._init_vs_monitor(vs_config)
+        self.hyperparameter_switch = self._init_hyperparameter_switch(
+            hyper_switch_config
         )
 
-        if activation_enabled:
-            self.activation_monitor: ActivationMonitor | None = ActivationMonitor(
-                interval=activation_interval,
-                ignore_module_types=ignore_types if ignore_types else (),
-                gradient_accumulation_steps=activation_config.gradient_accumulation_steps,
-                enabled_metrics=activation_config.enabled_metrics,
-            )
-        else:
-            self.activation_monitor = None
+        self._callbacks_setup_done = False
+
+    def _init_optimizer_monitor(
+        self, optimizer_config: OptimizerMonitorConfig
+    ) -> OptimizerMonitor | None:
+        if optimizer_config.interval <= 0:
+            return None
+        monitor = OptimizerMonitor(
+            interval=optimizer_config.interval,
+            only_global=optimizer_config.only_global,
+            log_optimizer_metrics=optimizer_config.log_metrics,
+        )
+        self.callbacks.append(monitor)
+        return monitor
+
+    def _init_activation_monitor(
+        self, activation_config: ActivationMonitorConfig
+    ) -> ActivationMonitor | None:
+        activation_enabled = activation_config.enabled or (
+            activation_config.interval > 0
+        )
+        if not activation_enabled:
+            return None
+        monitor = ActivationMonitor(
+            interval=activation_config.interval,
+            ignore_module_types=(
+                activation_config.ignore_module_types
+                if activation_config.ignore_module_types
+                else ()
+            ),
+            gradient_accumulation_steps=activation_config.gradient_accumulation_steps,
+            enabled_metrics=activation_config.enabled_metrics,
+        )
+        self.callbacks.append(monitor)
+        return monitor
+
+    def _init_lr_monitor(self, lr_config: LRMonitorConfig) -> LRMonitor | None:
+        if not (lr_config.enabled and lr_config.interval > 0):
+            return None
+        monitor = LRMonitor(
+            interval=lr_config.interval,
+            enabled=lr_config.enabled,
+        )
+        self.callbacks.append(monitor)
+        return monitor
+
+    def _init_betas_monitor(
+        self, betas_config: BetasMonitorConfig
+    ) -> BetasMonitor | None:
+        if not (betas_config.enabled and betas_config.interval > 0):
+            return None
+        monitor = BetasMonitor(
+            interval=betas_config.interval,
+            enabled=betas_config.enabled,
+        )
+        self.callbacks.append(monitor)
+        return monitor
+
+    def _init_vs_monitor(self, vs_config: VSMonitorConfig) -> VSMonitor | None:
+        if not (vs_config.enabled and vs_config.interval > 0):
+            return None
+        monitor = VSMonitor(
+            interval=vs_config.interval,
+            enabled=vs_config.enabled,
+        )
+        self.callbacks.append(monitor)
+        return monitor
+
+    def _init_hyperparameter_switch(
+        self, hyper_switch_config: HyperparameterSwitchConfig
+    ) -> HyperparameterSwitchCallback | None:
+        if not (hyper_switch_config.enabled and hyper_switch_config.steps):
+            return None
+        params = HyperparameterSwitchParams(
+            enabled=hyper_switch_config.enabled,
+            steps=tuple(int(step) for step in hyper_switch_config.steps),
+            new_vs=(
+                tuple(hyper_switch_config.new_vs)
+                if hyper_switch_config.new_vs is not None
+                else None
+            ),
+            new_betas=(
+                tuple(hyper_switch_config.new_betas)
+                if hyper_switch_config.new_betas is not None
+                else None
+            ),
+            reset_momenta=tuple(hyper_switch_config.reset_momenta),
+            log_metrics=hyper_switch_config.log_metrics,
+        )
+        switch_callback = HyperparameterSwitchCallback(params)
+        if not switch_callback.enabled:
+            return None
+        self.callbacks.append(switch_callback)
+        return switch_callback
 
     def should_log(self, step: int) -> bool:
         """Determine if metrics should be logged at the current step.
@@ -684,6 +1202,87 @@ class FLMetricsProcessor(MetricsProcessor):
         if self.activation_monitor and self.activation_monitor.should_log_step(step):
             return True
         return base_decision
+
+    def _build_unigram_payload(self, mesh: DeviceMesh | None) -> dict[str, float]:
+        local_loss, local_items = collect_unigram_metrics(reset=False)
+        if local_items == 0:
+            reset_unigram_metrics()
+            return {"pure_unigram_cross_entropy": 0.0}
+
+        device = torch.device("cpu")
+        if self.model_parts:
+            with contextlib.suppress(StopIteration):
+                device = next(self.model_parts[0].parameters()).device
+
+        loss_tensor = torch.tensor(
+            float(local_loss), device=device, dtype=torch.float64
+        )
+        items_tensor = torch.tensor(
+            float(local_items), device=device, dtype=torch.float64
+        )
+
+        if mesh is not None:
+            loss_tensor = dist_utils.dist_sum(loss_tensor, mesh)
+            items_tensor = dist_utils.dist_sum(items_tensor, mesh)
+
+        global_loss = float(loss_tensor)
+        global_items = float(items_tensor)
+        reset_unigram_metrics()
+
+        if global_items <= 0:
+            return {"pure_unigram_cross_entropy": 0.0}
+
+        return {
+            "pure_unigram_cross_entropy": global_loss / global_items,
+            "pure_unigram_cross_entropy/token_count": global_items,
+        }
+
+    def _ensure_callbacks_setup(self) -> None:
+        if self._callbacks_setup_done:
+            return
+        if not self.callbacks:
+            self._callbacks_setup_done = True
+            return
+        if not self.model_parts or self.optimizers is None:
+            return
+
+        setup_context = CallbackSetupContext(
+            model_parts=self.model_parts,
+            optimizers=self.optimizers,
+            logger=self.logger,
+            parallel_dims=self.parallel_dims,
+            job_config=self.job_config,
+        )
+        for callback in self.callbacks:
+            callback.setup(setup_context)
+        self._callbacks_setup_done = True
+
+    def _run_step_callbacks(self, step: int, mesh: DeviceMesh | None) -> None:
+        if not self.callbacks:
+            return
+        if not self.model_parts or self.optimizers is None:
+            return
+
+        context = CallbackStepContext(
+            step=step,
+            model_parts=self.model_parts,
+            optimizers=self.optimizers,
+            logger=self.logger,
+            mesh=mesh,
+        )
+        for callback in self.callbacks:
+            callback.on_step_end(context)
+
+    def _run_validation_callbacks(self, loss: float, step: int) -> None:
+        if not self.callbacks:
+            return
+        context = CallbackValidationContext(
+            step=step,
+            loss=loss,
+            logger=self.logger,
+        )
+        for callback in self.callbacks:
+            callback.on_validation_end(context)
 
     def log(
         self,
@@ -703,20 +1302,43 @@ class FLMetricsProcessor(MetricsProcessor):
             extra_metrics: Any additional metrics to log.
 
         """
-        super().log(step, global_avg_loss, global_max_loss, grad_norm, extra_metrics)
-
         mesh = (
             self.parallel_dims.world_mesh["dp_cp"]
             if self.parallel_dims.dp_cp_enabled
             else None
         )
+        unigram_payload = self._build_unigram_payload(mesh)
+        combined_metrics = dict(extra_metrics) if extra_metrics else {}
+        if unigram_payload:
+            combined_metrics.update(unigram_payload)
 
-        if self.model_parts and self.optimizers:
-            self.optimizer_monitor.batch_end(
-                step, self.model_parts[0], self.optimizers, self.logger, mesh
-            )
+        super().log(
+            step,
+            global_avg_loss,
+            global_max_loss,
+            grad_norm,
+            extra_metrics=combined_metrics or None,
+        )
 
-        if self.activation_monitor and self.model_parts:
-            if not self.activation_monitor.is_registered:
-                self.activation_monitor.register(self.model_parts[0])
-            self.activation_monitor.finalize(step, self.logger, mesh)
+        self._ensure_callbacks_setup()
+        self._run_step_callbacks(step, mesh)
+
+    def log_validation(self, loss: float, step: int) -> None:
+        """Log validation metrics and run validation-specific callbacks."""
+        super().log_validation(loss, step)
+        mesh = (
+            self.parallel_dims.world_mesh["dp_cp"]
+            if self.parallel_dims.dp_cp_enabled
+            else None
+        )
+        unigram_payload = self._build_unigram_payload(mesh)
+        if unigram_payload:
+            self.logger.log(unigram_payload, step)
+        self._ensure_callbacks_setup()
+        self._run_validation_callbacks(loss, step)
+
+    def close(self) -> None:
+        """Close registered callbacks and flush any pending metrics."""
+        for callback in self.callbacks:
+            callback.close()
+        super().close()

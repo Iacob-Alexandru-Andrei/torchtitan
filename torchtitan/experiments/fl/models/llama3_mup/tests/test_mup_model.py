@@ -4,6 +4,8 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 
+"""Unit tests covering the MuP-enabled LLaMA3 model variant."""
+
 import unittest
 
 import torch
@@ -14,7 +16,10 @@ from torchtitan.experiments.fl.models.llama3_mup.model.mup_model import Transfor
 
 
 class TestMuPLlamaModel(unittest.TestCase):
-    def setUp(self):
+    """Validate core behaviours of the MuP LLaMA transformer."""
+
+    def setUp(self) -> None:
+        """Instantiate a transformer with MuP configuration for reuse."""
         self.mup_config = {
             "mup_enabled": True,
             "mup_width_multiplier": 2.0,
@@ -38,21 +43,24 @@ class TestMuPLlamaModel(unittest.TestCase):
         )
         self.model = Transformer(self.model_args)
 
-    def test_model_initialization(self):
-        self.assertIsInstance(self.model, Transformer)
+    def test_model_initialization(self) -> None:
+        """Ensure peri-norm layers and embedding norms are constructed."""
+        assert isinstance(self.model, Transformer)
         # Check if peri_norm layers are created
         for layer in self.model.layers.values():
-            self.assertTrue(hasattr(layer, "post_attn_norm"))
-            self.assertTrue(hasattr(layer, "post_ffn_norm"))
+            assert hasattr(layer, "post_attn_norm")
+            assert hasattr(layer, "post_ffn_norm")
         # Check if embedding norm is created
-        self.assertIsNotNone(self.model.tok_embeddings.norm)
+        assert self.model.tok_embeddings.norm is not None
 
-    def test_forward_pass(self):
+    def test_forward_pass(self) -> None:
+        """Verify that forward pass returns logits of the expected shape."""
         input_ids = torch.randint(0, self.model_args.vocab_size, (2, 128))
         output = self.model.forward(input_ids)
-        self.assertEqual(output.shape, (2, 128, self.model_args.vocab_size))
+        assert output.shape == (2, 128, self.model_args.vocab_size)
 
-    def test_weight_initialization(self):
+    def test_weight_initialization(self) -> None:
+        """Ensure weight initialization completes without raising errors."""
         # A simple check to ensure no errors during init
         self.model.init_weights()
 

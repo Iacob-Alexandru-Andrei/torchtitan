@@ -14,16 +14,18 @@ from torchtitan.components.ft import FTManager
 from torchtitan.components.optimizer import OptimizersContainer
 from torchtitan.config import Optimizer as OptimizerConfig
 from torchtitan.distributed import ParallelDims
-from torchtitan.experiments.fl.components import build_metrics_processor
 from torchtitan.experiments.fl.configs.optimizers import MosaicOptimizerConfig
-from torchtitan.experiments.fl.dataloader.dataloader import build_mosaic_dataloader
-from torchtitan.experiments.fl.dataloader.tokenizer import build_mosaic_tokenizer
-from torchtitan.experiments.fl.validate import build_mosaic_validator
-from torchtitan.experiments.fl.models.llama3_mup.train_configs import (
-    get_train_spec as get_llama3_mup_train_spec,
+from torchtitan.experiments.fl.models.constants import MOSAIC_LLAMA_VOCAB_SIZE
+from torchtitan.experiments.fl.models.utils import (
+    MosaicSpecOverrides,
+    ensure_mosaic_spec,
 )
 from torchtitan.experiments.fl.optimizer_builder import build_mosaic_optimizers
-from torchtitan.protocols.train_spec import TokenizerBuilder, TrainSpec
+from torchtitan.experiments.fl.validate import build_mosaic_validator
+from torchtitan.protocols.train_spec import (
+    get_train_spec as get_registered_train_spec,
+    TrainSpec,
+)
 
 if TYPE_CHECKING:
     from torchtitan.experiments.fl.models.llama3_mup.model.mup_model import Transformer
@@ -65,10 +67,14 @@ def build_mosaic_mup_optimizers(
     }
 
     # MuP requires custom parameter groups for different learning rates.
-    param_groups_or_iter, final_optimizer_kwargs = model.get_optimizer_param_groups(initial_optimizer_kwargs)
+    param_groups_or_iter, final_optimizer_kwargs = model.get_optimizer_param_groups(
+        initial_optimizer_kwargs
+    )
 
     # Convert Iterator to None for build_optimizers (it will use model.parameters())
-    param_groups_list = param_groups_or_iter if isinstance(param_groups_or_iter, list) else None
+    param_groups_list = (
+        param_groups_or_iter if isinstance(param_groups_or_iter, list) else None
+    )
 
     # Update the config with MuP-adjusted values
     optimizer_config.eps = final_optimizer_kwargs.get("eps", optimizer_config.eps)
@@ -84,27 +90,23 @@ def build_mosaic_mup_optimizers(
     )
 
 
+def _update_vocab_sizes(base_spec: TrainSpec, mosaic_spec: TrainSpec) -> TrainSpec:
+    model_args = {
+        name: replace(config, vocab_size=MOSAIC_LLAMA_VOCAB_SIZE)
+        for name, config in base_spec.model_args.items()
+    }
+    return replace(mosaic_spec, model_args=model_args)
+
+
 def get_train_spec() -> TrainSpec:
-    """Get the training specification for Llama3 MuP with Mosaic streaming support.
-
-    This function wraps the base Llama3 MuP TrainSpec to make it compatible with
-    Mosaic streaming by replacing the dataloader, tokenizer, and optimizer builders
-    to support Mosaic-specific optimizers like DecoupledAdamW.
-    """
-    # Get the base Llama3 MuP spec
-    base_spec = get_llama3_mup_train_spec()
-
-    # Update all model configurations with larger vocab size for Mosaic tokenizer
-    model_args = {name: replace(config, vocab_size=50368) for name, config in base_spec.model_args.items()}
-
-    # Return a new spec with Mosaic components and updated vocab sizes
-    return replace(
-        base_spec,
-        name="mosaic_llama3_mup",
-        model_args=model_args,
-        build_dataloader_fn=build_mosaic_dataloader,
-        build_tokenizer_fn=cast("TokenizerBuilder", build_mosaic_tokenizer),
-        build_optimizers_fn=build_mosaic_mup_optimizers,
-        build_metrics_processor_fn=build_metrics_processor,
-        build_validator_fn=build_mosaic_validator,
+    """Get the training specification for Llama3 MuP with Mosaic streaming support."""
+    spec_name = ensure_mosaic_spec(
+        "llama3_mup",
+        spec_name="mosaic_llama3_mup",
+        overrides=MosaicSpecOverrides(
+            optimizers=build_mosaic_mup_optimizers,
+            validator=build_mosaic_validator,
+            post_transform=_update_vocab_sizes,
+        ),
     )
+    return get_registered_train_spec(spec_name)

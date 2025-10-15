@@ -28,10 +28,9 @@ hf_assets_path = "./tests/assets/tokenizer"
 
 [optimizer]
 name = "ADOPT"
-lr = 8e-4
+lr = 1e-4
 eps = 1e-8
 betas = [0.9,0.99]
-vs = [0.98]
 implementation = "foreach"
 
 [fl_metrics.optimizer_monitor]
@@ -43,14 +42,29 @@ log_metrics = true
 interval = 1
 ignore_module_types = ["dropout", "ln"]
 
+[fl_metrics.lr_monitor]
+enabled = true
+interval = 1
+
+[fl_metrics.betas_monitor]
+enabled = true
+interval = 1
+
+[fl_metrics.vs_monitor]
+enabled = true
+interval = 1
+
 [lr_scheduler]
 warmup_steps = 2  # lr scheduler warm up, normally 20% of the train steps
 decay_ratio = 0.8  # lr scheduler decay ratio, 80% of the train steps
 decay_type = "linear"
 min_lr_factor = 0.0
+switch_step = 5
+switch_scale = 0.75
 
 [training]
-local_batch_size = 8
+local_batch_size = 2
+global_batch_size = 8
 seq_len = 2048
 max_norm = 1.0  # grad norm clipping
 steps = 20
@@ -59,7 +73,7 @@ dataset = "c4_test"  # supported datasets: c4_test (2K), c4 (177M)
 # Mosaic-specific configurations are now at the root level
 [mosaic_dataloader]
 name = "text"
-num_workers = 8
+num_workers = 1
 prefetch_factor = 2
 pin_memory = true
 persistent_workers = true
@@ -81,11 +95,24 @@ batching_method = "random"
 split = "train"
 root_remote = "s3://smollm-corpus/shared"
 root_local = "/nfs-share/datasets/photon/dataset_cache/smollm-corpus-shared"
+sampling_groups_mode = "concatenate"  # set to "concatenate" to merge all sampling groups, grouped to separate
+
 
 [mosaic_dataloader.dataset.train.streams.client_streams.stream_0]
 local = "fineweb_edu_dedup/client_0"
 remote = "fineweb_edu_dedup/client_0"
 proportion = 70
+
+[mosaic_dataloader.dataset.train.streams.client_streams.stream_1]
+local = "cosmo/client_0"
+remote = "cosmo/client_0"
+proportion = 70
+
+[mosaic_dataloader.dataset.train.sampling_groups.group_0]
+streams = ["stream_0"]
+
+[mosaic_dataloader.dataset.train.sampling_groups.group_1]
+streams = ["stream_1"]
 
 
 [mosaic_dataloader.dataset.val]
@@ -94,11 +121,23 @@ split = "train"
 root_remote = "s3://smollm-corpus/shared"
 root_local = "/nfs-share/datasets/photon/dataset_cache/smollm-corpus-shared-val"
 subset_num_samples = 512
+sampling_groups_mode = "concatenate"
 
 [mosaic_dataloader.dataset.val.streams.client_streams.stream_0]
 local = "fineweb_edu_dedup/client_0"
 remote = "fineweb_edu_dedup/client_0"
 proportion = 70
+
+[mosaic_dataloader.dataset.val.streams.client_streams.stream_1]
+local = "cosmo/client_0"
+remote = "cosmo/client_0"
+proportion = 70
+
+[mosaic_dataloader.dataset.val.sampling_groups.group_0]
+streams = ["stream_0"]
+
+[mosaic_dataloader.dataset.val.sampling_groups.group_1]
+streams = ["stream_1"]
 
 [mosaic_tokenizer]
 name = "HuggingFaceTB/SmolLM-1.7B"
@@ -116,7 +155,7 @@ pipeline_parallel_degree = 1
 context_parallel_degree = 1
 
 [checkpoint]
-enable = true
+enable = false
 folder = "checkpoints"
 interval = 10
 last_save_model_only = false
@@ -124,7 +163,7 @@ export_dtype = "float32"
 async_mode = "async_with_pinned_mem"  # ["disabled", "async", "async_with_pinned_mem"]
 
 [s3_checkpoint]
-enable = true
+enable = false
 bucket = "checkpoints"
 prefix = ""  # Root of bucket
 download_on_start = true
@@ -145,7 +184,15 @@ filter_fqns = ["output"]
 
 
 [validation]
-enable = true
+enable = false
 dataset = "c4_validation"
 freq = 5
 steps = 32
+
+
+[unigram_metric]
+enable = true
+download_missing = true
+allow_failures = false
+ignore_index = -100
+num_attempts = 1

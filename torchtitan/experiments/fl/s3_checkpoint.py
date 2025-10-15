@@ -20,16 +20,17 @@ from composer.loggers.remote_uploader_downloader import _upload_worker
 from torchtitan.tools.logging import logger
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable
+    from collections.abc import Callable, Iterable
 
     from torchtitan.components.checkpoint import CheckpointManager
 
     from .configs.config import MosaicJobConfig, S3CheckpointingConfig
 
 __all__ = [
-    "S3CheckpointManager",
+    "S3CheckpointWrapper",
     "create_remote_up_down",
     "download_file_from_s3",
+    "get_s3_checkpoint_wrapper_factory",
     "setup_s3_checkpointing",
     "upload_file_to_s3",
 ]
@@ -105,18 +106,28 @@ def create_remote_up_down(  # noqa: PLR0913
     )
 
 
-class S3CheckpointManager:
-    """Synchronise checkpoints produced by a :class:`CheckpointManager` with S3."""
+class S3CheckpointWrapper:
+    """Synchronise checkpoints produced by a :class:`CheckpointManager` with S3.
+
+    The wrapper composes with the wrapped checkpointer via delegation. It overrides
+    a subset of the public API (``save``/``maybe_wait_for_staging``/``close``)
+    while forwarding all other attributes to the inner manager. This keeps the
+    original instance untouched so other references (e.g. TorchFT internals)
+    continue to observe the same object graph.
+    """
 
     def __init__(
         self,
         checkpointer: CheckpointManager,
         config: S3CheckpointingConfig,
         job_config: MosaicJobConfig,
+        *,
+        enable_uploads: bool = True,
     ) -> None:
         self._checkpointer = checkpointer
         self.config = config
         self.job_config = job_config
+        self._enable_uploads = enable_uploads
         self.remote_root = self._resolve_remote_root()
         self.remote_up_down = create_remote_up_down(
             bucket_name=config.bucket,
@@ -129,7 +140,25 @@ class S3CheckpointManager:
         )
         # Set the run name for the RemoteUploaderDownloader
         # This is normally set in init() but we're using it standalone
-        self.remote_up_down._run_name = config.run_uuid
+        run_name = (
+            config.run_uuid
+            or job_config.job.description
+            or Path(job_config.job.dump_folder).name
+            or "torchtitan-run"
+        )
+        self.remote_up_down._run_name = str(run_name)
+
+        self._base_folder = Path(checkpointer.folder)
+        self._ft_mode = bool(getattr(checkpointer, "ft_manager", None))
+        self._ft_folder_path: Path | None = None
+        self._ft_relative: Path | None = None
+        if self._ft_mode:
+            ft_folder_str = checkpointer._ft_folder()
+            self._ft_folder_path = Path(ft_folder_str)
+            try:
+                self._ft_relative = self._ft_folder_path.relative_to(self._base_folder)
+            except ValueError:
+                self._ft_relative = Path(self._ft_folder_path.name)
 
         self._pending_steps: deque[tuple[int, Path]] = deque()
         self._uploaded_steps: set[int] = set()
@@ -139,9 +168,12 @@ class S3CheckpointManager:
         # Install tracking
         self._missing_directory_steps: set[int] = set()
         self._not_ready_steps: set[int] = set()
-        self._installed = False
         self._orig_save = checkpointer.save
         self._orig_maybe_wait = checkpointer.maybe_wait_for_staging
+        self._orig_close = checkpointer.close
+
+        if self._enable_uploads:
+            self._start_remote_workers()
 
     @property
     def checkpointer(self) -> CheckpointManager:
@@ -155,19 +187,24 @@ class S3CheckpointManager:
         msg = f"'{type(self).__name__}' proxy: '{type(self._checkpointer).__name__}' object has no attribute '{name}'"
         raise AttributeError(msg)
 
-    def install(self) -> None:
-        """Hook into the wrapped :class:`CheckpointManager`."""
-        if self._installed:
+    def attach_to_trainer(self, trainer: Any) -> None:
+        """Replace ``trainer.checkpointer`` with this wrapper."""
+        trainer.checkpointer = self
+
+    def install_onto_checkpointer(self) -> None:
+        """Patch the wrapped checkpointer for legacy compatibility."""
+        existing = getattr(self._checkpointer, "_s3_wrapper", None)
+        if existing is self:
             return
-        self._installed = True
-
-        # Initialize the RemoteUploaderDownloader workers
-        self._start_remote_workers()
-
-        self.checkpointer.save = self.save  # type: ignore[assignment]
-        self.checkpointer.maybe_wait_for_staging = (  # type: ignore[assignment]
-            self.maybe_wait_for_staging
-        )
+        if existing is not None and existing is not self:
+            logger.warning(
+                "Replacing existing S3 checkpoint wrapper on %s",
+                type(self._checkpointer).__name__,
+            )
+        self._checkpointer._s3_wrapper = self
+        self._checkpointer.save = self.save  # type: ignore[assignment]
+        self._checkpointer.maybe_wait_for_staging = self.maybe_wait_for_staging  # type: ignore[assignment]
+        self._checkpointer.close = self.close  # type: ignore[assignment]
 
     def _start_remote_workers(self) -> None:
         """Start the RemoteUploaderDownloader background workers."""
@@ -217,10 +254,17 @@ class S3CheckpointManager:
             logger.info("S3 download skipped: download_on_start=False")
             return
 
-        local_latest = self._find_local_latest_step()
+        if self._ft_mode and self._ft_folder_path is not None:
+            base_folder = self._ft_folder_path
+            local_latest = self.checkpointer._find_load_step(
+                folder=str(self._ft_folder_path)
+            )
+        else:
+            base_folder = self._base_folder
+            local_latest = self._find_local_latest_step()
         logger.info(
             "Checking for local checkpoints in: %s (found step: %s)",
-            self.checkpointer.folder,
+            base_folder,
             local_latest if local_latest != -1 else "none",
         )
         if local_latest != -1:
@@ -242,13 +286,19 @@ class S3CheckpointManager:
                 step_str = parts[1][len(STEP_PREFIX) :]  # Remove "step-" prefix
                 step = int(step_str)
                 remote_path = f"torchtitan/{run_uuid}"
+                relative_suffix = Path(f"step-{step}")
+                if self._ft_relative is not None:
+                    relative_suffix = self._ft_relative / relative_suffix
+                remote_preview = f"{remote_path}/{relative_suffix.as_posix()}"
 
+                prefix_display = (self.config.prefix or "").strip("/")
+                components = [comp for comp in (prefix_display, remote_preview) if comp]
+                combined_path = "/".join(components)
                 logger.info(
-                    "Resuming from run step: %s (downloading from: s3://%s/%s/step-%d)",
+                    "Resuming from run step: %s (downloading from: s3://%s/%s)",
                     self.config.resume_from_run_step,
                     self.config.bucket,
-                    remote_path,
-                    step,
+                    combined_path,
                 )
             except (ValueError, IndexError) as e:
                 logger.exception(
@@ -285,9 +335,10 @@ class S3CheckpointManager:
             return
         try:
             self._wait_for_staging_with_logging()
-            self._process_pending(flush=True)
+            if self._enable_uploads:
+                self._process_pending(flush=True)
             # Note: RemoteUploaderDownloader cleanup is handled by Composer internally
-            self._checkpointer.close()
+            self._orig_close()
         finally:
             self._closed = True
 
@@ -298,7 +349,7 @@ class S3CheckpointManager:
             logger.exception(
                 "Failed while waiting for staged checkpoints before upload."
             )
-        if self._installed:
+        if self._enable_uploads:
             self._process_pending(flush=True)
         # Note: RemoteUploaderDownloader cleanup is handled by Composer internally
 
@@ -307,7 +358,9 @@ class S3CheckpointManager:
         return root.strip("/")
 
     def _checkpoint_dir(self, step: int) -> Path:
-        return Path(self.checkpointer.folder) / f"step-{step}"
+        if self._ft_mode and self._ft_folder_path is not None:
+            return self._ft_folder_path / f"step-{step}"
+        return self._base_folder / f"step-{step}"
 
     def _raise_invalid_resume_format(self, cause: Exception | None = None) -> None:
         """Raise a ValueError for invalid resume_from_run_step format.
@@ -344,6 +397,8 @@ class S3CheckpointManager:
             last_step: Whether this is the final checkpoint
         """
         self._orig_save(curr_step, last_step=last_step)
+        if not self._enable_uploads:
+            return
         checkpoint_dir = self._checkpoint_dir(curr_step)
         if not checkpoint_dir.exists():
             logger.warning(
@@ -365,7 +420,8 @@ class S3CheckpointManager:
     def maybe_wait_for_staging(self) -> None:
         """Wait for staged checkpoints and process pending uploads."""
         self._orig_maybe_wait()
-        self._process_pending()
+        if self._enable_uploads:
+            self._process_pending()
 
     def _process_pending(self, flush: bool = False) -> None:  # noqa: FBT001, FBT002
         pending: deque[tuple[int, Path]] = deque()
@@ -510,8 +566,12 @@ class S3CheckpointManager:
         checkpoint_dir.mkdir(parents=True, exist_ok=True)
         manifest_path = checkpoint_dir / MANIFEST_FILENAME
 
+        relative_base = Path(f"step-{step}")
+        if self._ft_relative is not None:
+            relative_base = self._ft_relative / relative_base
+
         remote_manifest_key = self._remote_key(
-            Path(f"step-{step}") / MANIFEST_FILENAME, remote_root=remote_path
+            relative_base / MANIFEST_FILENAME, remote_root=remote_path
         )
         logger.info(
             "Downloading manifest from S3: s3://%s/%s/%s",
@@ -534,7 +594,7 @@ class S3CheckpointManager:
             download_file_from_s3(
                 self.remote_up_down,
                 self._remote_key(
-                    Path(f"step-{step}") / relative_path, remote_root=remote_path
+                    relative_base / relative_path, remote_root=remote_path
                 ),
                 local_path,
             )
@@ -576,8 +636,38 @@ def setup_s3_checkpointing(
     job_config: MosaicJobConfig,
     *,
     install: bool = True,
-) -> S3CheckpointManager | None:
-    """Create an :class:`S3CheckpointManager` if configured."""
+) -> S3CheckpointWrapper | None:
+    """Create an :class:`S3CheckpointWrapper` if configured.
+
+    This helper is kept for backwards compatibility; new call sites should
+    prefer :func:`get_s3_checkpoint_wrapper_factory` to obtain a wrapper
+    factory explicitly. When ``install`` is ``True`` the wrapper is also
+    patched onto the provided ``checkpointer`` so existing references keep the
+    S3 synchronisation behaviour.
+    """
+    factory = get_s3_checkpoint_wrapper_factory(job_config)
+    if factory is None:
+        return None
+
+    wrapper = factory(checkpointer, enable_uploads=install)
+    if install:
+        wrapper.install_onto_checkpointer()
+    return wrapper
+
+
+def get_s3_checkpoint_wrapper_factory(
+    job_config: MosaicJobConfig,
+) -> Callable[[CheckpointManager, bool], S3CheckpointWrapper] | None:
+    """Return a factory producing :class:`S3CheckpointWrapper` instances.
+
+    Args:
+        job_config: The Mosaic job configuration.
+
+    Returns:
+        A callable that accepts a :class:`CheckpointManager` and a boolean flag
+        indicating whether uploads should be enabled. ``None`` is returned when
+        S3 checkpointing is disabled or misconfigured.
+    """
     config = job_config.s3_checkpoint
     if not config.enable:
         return None
@@ -587,7 +677,15 @@ def setup_s3_checkpointing(
         )
         return None
 
-    manager = S3CheckpointManager(checkpointer, config, job_config)
-    if install:
-        manager.install()
-    return manager
+    def factory(
+        checkpointer: CheckpointManager,
+        enable_uploads: bool = True,
+    ) -> S3CheckpointWrapper:
+        return S3CheckpointWrapper(
+            checkpointer,
+            config,
+            job_config,
+            enable_uploads=enable_uploads,
+        )
+
+    return factory

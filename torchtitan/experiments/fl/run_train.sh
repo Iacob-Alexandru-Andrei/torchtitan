@@ -14,6 +14,8 @@
 # For multi-node training, you can use torchrun directly, e.g.:
 # torchrun --nproc_per_node=2 experiments/mosaic/train.py --config-path experiments/mosaic/configs/mosaic_job.toml
 
+rm -rf /dev/shm/*
+
 set -e
 
 export S3_ENDPOINT_URL='http://taranaki.cl.cam.ac.uk:9000'

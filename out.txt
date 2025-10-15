@@ -1,0 +1,3315 @@
+trim trailing whitespace.................................................Failed
+- hook id: trailing-whitespace
+- files were modified by this hook
+check python ast.........................................................Failed
+- hook id: check-ast
+- files were modified by this hook
+check for merge conflicts................................................Failed
+- hook id: check-merge-conflict
+- files were modified by this hook
+don't commit to branch...................................................Failed
+- hook id: no-commit-to-branch
+- files were modified by this hook
+check for added large files..............................................Failed
+- hook id: check-added-large-files
+- files were modified by this hook
+fix end of files.........................................................Failed
+- hook id: end-of-file-fixer
+- exit code: 1
+- files were modified by this hook
+
+Fixing out.txt
+
+Insert license in comments...............................................Failed
+- hook id: insert-license
+- files were modified by this hook
+flake8...................................................................Failed
+- hook id: flake8
+- exit code: 1
+- files were modified by this hook
+
+tests/experiments/fl/test_s3_checkpoint.py:13:1: F401 'types.ModuleType' imported but unused
+tests/integration_tests/test_desloc_ft.py:154:16: B009 Do not call getattr with a constant attribute value, it is not any safer than normal property access.
+tests/unit_tests/test_mosaic_spec_utils.py:101:5: B903 Data class should either be immutable or use __slots__ to save memory. Use collections.namedtuple to generate an immutable class, or enumerate the attributes in a __slot__ declaration in the class to leave attributes mutable.
+
+ruff (fl experiments only)...............................................Failed
+- hook id: ruff
+- exit code: 1
+- files were modified by this hook
+
+D104 Missing docstring in public package
+--> torchtitan/experiments/fl/__init__.py:1:1
+
+D100 Missing docstring in public module
+--> torchtitan/experiments/fl/callbacks.py:1:1
+
+D102 Missing docstring in public method
+  --> torchtitan/experiments/fl/configs/__init__.py:29:9
+   |
+27 |         super().__init__(MosaicJobConfig)
+28 |
+29 |     def parse_args(self, args: list[str] = sys.argv[1:]) -> MosaicJobConfig:
+   |         ^^^^^^^^^^
+30 |         config = super().parse_args(args)
+31 |         return ensure_mosaic_job_config_types(config)
+   |
+
+D102 Missing docstring in public method
+  --> torchtitan/experiments/fl/configs/config.py:52:9
+   |
+51 |     @classmethod
+52 |     def from_dict(cls, data: Mapping[str, Any]) -> MosaicTokenizerConfig:
+   |         ^^^^^^^^^
+53 |         return cls(name=str(data.get("name", "")), kwargs=_as_dict(data.get("kwargs")))
+   |
+
+D102 Missing docstring in public method
+  --> torchtitan/experiments/fl/configs/config.py:56:9
+   |
+55 |     @classmethod
+56 |     def coerce(cls, value: Any) -> MosaicTokenizerConfig:
+   |         ^^^^^^
+57 |         if isinstance(value, cls):
+58 |             return value
+   |
+
+D102 Missing docstring in public method
+   --> torchtitan/experiments/fl/configs/config.py:122:9
+    |
+121 |     @classmethod
+122 |     def from_dict(cls, data: Mapping[str, Any]) -> MosaicDataLoaderConfig:
+    |         ^^^^^^^^^
+123 |         known_keys = {
+124 |             "name",
+    |
+
+D102 Missing docstring in public method
+   --> torchtitan/experiments/fl/configs/config.py:182:9
+    |
+181 |     @classmethod
+182 |     def coerce(cls, value: Any) -> MosaicDataLoaderConfig:
+    |         ^^^^^^
+183 |         if isinstance(value, cls):
+184 |             return value
+    |
+
+D102 Missing docstring in public method
+   --> torchtitan/experiments/fl/configs/config.py:190:9
+    |
+188 |         raise TypeError(msg)
+189 |
+190 |     def get_split_overrides(self, split: str) -> dict[str, Any]:
+    |         ^^^^^^^^^^^^^^^^^^^
+191 |         overrides = self.split_overrides.get(split)
+192 |         if overrides is None:
+    |
+
+D102 Missing docstring in public method
+   --> torchtitan/experiments/fl/configs/config.py:469:9
+    |
+468 |     @classmethod
+469 |     def from_dict(cls, data: Mapping[str, Any]) -> FLMetricsConfigEnvelope:
+    |         ^^^^^^^^^
+470 |         optimizer_monitor_dict = _as_dict(data.get("optimizer_monitor"))
+471 |         activation_monitor_dict = _as_dict(data.get("activation_monitor"))
+    |
+
+D102 Missing docstring in public method
+   --> torchtitan/experiments/fl/configs/config.py:488:9
+    |
+487 |     @classmethod
+488 |     def coerce(cls, value: Any) -> FLMetricsConfigEnvelope:
+    |         ^^^^^^
+489 |         if isinstance(value, cls):
+490 |             return value
+    |
+
+D102 Missing docstring in public method
+   --> torchtitan/experiments/fl/configs/config.py:498:9
+    |
+496 |         raise TypeError(msg)
+497 |
+498 |     def unwrap(self) -> MetricsConfig:
+    |         ^^^^^^
+499 |         return self.metrics
+    |
+
+D102 Missing docstring in public method
+   --> torchtitan/experiments/fl/configs/config.py:502:9
+    |
+501 |     @property
+502 |     def optimizer_monitor(self) -> OptimizerMonitorConfig:
+    |         ^^^^^^^^^^^^^^^^^
+503 |         return self.metrics.optimizer_monitor
+    |
+
+D102 Missing docstring in public method
+   --> torchtitan/experiments/fl/configs/config.py:506:9
+    |
+505 |     @property
+506 |     def activation_monitor(self) -> ActivationMonitorConfig:
+    |         ^^^^^^^^^^^^^^^^^^
+507 |         return self.metrics.activation_monitor
+    |
+
+D102 Missing docstring in public method
+   --> torchtitan/experiments/fl/configs/config.py:510:9
+    |
+509 |     @property
+510 |     def lr_monitor(self) -> LRMonitorConfig:
+    |         ^^^^^^^^^^
+511 |         return self.metrics.lr_monitor
+    |
+
+D102 Missing docstring in public method
+   --> torchtitan/experiments/fl/configs/config.py:514:9
+    |
+513 |     @property
+514 |     def betas_monitor(self) -> BetasMonitorConfig:
+    |         ^^^^^^^^^^^^^
+515 |         return self.metrics.betas_monitor
+    |
+
+D102 Missing docstring in public method
+   --> torchtitan/experiments/fl/configs/config.py:518:9
+    |
+517 |     @property
+518 |     def vs_monitor(self) -> VSMonitorConfig:
+    |         ^^^^^^^^^^
+519 |         return self.metrics.vs_monitor
+    |
+
+D102 Missing docstring in public method
+   --> torchtitan/experiments/fl/configs/config.py:522:9
+    |
+521 |     @property
+522 |     def hyperparameter_switch(self) -> HyperparameterSwitchConfig:
+    |         ^^^^^^^^^^^^^^^^^^^^^
+523 |         return self.metrics.hyperparameter_switch
+    |
+
+D102 Missing docstring in public method
+   --> torchtitan/experiments/fl/configs/config.py:644:9
+    |
+643 |     @classmethod
+644 |     def from_dict(cls, data: Mapping[str, Any]) -> S3CheckpointingConfig:
+    |         ^^^^^^^^^
+645 |         run_uuid = data.get("run_uuid")
+646 |         remote_checkpoint_folder = data.get("remote_checkpoint_folder")
+    |
+
+D102 Missing docstring in public method
+   --> torchtitan/experiments/fl/configs/config.py:674:9
+    |
+673 |     @classmethod
+674 |     def coerce(cls, value: Any) -> S3CheckpointingConfig:
+    |         ^^^^^^
+675 |         if isinstance(value, cls):
+676 |             return value
+    |
+
+INP001 File `torchtitan/experiments/fl/dataloader/dataloader.py` is part of an implicit namespace package. Add an `__init__.py`.
+--> torchtitan/experiments/fl/dataloader/dataloader.py:1:1
+
+PTH117 `os.path.isabs()` should be replaced by `Path.is_absolute()`
+   --> torchtitan/experiments/fl/dataloader/dataloader.py:141:8
+    |
+139 |     if path is None or root is None:
+140 |         return path
+141 |     if os.path.isabs(path):
+    |        ^^^^^^^^^^^^^
+142 |         return path
+143 |     return os.path.join(root, path)
+    |
+help: Replace with `Path(...).is_absolute()`
+
+PTH118 `os.path.join()` should be replaced by `Path` with `/` operator
+   --> torchtitan/experiments/fl/dataloader/dataloader.py:143:12
+    |
+141 |     if os.path.isabs(path):
+142 |         return path
+143 |     return os.path.join(root, path)
+    |            ^^^^^^^^^^^^
+    |
+
+C901 `_extract_streams` is too complex (33 > 10)
+   --> torchtitan/experiments/fl/dataloader/dataloader.py:242:5
+    |
+242 | def _extract_streams(dataset_cfg: dict[str, Any]) -> StreamExtractionResult:
+    |     ^^^^^^^^^^^^^^^^
+243 |     root_remote = dataset_cfg.pop("root_remote", None)
+244 |     root_local = dataset_cfg.pop("root_local", None)
+    |
+
+PLR0912 Too many branches (34 > 12)
+   --> torchtitan/experiments/fl/dataloader/dataloader.py:242:5
+    |
+242 | def _extract_streams(dataset_cfg: dict[str, Any]) -> StreamExtractionResult:
+    |     ^^^^^^^^^^^^^^^^
+243 |     root_remote = dataset_cfg.pop("root_remote", None)
+244 |     root_local = dataset_cfg.pop("root_local", None)
+    |
+
+PLR0915 Too many statements (99 > 50)
+   --> torchtitan/experiments/fl/dataloader/dataloader.py:242:5
+    |
+242 | def _extract_streams(dataset_cfg: dict[str, Any]) -> StreamExtractionResult:
+    |     ^^^^^^^^^^^^^^^^
+243 |     root_remote = dataset_cfg.pop("root_remote", None)
+244 |     root_local = dataset_cfg.pop("root_local", None)
+    |
+
+C901 `_maybe_download_unigram_file` is too complex (14 > 10)
+   --> torchtitan/experiments/fl/dataloader/dataloader.py:425:5
+    |
+425 | def _maybe_download_unigram_file(
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+426 |     remote_uri: str | None,
+427 |     root_remote: str | None,
+    |
+
+PLR0912 Too many branches (14 > 12)
+   --> torchtitan/experiments/fl/dataloader/dataloader.py:425:5
+    |
+425 | def _maybe_download_unigram_file(
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+426 |     remote_uri: str | None,
+427 |     root_remote: str | None,
+    |
+
+TRY300 Consider moving this statement to an `else` block
+   --> torchtitan/experiments/fl/dataloader/dataloader.py:494:9
+    |
+492 |         download_file_from_s3(remote_up_down, remote_key, destination)
+493 |         logger.info("Downloaded unigram frequencies to %s", destination)
+494 |         return True
+    |         ^^^^^^^^^^^
+495 |     except FileNotFoundError as exc:
+496 |         logger.warning(
+    |
+
+SIM105 Use `contextlib.suppress(Exception)` instead of `try`-`except`-`pass`
+   --> torchtitan/experiments/fl/dataloader/dataloader.py:512:9
+    |
+510 |           return False
+511 |       finally:
+512 | /         try:
+513 | |             remote_up_down.close()
+514 | |         except Exception:  # noqa: BLE001
+515 | |             pass
+    | |________________^
+    |
+help: Replace `try`-`except`-`pass` with `with contextlib.suppress(Exception): ...`
+
+S110 `try`-`except`-`pass` detected, consider logging the exception
+   --> torchtitan/experiments/fl/dataloader/dataloader.py:514:9
+    |
+512 |           try:
+513 |               remote_up_down.close()
+514 | /         except Exception:  # noqa: BLE001
+515 | |             pass
+    | |________________^
+    |
+
+C901 `_load_stream_unigram_counts` is too complex (13 > 10)
+   --> torchtitan/experiments/fl/dataloader/dataloader.py:518:5
+    |
+518 | def _load_stream_unigram_counts(
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+519 |     stream: Stream,
+520 |     *,
+    |
+
+PLR0913 Too many arguments in function definition (7 > 5)
+   --> torchtitan/experiments/fl/dataloader/dataloader.py:791:5
+    |
+791 | def _build_unigram_metric_for_group(
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+792 |     streams: list[Stream] | None,
+793 |     default_split: str,
+    |
+
+D205 1 blank line required between summary line and description
+   --> torchtitan/experiments/fl/dataloader/dataloader.py:852:5
+    |
+851 |   class StatefulStreamingTextDataset(StreamingTextDataset):
+852 | /     """A stateful wrapper around StreamingTextDataset that internally tracks the number
+853 | |     of samples yielded. This makes it compatible with dataloaders like TorchTitan's
+854 | |     StatefulDataLoader that do not pass arguments to the dataset's state_dict method.
+855 | |
+856 | |     Args:
+857 | |         *args: Positional arguments to pass to StreamingTextDataset.
+858 | |         **kwargs: Keyword arguments to pass to StreamingTextDataset.
+859 | |     """
+    | |_______^
+860 |
+861 |       def __init__(self, *args: Any, **kwargs: Any) -> None:
+    |
+help: Insert single blank line
+
+D205 1 blank line required between summary line and description
+   --> torchtitan/experiments/fl/dataloader/dataloader.py:866:9
+    |
+865 |       def __getitem__(self, idx: int) -> dict[str, list[int]] | torch.Tensor:
+866 | /         """Overrides the parent method to increment the internal sample counter
+867 | |         each time an item is fetched.
+868 | |         """
+    | |___________^
+869 |           self._num_samples_yielded += 1
+870 |           return super().__getitem__(idx)
+    |
+help: Insert single blank line
+
+FBT001 Boolean-typed positional argument in function definition
+   --> torchtitan/experiments/fl/dataloader/dataloader.py:873:47
+    |
+872 |     def state_dict(
+873 |         self, num_samples: int | None = None, from_beginning: bool = True
+    |                                               ^^^^^^^^^^^^^^
+874 |     ) -> dict[str, Any]:
+875 |         """Saves the dataset's state.
+    |
+
+FBT002 Boolean default positional argument in function definition
+   --> torchtitan/experiments/fl/dataloader/dataloader.py:873:47
+    |
+872 |     def state_dict(
+873 |         self, num_samples: int | None = None, from_beginning: bool = True
+    |                                               ^^^^^^^^^^^^^^
+874 |     ) -> dict[str, Any]:
+875 |         """Saves the dataset's state.
+    |
+
+PLR0913 Too many arguments in function definition (10 > 5)
+   --> torchtitan/experiments/fl/dataloader/dataloader.py:920:9
+    |
+918 |     batch_size: int
+919 |
+920 |     def __init__(
+    |         ^^^^^^^^
+921 |         self,
+922 |         dataset: StatefulStreamingTextDataset,
+    |
+
+FBT001 Boolean-typed positional argument in function definition
+   --> torchtitan/experiments/fl/dataloader/dataloader.py:929:9
+    |
+927 |         num_workers: int = 0,
+928 |         prefetch_factor: int | None = 2,
+929 |         pin_memory: bool = True,
+    |         ^^^^^^^^^^
+930 |         persistent_workers: bool = True,
+931 |         drop_last: bool = True,
+    |
+
+FBT002 Boolean default positional argument in function definition
+   --> torchtitan/experiments/fl/dataloader/dataloader.py:929:9
+    |
+927 |         num_workers: int = 0,
+928 |         prefetch_factor: int | None = 2,
+929 |         pin_memory: bool = True,
+    |         ^^^^^^^^^^
+930 |         persistent_workers: bool = True,
+931 |         drop_last: bool = True,
+    |
+
+FBT001 Boolean-typed positional argument in function definition
+   --> torchtitan/experiments/fl/dataloader/dataloader.py:930:9
+    |
+928 |         prefetch_factor: int | None = 2,
+929 |         pin_memory: bool = True,
+930 |         persistent_workers: bool = True,
+    |         ^^^^^^^^^^^^^^^^^^
+931 |         drop_last: bool = True,
+932 |     ) -> None:
+    |
+
+FBT002 Boolean default positional argument in function definition
+   --> torchtitan/experiments/fl/dataloader/dataloader.py:930:9
+    |
+928 |         prefetch_factor: int | None = 2,
+929 |         pin_memory: bool = True,
+930 |         persistent_workers: bool = True,
+    |         ^^^^^^^^^^^^^^^^^^
+931 |         drop_last: bool = True,
+932 |     ) -> None:
+    |
+
+FBT001 Boolean-typed positional argument in function definition
+   --> torchtitan/experiments/fl/dataloader/dataloader.py:931:9
+    |
+929 |         pin_memory: bool = True,
+930 |         persistent_workers: bool = True,
+931 |         drop_last: bool = True,
+    |         ^^^^^^^^^
+932 |     ) -> None:
+933 |         self.dp_world_size = dp_world_size
+    |
+
+FBT002 Boolean default positional argument in function definition
+   --> torchtitan/experiments/fl/dataloader/dataloader.py:931:9
+    |
+929 |         pin_memory: bool = True,
+930 |         persistent_workers: bool = True,
+931 |         drop_last: bool = True,
+    |         ^^^^^^^^^
+932 |     ) -> None:
+933 |         self.dp_world_size = dp_world_size
+    |
+
+S301 `pickle` and modules that wrap it can be unsafe when used to deserialize untrusted data, possible security issue
+   --> torchtitan/experiments/fl/dataloader/dataloader.py:969:33
+    |
+967 |             self.dp_world_size == state_dict["world_size"]
+968 |         ), "dp_degree is inconsistent before and after checkpoint, dataloader resharding is not supported yet."
+969 |         super().load_state_dict(pickle.loads(state_dict[self._rank_id]))
+    |                                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+
+D205 1 blank line required between summary line and description
+   --> torchtitan/experiments/fl/dataloader/dataloader.py:973:5
+    |
+972 |   def titan_collate_fn(batch: list[Any]) -> tuple[dict[str, torch.Tensor], torch.Tensor]:
+973 | /     """Collates samples from StreamingTextDataset and formats them for the
+974 | |     TorchTitan training loop.
+975 | |
+976 | |     Args:
+977 | |         batch: A list of samples from the dataset.
+978 | |
+979 | |     Returns:
+980 | |         A tuple where the first element is an `input_dict` and the second is a
+981 | |         tensor of corresponding labels.
+982 | |     """
+    | |_______^
+983 |       if isinstance(batch[0], dict):
+984 |           input_ids_list = [item["input_ids"] for item in batch]
+    |
+help: Insert single blank line
+
+PLR0913 Too many arguments in function definition (6 > 5)
+    --> torchtitan/experiments/fl/dataloader/dataloader.py:1001:5
+     |
+1001 | def _build_mosaic_dataloader(
+     |     ^^^^^^^^^^^^^^^^^^^^^^^^
+1002 |     *,
+1003 |     job_config: MosaicJobConfig,
+     |
+
+INP001 File `torchtitan/experiments/fl/dataloader/tokenizer.py` is part of an implicit namespace package. Add an `__init__.py`.
+--> torchtitan/experiments/fl/dataloader/tokenizer.py:1:1
+
+PLR0913 Too many arguments in function definition (6 > 5)
+  --> torchtitan/experiments/fl/desloc.py:92:9
+   |
+90 |     """Handles parameter state replication and synchronization."""
+91 |
+92 |     def __init__(
+   |         ^^^^^^^^
+93 |         self,
+94 |         manager: Any,
+   |
+
+FBT001 Boolean-typed positional argument in function definition
+   --> torchtitan/experiments/fl/desloc.py:98:9
+    |
+ 96 |         sync_every: int,
+ 97 |         backup_device: torch.device | None,
+ 98 |         pin_memory: bool,
+    |         ^^^^^^^^^^
+ 99 |         name_prefix: str,
+100 |     ) -> None:
+    |
+
+PLR0913 Too many arguments in function definition (7 > 5)
+   --> torchtitan/experiments/fl/desloc.py:178:9
+    |
+176 |     """Synchronize a specific optimizer state tensor across replicas."""
+177 |
+178 |     def __init__(
+    |         ^^^^^^^^
+179 |         self,
+180 |         manager: Any,
+    |
+
+PLR0913 Too many arguments in function definition (9 > 5)
+   --> torchtitan/experiments/fl/desloc.py:274:9
+    |
+272 |     """Attach DES-LOC synchronization hooks to a PyTorch optimizer."""
+273 |
+274 |     def __init__(
+    |         ^^^^^^^^
+275 |         self,
+276 |         *,
+    |
+
+D102 Missing docstring in public method
+   --> torchtitan/experiments/fl/desloc.py:312:9
+    |
+310 |         self._hook = optimizer.register_step_post_hook(self._step_post_hook)
+311 |
+312 |     def close(self) -> None:
+    |         ^^^^^
+313 |         if self._hook is not None:
+314 |             self._hook.remove()
+    |
+
+C901 `_resolve_optimizer_sync_intervals` is too complex (12 > 10)
+   --> torchtitan/experiments/fl/desloc.py:317:9
+    |
+315 |             self._hook = None
+316 |
+317 |     def _resolve_optimizer_sync_intervals(self, state_keys: Iterable[str]) -> list[int]:
+    |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+318 |         spec = self._raw_optimizer_sync_config
+319 |         keys = list(state_keys)
+    |
+
+PERF401 Use a list comprehension to create a transformed list
+   --> torchtitan/experiments/fl/desloc.py:396:17
+    |
+394 |         for fragment in self._fragments:
+395 |             if fragment.tick():
+396 |                 ready_fragments.append(fragment)
+    |                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+397 |
+398 |         if ready_fragments:
+    |
+help: Replace for loop with list comprehension
+
+PLR0913 Too many arguments in function definition (7 > 5)
+   --> torchtitan/experiments/fl/desloc.py:451:9
+    |
+449 |     """FT optimizer container augmented with DES-LOC synchronization."""
+450 |
+451 |     def __init__(
+    |         ^^^^^^^^
+452 |         self,
+453 |         model_parts: list[nn.Module],
+    |
+
+ARG001 Unused function argument: `ft_manager`
+   --> torchtitan/experiments/fl/desloc.py:504:5
+    |
+502 | @contextmanager
+503 | def desloc_semi_sync_context(
+504 |     ft_manager: FTManager, optimizer: torch.optim.Optimizer
+    |     ^^^^^^^^^^
+505 | ) -> Iterator[None]:
+506 |     """Context manager wiring DES-LOC into TorchFT semi-sync execution."""
+    |
+
+EXE001 Shebang is present but file is not executable
+ --> torchtitan/experiments/fl/ft_override.py:1:1
+  |
+1 | #!/usr/bin/env python3
+  | ^^^^^^^^^^^^^^^^^^^^^^
+2 | # Copyright (c) Meta Platforms, Inc. and affiliates.
+3 | # All rights reserved.
+  |
+
+D100 Missing docstring in public module
+--> torchtitan/experiments/fl/lr_scheduler.py:1:1
+
+PLR0913 Too many arguments in function definition (6 > 5)
+  --> torchtitan/experiments/fl/lr_scheduler.py:24:5
+   |
+24 | def _linear_warmup_stable_decay(
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+25 |     current_step: int,
+26 |     *,
+   |
+
+D103 Missing docstring in public function
+   --> torchtitan/experiments/fl/metrics.py:161:5
+    |
+161 | def reset_unigram_metrics() -> None:
+    |     ^^^^^^^^^^^^^^^^^^^^^
+162 |     for metric in _UNIGRAM_METRICS:
+163 |         metric.sum_loss.zero_()
+    |
+
+D103 Missing docstring in public function
+   --> torchtitan/experiments/fl/metrics.py:167:5
+    |
+167 | def update_unigram_metrics(labels: Tensor) -> None:
+    |     ^^^^^^^^^^^^^^^^^^^^^^
+168 |     if not _UNIGRAM_METRICS:
+169 |         return
+    |
+
+D102 Missing docstring in public method
+   --> torchtitan/experiments/fl/metrics.py:263:9
+    |
+261 |         self._model_ref: torch.nn.Module | None = None
+262 |
+263 |     def setup(self, context: CallbackSetupContext) -> None:
+    |         ^^^^^
+264 |         if not self.enabled or self._registered:
+265 |             return
+    |
+
+D102 Missing docstring in public method
+   --> torchtitan/experiments/fl/metrics.py:272:9
+    |
+270 |         self._model_ref = model
+271 |
+272 |     def on_step_end(self, context: CallbackStepContext) -> None:
+    |         ^^^^^^^^^^^
+273 |         if not self.enabled or not self._registered:
+274 |             return
+    |
+
+D102 Missing docstring in public method
+   --> torchtitan/experiments/fl/metrics.py:277:9
+    |
+275 |         self.finalize(context.step, context.logger, context.mesh)
+276 |
+277 |     def close(self) -> None:
+    |         ^^^^^
+278 |         if self._pre_handle is not None:
+279 |             self._pre_handle.remove()
+    |
+
+D102 Missing docstring in public method
+   --> torchtitan/experiments/fl/metrics.py:631:9
+    |
+629 |         self._model_ref: torch.nn.Module | None = None
+630 |
+631 |     def setup(self, context: CallbackSetupContext) -> None:
+    |         ^^^^^
+632 |         if context.model_parts:
+633 |             self._model_ref = context.model_parts[0]
+    |
+
+D102 Missing docstring in public method
+   --> torchtitan/experiments/fl/metrics.py:811:9
+    |
+809 |         self.enabled = enabled
+810 |
+811 |     def on_step_end(self, context: CallbackStepContext) -> None:
+    |         ^^^^^^^^^^^
+812 |         if not self.enabled or self.interval <= 0:
+813 |             return
+    |
+
+D102 Missing docstring in public method
+   --> torchtitan/experiments/fl/metrics.py:839:9
+    |
+837 |         self.enabled = enabled
+838 |
+839 |     def on_step_end(self, context: CallbackStepContext) -> None:
+    |         ^^^^^^^^^^^
+840 |         if not self.enabled or self.interval <= 0:
+841 |             return
+    |
+
+C901 `on_step_end` is too complex (11 > 10)
+   --> torchtitan/experiments/fl/metrics.py:839:9
+    |
+837 |         self.enabled = enabled
+838 |
+839 |     def on_step_end(self, context: CallbackStepContext) -> None:
+    |         ^^^^^^^^^^^
+840 |         if not self.enabled or self.interval <= 0:
+841 |             return
+    |
+
+D102 Missing docstring in public method
+   --> torchtitan/experiments/fl/metrics.py:876:9
+    |
+874 |         self.enabled = enabled
+875 |
+876 |     def on_step_end(self, context: CallbackStepContext) -> None:
+    |         ^^^^^^^^^^^
+877 |         if not self.enabled or self.interval <= 0:
+878 |             return
+    |
+
+PLR0913 Too many arguments in function definition (6 > 5)
+   --> torchtitan/experiments/fl/metrics.py:903:9
+    |
+901 |     """Switch optimizer betas/vs at configured steps and optionally reset momenta."""
+902 |
+903 |     def __init__(
+    |         ^^^^^^^^
+904 |         self,
+905 |         *,
+    |
+
+D102 Missing docstring in public method
+   --> torchtitan/experiments/fl/metrics.py:923:9
+    |
+921 |         self._applied_steps: set[int] = set()
+922 |
+923 |     def on_step_end(self, context: CallbackStepContext) -> None:
+    |         ^^^^^^^^^^^
+924 |         if not self.enabled:
+925 |             return
+    |
+
+C901 `on_step_end` is too complex (14 > 10)
+   --> torchtitan/experiments/fl/metrics.py:923:9
+    |
+921 |         self._applied_steps: set[int] = set()
+922 |
+923 |     def on_step_end(self, context: CallbackStepContext) -> None:
+    |         ^^^^^^^^^^^
+924 |         if not self.enabled:
+925 |             return
+    |
+
+PLR0912 Too many branches (13 > 12)
+   --> torchtitan/experiments/fl/metrics.py:923:9
+    |
+921 |         self._applied_steps: set[int] = set()
+922 |
+923 |     def on_step_end(self, context: CallbackStepContext) -> None:
+    |         ^^^^^^^^^^^
+924 |         if not self.enabled:
+925 |             return
+    |
+
+D102 Missing docstring in public method
+    --> torchtitan/experiments/fl/metrics.py:1232:9
+     |
+1230 |         self._run_step_callbacks(step, mesh)
+1231 |
+1232 |     def log_validation(self, loss: float, step: int) -> None:
+     |         ^^^^^^^^^^^^^^
+1233 |         super().log_validation(loss, step)
+1234 |         mesh = (
+     |
+
+D102 Missing docstring in public method
+    --> torchtitan/experiments/fl/metrics.py:1245:9
+     |
+1243 |         self._run_validation_callbacks(loss, step)
+1244 |
+1245 |     def close(self) -> None:
+     |         ^^^^^
+1246 |         for callback in self.callbacks:
+1247 |             callback.close()
+     |
+
+D104 Missing docstring in public package
+--> torchtitan/experiments/fl/models/llama3_mup/__init__.py:1:1
+
+D104 Missing docstring in public package
+--> torchtitan/experiments/fl/models/llama3_mup/model/__init__.py:1:1
+
+D100 Missing docstring in public module
+--> torchtitan/experiments/fl/models/llama3_mup/model/mup_args.py:1:1
+
+D101 Missing docstring in public class
+  --> torchtitan/experiments/fl/models/llama3_mup/model/mup_args.py:19:7
+   |
+18 | @dataclass
+19 | class MuPConfig:
+   |       ^^^^^^^^^
+20 |     mup_enabled: bool = False
+21 |     mup_disable_attention_scaling: bool = True
+   |
+
+D101 Missing docstring in public class
+  --> torchtitan/experiments/fl/models/llama3_mup/model/mup_args.py:33:7
+   |
+32 | @dataclass
+33 | class ModelInitConfig:
+   |       ^^^^^^^^^^^^^^^
+34 |     init_std: float = 0.02
+35 |     emb_init_std: float | None = None
+   |
+
+D101 Missing docstring in public class
+  --> torchtitan/experiments/fl/models/llama3_mup/model/mup_args.py:40:7
+   |
+39 | @dataclass
+40 | class TransformerModelArgs(BaseTransformerModelArgs):
+   |       ^^^^^^^^^^^^^^^^^^^^
+41 |     # muP / CompleteP
+42 |     use_embedding_norm: bool = False
+   |
+
+ANN204 Missing return type annotation for special method `__post_init__`
+  --> torchtitan/experiments/fl/models/llama3_mup/model/mup_args.py:48:9
+   |
+46 |     init_config: dict[str, Any] = field(default_factory=dict)
+47 |
+48 |     def __post_init__(self):
+   |         ^^^^^^^^^^^^^
+49 |         self.mup_config_obj = MuPConfig(**self.mup_config)
+50 |         self.init_config_obj = ModelInitConfig(**self.init_config)
+   |
+help: Add return type annotation
+
+D105 Missing docstring in magic method
+  --> torchtitan/experiments/fl/models/llama3_mup/model/mup_args.py:48:9
+   |
+46 |     init_config: dict[str, Any] = field(default_factory=dict)
+47 |
+48 |     def __post_init__(self):
+   |         ^^^^^^^^^^^^^
+49 |         self.mup_config_obj = MuPConfig(**self.mup_config)
+50 |         self.init_config_obj = ModelInitConfig(**self.init_config)
+   |
+
+C901 `get_optimizer_param_groups` is too complex (15 > 10)
+   --> torchtitan/experiments/fl/models/llama3_mup/model/mup_model.py:229:9
+    |
+227 |         )
+228 |
+229 |     def get_optimizer_param_groups(
+    |         ^^^^^^^^^^^^^^^^^^^^^^^^^^
+230 |         self, optimizer_config: dict[str, Any]
+231 |     ) -> tuple[Iterator[Parameter] | list[dict[str, Any]], dict[str, Any]]:
+    |
+
+PLR0912 Too many branches (16 > 12)
+   --> torchtitan/experiments/fl/models/llama3_mup/model/mup_model.py:229:9
+    |
+227 |         )
+228 |
+229 |     def get_optimizer_param_groups(
+    |         ^^^^^^^^^^^^^^^^^^^^^^^^^^
+230 |         self, optimizer_config: dict[str, Any]
+231 |     ) -> tuple[Iterator[Parameter] | list[dict[str, Any]], dict[str, Any]]:
+    |
+
+D100 Missing docstring in public module
+--> torchtitan/experiments/fl/models/llama3_mup/model/state_dict_adapter.py:1:1
+
+INP001 File `torchtitan/experiments/fl/models/llama3_mup/tests/test_mup_model.py` is part of an implicit namespace package. Add an `__init__.py`.
+--> torchtitan/experiments/fl/models/llama3_mup/tests/test_mup_model.py:1:1
+
+D100 Missing docstring in public module
+--> torchtitan/experiments/fl/models/llama3_mup/tests/test_mup_model.py:1:1
+
+D101 Missing docstring in public class
+  --> torchtitan/experiments/fl/models/llama3_mup/tests/test_mup_model.py:16:7
+   |
+16 | class TestMuPLlamaModel(unittest.TestCase):
+   |       ^^^^^^^^^^^^^^^^^
+17 |     def setUp(self) -> None:
+18 |         self.mup_config = {
+   |
+
+D102 Missing docstring in public method
+  --> torchtitan/experiments/fl/models/llama3_mup/tests/test_mup_model.py:17:9
+   |
+16 | class TestMuPLlamaModel(unittest.TestCase):
+17 |     def setUp(self) -> None:
+   |         ^^^^^
+18 |         self.mup_config = {
+19 |             "mup_enabled": True,
+   |
+
+D102 Missing docstring in public method
+  --> torchtitan/experiments/fl/models/llama3_mup/tests/test_mup_model.py:41:9
+   |
+39 |         self.model = Transformer(self.model_args)
+40 |
+41 |     def test_model_initialization(self) -> None:
+   |         ^^^^^^^^^^^^^^^^^^^^^^^^^
+42 |         assert isinstance(self.model, Transformer)
+43 |         # Check if peri_norm layers are created
+   |
+
+D102 Missing docstring in public method
+  --> torchtitan/experiments/fl/models/llama3_mup/tests/test_mup_model.py:50:9
+   |
+48 |         assert self.model.tok_embeddings.norm is not None
+49 |
+50 |     def test_forward_pass(self) -> None:
+   |         ^^^^^^^^^^^^^^^^^
+51 |         input_ids = torch.randint(0, self.model_args.vocab_size, (2, 128))
+52 |         output = self.model.forward(input_ids)
+   |
+
+D102 Missing docstring in public method
+  --> torchtitan/experiments/fl/models/llama3_mup/tests/test_mup_model.py:55:9
+   |
+53 |         assert output.shape == (2, 128, self.model_args.vocab_size)
+54 |
+55 |     def test_weight_initialization(self) -> None:
+   |         ^^^^^^^^^^^^^^^^^^^^^^^^^^
+56 |         # A simple check to ensure no errors during init
+57 |         self.model.init_weights()
+   |
+
+PLR0913 Too many arguments in function definition (8 > 5)
+  --> torchtitan/experiments/fl/models/utils.py:36:5
+   |
+36 | def _build_mosaic_spec(
+   |     ^^^^^^^^^^^^^^^^^^
+37 |     base_spec: TrainSpec,
+38 |     *,
+   |
+
+PLR0913 Too many arguments in function definition (8 > 5)
+  --> torchtitan/experiments/fl/models/utils.py:73:5
+   |
+73 | def ensure_mosaic_spec(
+   |     ^^^^^^^^^^^^^^^^^^
+74 |     base_spec_name: str,
+75 |     *,
+   |
+
+C901 `_normalize_mosaic_optimizer_config` is too complex (12 > 10)
+  --> torchtitan/experiments/fl/optimizer_builder.py:67:5
+   |
+67 | def _normalize_mosaic_optimizer_config(
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+68 |     optimizer_config: MosaicOptimizerConfig | dict[str, Any],
+69 | ) -> tuple[MosaicOptimizerConfig, dict[str, Any]]:
+   |
+
+F821 Undefined name `parallel_dims`
+  --> torchtitan/experiments/fl/optimizer_builder.py:95:12
+   |
+93 |     optim_in_bwd = optimizer_config.early_step_in_backward
+94 |     if optim_in_bwd:
+95 |         if parallel_dims.ep_enabled:
+   |            ^^^^^^^^^^^^^
+96 |             msg = "Optimizers in backward is not supported with Expert Parallel."
+97 |             raise NotImplementedError(msg)
+   |
+
+F821 Undefined name `parallel_dims`
+   --> torchtitan/experiments/fl/optimizer_builder.py:98:12
+    |
+ 96 |             msg = "Optimizers in backward is not supported with Expert Parallel."
+ 97 |             raise NotImplementedError(msg)
+ 98 |         if parallel_dims.pp_enabled:
+    |            ^^^^^^^^^^^^^
+ 99 |             msg = "Optimizers in backward is not supported with Pipeline Parallel."
+100 |             raise NotImplementedError(msg)
+    |
+
+F821 Undefined name `ft_manager`
+   --> torchtitan/experiments/fl/optimizer_builder.py:101:12
+    |
+ 99 |             msg = "Optimizers in backward is not supported with Pipeline Parallel."
+100 |             raise NotImplementedError(msg)
+101 |         if ft_manager and ft_manager.enabled:
+    |            ^^^^^^^^^^
+102 |             msg = "TorchFT is not supported with optimizers in backward."
+103 |             raise NotImplementedError(msg)
+    |
+
+F821 Undefined name `ft_manager`
+   --> torchtitan/experiments/fl/optimizer_builder.py:101:27
+    |
+ 99 |             msg = "Optimizers in backward is not supported with Pipeline Parallel."
+100 |             raise NotImplementedError(msg)
+101 |         if ft_manager and ft_manager.enabled:
+    |                           ^^^^^^^^^^
+102 |             msg = "TorchFT is not supported with optimizers in backward."
+103 |             raise NotImplementedError(msg)
+    |
+
+F821 Undefined name `desloc_enabled`
+   --> torchtitan/experiments/fl/optimizer_builder.py:105:8
+    |
+103 |             raise NotImplementedError(msg)
+104 |
+105 |     if desloc_enabled and not (ft_manager and ft_manager.enabled):
+    |        ^^^^^^^^^^^^^^
+106 |         msg = "DES-LOC requires TorchFT to be enabled. Set fault_tolerance.enable to true."
+107 |         raise ValueError(msg)
+    |
+
+F821 Undefined name `ft_manager`
+   --> torchtitan/experiments/fl/optimizer_builder.py:105:32
+    |
+103 |             raise NotImplementedError(msg)
+104 |
+105 |     if desloc_enabled and not (ft_manager and ft_manager.enabled):
+    |                                ^^^^^^^^^^
+106 |         msg = "DES-LOC requires TorchFT to be enabled. Set fault_tolerance.enable to true."
+107 |         raise ValueError(msg)
+    |
+
+F821 Undefined name `ft_manager`
+   --> torchtitan/experiments/fl/optimizer_builder.py:105:47
+    |
+103 |             raise NotImplementedError(msg)
+104 |
+105 |     if desloc_enabled and not (ft_manager and ft_manager.enabled):
+    |                                               ^^^^^^^^^^
+106 |         msg = "DES-LOC requires TorchFT to be enabled. Set fault_tolerance.enable to true."
+107 |         raise ValueError(msg)
+    |
+
+PLR0913 Too many arguments in function definition (7 > 5)
+   --> torchtitan/experiments/fl/optimizer_builder.py:158:5
+    |
+158 | def _build_desloc_container(
+    |     ^^^^^^^^^^^^^^^^^^^^^^^
+159 |     *,
+160 |     model_parts: list[torch.nn.Module],
+    |
+
+C901 `_build_optimizer_container` is too complex (12 > 10)
+   --> torchtitan/experiments/fl/optimizer_builder.py:186:5
+    |
+186 | def _build_optimizer_container(
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^
+187 |     *,
+188 |     model_parts: list[torch.nn.Module],
+    |
+
+PLR0913 Too many arguments in function definition (7 > 5)
+   --> torchtitan/experiments/fl/optimizer_builder.py:186:5
+    |
+186 | def _build_optimizer_container(
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^
+187 |     *,
+188 |     model_parts: list[torch.nn.Module],
+    |
+
+FBT002 Boolean default positional argument in function definition
+   --> torchtitan/experiments/fl/s3_checkpoint.py:682:9
+    |
+680 |     def factory(
+681 |         checkpointer: CheckpointManager,
+682 |         enable_uploads: bool = True,
+    |         ^^^^^^^^^^^^^^
+683 |     ) -> S3CheckpointWrapper:
+684 |         return S3CheckpointWrapper(
+    |
+
+FBT001 Boolean-typed positional argument in function definition
+   --> torchtitan/experiments/fl/s3_checkpoint.py:682:9
+    |
+680 |     def factory(
+681 |         checkpointer: CheckpointManager,
+682 |         enable_uploads: bool = True,
+    |         ^^^^^^^^^^^^^^
+683 |     ) -> S3CheckpointWrapper:
+684 |         return S3CheckpointWrapper(
+    |
+
+F821 Undefined name `S3CheckpointManager`
+  --> torchtitan/experiments/fl/train.py:89:17
+   |
+87 |     # Launch the trainer
+88 |     trainer: Trainer | None = None
+89 |     s3_manager: S3CheckpointManager | None = None
+   |                 ^^^^^^^^^^^^^^^^^^^
+90 |     download_manager: S3CheckpointManager | None = None
+   |
+
+F821 Undefined name `S3CheckpointManager`
+  --> torchtitan/experiments/fl/train.py:90:23
+   |
+88 |     trainer: Trainer | None = None
+89 |     s3_manager: S3CheckpointManager | None = None
+90 |     download_manager: S3CheckpointManager | None = None
+   |                       ^^^^^^^^^^^^^^^^^^^
+91 |
+92 |     s3_manager: S3CheckpointWrapper | None = None
+   |
+
+F821 Undefined name `setup_s3_checkpointing`
+   --> torchtitan/experiments/fl/train.py:254:34
+    |
+252 |                         "[S3 DEBUG] Creating S3 manager as checkpoint writer (with install=True)"
+253 |                     )
+254 |                     s3_manager = setup_s3_checkpointing(checkpointer, job_config)
+    |                                  ^^^^^^^^^^^^^^^^^^^^^^
+255 |                     if s3_manager is not None:
+256 |                         trainer.checkpointer = s3_manager  # type: ignore[assignment]
+    |
+
+F821 Undefined name `setup_s3_checkpointing`
+   --> torchtitan/experiments/fl/train.py:266:40
+    |
+264 |                         "[S3 DEBUG] Creating download-only S3 manager (with install=False)"
+265 |                     )
+266 |                     download_manager = setup_s3_checkpointing(
+    |                                        ^^^^^^^^^^^^^^^^^^^^^^
+267 |                         checkpointer, job_config, install=False
+268 |                     )
+    |
+
+PLR0913 Too many arguments in function definition (12 > 5)
+  --> torchtitan/experiments/fl/validate.py:33:9
+   |
+31 |     """Validator variant that swaps in the Mosaic streaming dataloader."""
+32 |
+33 |     def __init__(
+   |         ^^^^^^^^
+34 |         self,
+35 |         job_config: MosaicJobConfig,
+   |
+
+FBT001 Boolean-typed positional argument in function definition
+  --> torchtitan/experiments/fl/validate.py:45:9
+   |
+43 |         metrics_processor: MetricsProcessor,
+44 |         pp_schedule: _PipelineSchedule | None = None,
+45 |         pp_has_first_stage: bool | None = None,
+   |         ^^^^^^^^^^^^^^^^^^
+46 |         pp_has_last_stage: bool | None = None,
+47 |     ) -> None:
+   |
+
+FBT001 Boolean-typed positional argument in function definition
+  --> torchtitan/experiments/fl/validate.py:46:9
+   |
+44 |         pp_schedule: _PipelineSchedule | None = None,
+45 |         pp_has_first_stage: bool | None = None,
+46 |         pp_has_last_stage: bool | None = None,
+   |         ^^^^^^^^^^^^^^^^^
+47 |     ) -> None:
+48 |         super().__init__(
+   |
+
+PLR0913 Too many arguments in function definition (12 > 5)
+  --> torchtitan/experiments/fl/validate.py:70:5
+   |
+70 | def build_mosaic_validator(
+   |     ^^^^^^^^^^^^^^^^^^^^^^
+71 |     job_config: MosaicJobConfig,
+72 |     dp_world_size: int,
+   |
+
+FBT001 Boolean-typed positional argument in function definition
+  --> torchtitan/experiments/fl/validate.py:81:5
+   |
+79 |     metrics_processor: MetricsProcessor,
+80 |     pp_schedule: _PipelineSchedule | None = None,
+81 |     pp_has_first_stage: bool | None = None,
+   |     ^^^^^^^^^^^^^^^^^^
+82 |     pp_has_last_stage: bool | None = None,
+83 | ) -> MosaicValidator:
+   |
+
+FBT001 Boolean-typed positional argument in function definition
+  --> torchtitan/experiments/fl/validate.py:82:5
+   |
+80 |     pp_schedule: _PipelineSchedule | None = None,
+81 |     pp_has_first_stage: bool | None = None,
+82 |     pp_has_last_stage: bool | None = None,
+   |     ^^^^^^^^^^^^^^^^^
+83 | ) -> MosaicValidator:
+84 |     """Build a validator that uses Mosaic streaming for the validation split."""
+   |
+
+Found 118 errors.
+
+Format files with µfmt...................................................Failed
+- hook id: ufmt
+- files were modified by this hook
+
+Formatted /nfs-share/aai30/projects/torchtitan/torchtitan/experiments/fl/dataloader/dataloader.py
+Formatted /nfs-share/aai30/projects/torchtitan/torchtitan/experiments/fl/metrics.py
+✨ 2 files formatted, 244 files already formatted ✨
+
+pydoclint................................................................Failed
+- hook id: pydoclint
+- exit code: 1
+- files were modified by this hook
+
+Skipping files that match this pattern: \.git|\.tox
+precommit-hooks/split_long_lines.py
+scripts/checkpoint_conversion/convert_from_hf.py
+scripts/checkpoint_conversion/convert_to_hf.py
+scripts/checkpoint_conversion/numerical_tests_example.py
+scripts/download_hf_assets.py
+scripts/estimate/estimation.py
+scripts/generate/_generation.py
+scripts/generate/test_generate.py
+tests/__init__.py
+tests/assets/extend_jobconfig_example.py
+tests/conftest.py
+tests/experiments/fl/test_metrics_processor.py
+tests/experiments/fl/test_s3_checkpoint.py
+tests/integration_tests/__init__.py
+tests/integration_tests/features.py
+tests/integration_tests/ft.py
+tests/integration_tests/h100.py
+tests/integration_tests/models.py
+tests/integration_tests/run_tests.py
+tests/integration_tests/test_desloc_ft.py
+tests/unit_tests/__init__.py
+tests/unit_tests/experiments/fl/dataloader/test_dataloader_helpers.py
+tests/unit_tests/test_activation_checkpoint.py
+tests/unit_tests/test_checkpoint.py
+tests/unit_tests/test_dataset_checkpointing.py
+tests/unit_tests/test_download_hf_assets.py
+tests/unit_tests/test_job_config.py
+tests/unit_tests/test_lr_scheduler.py
+tests/unit_tests/test_model_converter.py
+tests/unit_tests/test_mosaic_spec_utils.py
+tests/unit_tests/test_tokenizer.py
+tests/unit_tests/test_train_spec.py
+torchtitan/__init__.py
+torchtitan/components/checkpoint.py
+torchtitan/components/dataloader.py
+torchtitan/components/ft/__init__.py
+torchtitan/components/ft/config/__init__.py
+torchtitan/components/ft/config/job_config.py
+torchtitan/components/ft/diloco/__init__.py
+torchtitan/components/ft/diloco/protocol.py
+torchtitan/components/ft/diloco/utils.py
+torchtitan/components/ft/manager.py
+torchtitan/components/loss.py
+torchtitan/components/lr_scheduler.py
+torchtitan/components/metrics.py
+torchtitan/components/optimizer.py
+torchtitan/components/quantization/__init__.py
+torchtitan/components/quantization/float8.py
+torchtitan/components/quantization/mx.py
+torchtitan/components/quantization/utils.py
+torchtitan/components/tokenizer.py
+torchtitan/components/validate.py
+torchtitan/config/__init__.py
+torchtitan/config/job_config.py
+torchtitan/config/manager.py
+torchtitan/datasets/__init__.py
+torchtitan/datasets/hf_datasets.py
+torchtitan/distributed/__init__.py
+torchtitan/distributed/activation_checkpoint.py
+torchtitan/distributed/expert_parallel.py
+torchtitan/distributed/parallel_dims.py
+torchtitan/distributed/pipeline_parallel.py
+torchtitan/distributed/tensor_parallel.py
+torchtitan/distributed/utils.py
+torchtitan/experiments/__init__.py
+torchtitan/experiments/deepseek_v3/__init__.py
+torchtitan/experiments/deepseek_v3/attn_mask_utils.py
+torchtitan/experiments/deepseek_v3/checkpoint.py
+torchtitan/experiments/deepseek_v3/download.py
+torchtitan/experiments/deepseek_v3/dsgemm_kernels.py
+torchtitan/experiments/deepseek_v3/dsgemm_utils.py
+torchtitan/experiments/deepseek_v3/generate.py
+torchtitan/experiments/deepseek_v3/group_gemms.py
+torchtitan/experiments/deepseek_v3/infra/parallelize_deepseek.py
+torchtitan/experiments/deepseek_v3/model.py
+torchtitan/experiments/deepseek_v3/model_args.py
+torchtitan/experiments/deepseek_v3/model_config.py
+torchtitan/experiments/deepseek_v3/moe_kernels.py
+torchtitan/experiments/deepseek_v3/symm_mem_recipes/__init__.py
+torchtitan/experiments/deepseek_v3/symm_mem_recipes/triton_barrier.py
+torchtitan/experiments/deepseek_v3/symm_mem_recipes/triton_on_device_all_to_all_v.py
+torchtitan/experiments/deepseek_v3/symm_mem_recipes/triton_utils.py
+torchtitan/experiments/deepseek_v3/tokenizers/hf_tokenizer.py
+torchtitan/experiments/deepseek_v3/train_configs/custom_args.py
+torchtitan/experiments/deepseek_v3/train_ds_dev.py
+torchtitan/experiments/deepseek_v3/train_ds_real.py
+torchtitan/experiments/deepseek_v3/unit_testing/benchmark_kernels.py
+torchtitan/experiments/deepseek_v3/unit_testing/dsgemm_unit_testing.py
+torchtitan/experiments/deepseek_v3/unit_testing/permute_indices_testing.py
+torchtitan/experiments/deepseek_v3/unit_testing/test_create_m_indices.py
+torchtitan/experiments/fl/__init__.py
+torchtitan/experiments/fl/callbacks.py
+torchtitan/experiments/fl/components.py
+torchtitan/experiments/fl/configs/__init__.py
+torchtitan/experiments/fl/configs/config.py
+torchtitan/experiments/fl/configs/optimizers.py
+torchtitan/experiments/fl/dataloader/dataloader.py
+torchtitan/experiments/fl/dataloader/tokenizer.py
+torchtitan/experiments/fl/desloc.py
+torchtitan/experiments/fl/ft_override.py
+torchtitan/experiments/fl/lr_scheduler.py
+torchtitan/experiments/fl/metrics.py
+torchtitan/experiments/fl/models/__init__.py
+torchtitan/experiments/fl/models/constants.py
+torchtitan/experiments/fl/models/llama3_mup/__init__.py
+torchtitan/experiments/fl/models/llama3_mup/infra/__init__.py
+torchtitan/experiments/fl/models/llama3_mup/infra/parallelize.py
+torchtitan/experiments/fl/models/llama3_mup/model/__init__.py
+torchtitan/experiments/fl/models/llama3_mup/model/mup_args.py
+torchtitan/experiments/fl/models/llama3_mup/model/mup_model.py
+torchtitan/experiments/fl/models/llama3_mup/model/state_dict_adapter.py
+torchtitan/experiments/fl/models/llama3_mup/tests/test_mup_model.py
+torchtitan/experiments/fl/models/llama3_mup/train_configs/__init__.py
+torchtitan/experiments/fl/models/mosaic_llama3/__init__.py
+torchtitan/experiments/fl/models/mosaic_llama3_mup/__init__.py
+torchtitan/experiments/fl/models/utils.py
+torchtitan/experiments/fl/optimizer_builder.py
+torchtitan/experiments/fl/optimizers/__init__.py
+torchtitan/experiments/fl/optimizers/_decoupled_decay.py
+torchtitan/experiments/fl/optimizers/adopt.py
+torchtitan/experiments/fl/optimizers/aggmo_adamw.py
+torchtitan/experiments/fl/optimizers/aggmo_adopt.py
+torchtitan/experiments/fl/optimizers/decoupled_adamw.py
+torchtitan/experiments/fl/optimizers/qhadamw.py
+torchtitan/experiments/fl/optimizers/qhadopt.py
+torchtitan/experiments/fl/s3_checkpoint.py
+torchtitan/experiments/fl/train.py
+torchtitan/experiments/fl/validate.py
+torchtitan/experiments/flux/__init__.py
+torchtitan/experiments/flux/dataset/flux_dataset.py
+torchtitan/experiments/flux/dataset/tokenizer.py
+torchtitan/experiments/flux/inference/infer.py
+torchtitan/experiments/flux/infra/parallelize.py
+torchtitan/experiments/flux/job_config.py
+torchtitan/experiments/flux/loss.py
+torchtitan/experiments/flux/model/args.py
+torchtitan/experiments/flux/model/autoencoder.py
+torchtitan/experiments/flux/model/hf_embedder.py
+torchtitan/experiments/flux/model/layers.py
+torchtitan/experiments/flux/model/math.py
+torchtitan/experiments/flux/model/model.py
+torchtitan/experiments/flux/model/state_dict_adapter.py
+torchtitan/experiments/flux/sampling.py
+torchtitan/experiments/flux/scripts/download_autoencoder.py
+torchtitan/experiments/flux/tests/__init__.py
+torchtitan/experiments/flux/tests/assets/cc12m_test/pack_test_dataset.py
+torchtitan/experiments/flux/tests/integration_tests.py
+torchtitan/experiments/flux/tests/unit_tests/__init__.py
+torchtitan/experiments/flux/tests/unit_tests/test_flux_dataloader.py
+torchtitan/experiments/flux/train.py
+torchtitan/experiments/flux/utils.py
+torchtitan/experiments/flux/validate.py
+torchtitan/experiments/forge/__init__.py
+torchtitan/experiments/forge/engine.py
+torchtitan/experiments/forge/example_train.py
+torchtitan/experiments/forge/job_config.py
+torchtitan/experiments/forge/train_spec.py
+torchtitan/experiments/kernels/moe/combine.py
+torchtitan/experiments/kernels/moe/dispatch.py
+torchtitan/experiments/kernels/moe/indices.py
+torchtitan/experiments/kernels/moe/unit_tests/permute_indices_testing.py
+torchtitan/experiments/kernels/triton_contiguous_group_gemm/cg_backward.py
+torchtitan/experiments/kernels/triton_contiguous_group_gemm/cg_forward.py
+torchtitan/experiments/kernels/triton_contiguous_group_gemm/cg_reference.py
+torchtitan/experiments/kernels/triton_contiguous_group_gemm/debug.py
+torchtitan/experiments/kernels/triton_contiguous_group_gemm/tma_cuda_autotune.py
+torchtitan/experiments/kernels/triton_contiguous_group_gemm/unit_test_cg.py
+torchtitan/experiments/kernels/triton_mg_group_gemm/benchmark.py
+torchtitan/experiments/kernels/triton_mg_group_gemm/simpleMoE.py
+torchtitan/experiments/kernels/triton_mg_group_gemm/torchao_pr/__init__.py
+torchtitan/experiments/kernels/triton_mg_group_gemm/torchao_pr/fast_debug_ao.py
+torchtitan/experiments/kernels/triton_mg_group_gemm/torchao_pr/mg_grouped_gemm.py
+torchtitan/experiments/kernels/triton_mg_group_gemm/torchao_pr/reference_utils.py
+torchtitan/experiments/kernels/triton_mg_group_gemm/torchao_pr/tma_autotuning.py
+torchtitan/experiments/kernels/triton_mg_group_gemm/torchao_pr/unit_test_backwards.py
+torchtitan/experiments/kernels/triton_mg_group_gemm/torchao_pr/unit_test_forwards.py
+torchtitan/experiments/llama4/__init__.py
+torchtitan/experiments/llama4/infra/parallelize.py
+torchtitan/experiments/llama4/model/args.py
+torchtitan/experiments/llama4/model/model.py
+torchtitan/experiments/llama4/model/state_dict_adapter.py
+torchtitan/experiments/llama4/scripts/convert_hf_to_dcp_with_gpus.py
+torchtitan/experiments/llama4/scripts/convert_meta_to_dcp_with_gpus.py
+torchtitan/experiments/multimodal/__init__.py
+torchtitan/experiments/multimodal/check_padding_mm.py
+torchtitan/experiments/multimodal/mm_collator.py
+torchtitan/experiments/multimodal/mm_dataset.py
+torchtitan/experiments/multimodal/model.py
+torchtitan/experiments/multimodal/tests/__init__.py
+torchtitan/experiments/multimodal/tests/test_multimodal_model.py
+torchtitan/experiments/multimodal/tests/test_utils.py
+torchtitan/experiments/multimodal/tokenizer/tiktoken.py
+torchtitan/experiments/multimodal/transform.py
+torchtitan/experiments/multimodal/utils.py
+torchtitan/experiments/qwen3/__init__.py
+torchtitan/experiments/qwen3/infra/parallelize.py
+torchtitan/experiments/qwen3/model/args.py
+torchtitan/experiments/qwen3/model/model.py
+torchtitan/experiments/qwen3/model/state_dict_adapter.py
+torchtitan/experiments/simple_fsdp/deepseek_v3/__init__.py
+torchtitan/experiments/simple_fsdp/deepseek_v3/model.py
+torchtitan/experiments/simple_fsdp/deepseek_v3/parallelize.py
+torchtitan/experiments/simple_fsdp/llama3/__init__.py
+torchtitan/experiments/simple_fsdp/llama3/model.py
+torchtitan/experiments/simple_fsdp/llama3/parallelize.py
+torchtitan/experiments/simple_fsdp/simple_fsdp.py
+torchtitan/experiments/simple_fsdp/tests/__init__.py
+torchtitan/experiments/simple_fsdp/tests/integration_tests.py
+torchtitan/experiments/simple_fsdp/tests/test_numerics.py
+torchtitan/experiments/vlm/__init__.py
+torchtitan/experiments/vlm/assets/job_config.py
+torchtitan/experiments/vlm/datasets/mm_collator_nld.py
+torchtitan/experiments/vlm/datasets/mm_datasets.py
+torchtitan/experiments/vlm/datasets/utils/image.py
+torchtitan/experiments/vlm/datasets/utils/packing.py
+torchtitan/experiments/vlm/datasets/utils/text.py
+torchtitan/experiments/vlm/infra/parallelize.py
+torchtitan/experiments/vlm/model/args.py
+torchtitan/experiments/vlm/model/model.py
+torchtitan/experiments/vlm/model/siglip2.py
+torchtitan/models/__init__.py
+torchtitan/models/attention.py
+torchtitan/models/deepseek_v3/__init__.py
+torchtitan/models/deepseek_v3/infra/parallelize.py
+torchtitan/models/deepseek_v3/model/args.py
+torchtitan/models/deepseek_v3/model/model.py
+torchtitan/models/deepseek_v3/model/quantization.py
+torchtitan/models/deepseek_v3/model/state_dict_adapter.py
+torchtitan/models/llama3/__init__.py
+torchtitan/models/llama3/infra/parallelize.py
+torchtitan/models/llama3/infra/pipeline.py
+torchtitan/models/llama3/model/args.py
+torchtitan/models/llama3/model/model.py
+torchtitan/models/llama3/model/state_dict_adapter.py
+torchtitan/models/llama3_ft/__init__.py
+torchtitan/models/moe.py
+torchtitan/models/utils.py
+torchtitan/protocols/__init__.py
+torchtitan/protocols/model.py
+torchtitan/protocols/model_converter.py
+torchtitan/protocols/state_dict_adapter.py
+torchtitan/protocols/train_spec.py
+torchtitan/tools/logging.py
+torchtitan/tools/profiling.py
+torchtitan/tools/utils.py
+torchtitan/train.py
+torchtitan/experiments/fl/dataloader/dataloader.py
+    1106: DOC201: Function `build_mosaic_validation_dataloader` does not have a return section in docstring
+    1106: DOC203: Function `build_mosaic_validation_dataloader` return type(s) in docstring not consistent with the return annotation. Return annotation has 1 type(s); docstring return section has 0 type(s).
+Loading config from user-specified .toml file: pyproject.toml
+No config found in pyproject.toml.
+
+Generate AGENTS.MD from project..........................................Failed
+- hook id: generate-agents-md
+- files were modified by this hook
+
+Starting recursive AGENTS.md generation...
+
+=========================================
+Processing project root (top-level AGENTS.md)
+=========================================
+Step 1: Generating project summary (EMBARGO.md)...
+🚀 EMBARGO - Ultrafast Codebase Analysis
+📁 Input: torchtitan (targeting <1s)
+📄 Output: EMBARGO.md
+🎨 Format: llm-optimized
+🔧 Languages: ["python", "typescript", "javascript", "cpp", "rust", "java", "go", "csharp"]
+🔍 Scanning files...
+📊 Found 214 files to analyze
+⚡ Parsing files with cache optimization...
+📋 Cache hits: 200, Parsed: 14
+🏗️  Building dependency graph...
+🔗 Resolving function calls...
+🔗 Resolved 640 call edges
+⚡ Analysis completed in 0.15s
+✅ Analysis complete! Generated EMBARGO.md
+⏱️  Total execution time: 0.16s
+🎯 ULTRAFAST TARGET ACHIEVED! Sub-1 second execution ⚡
+Step 2: Renaming EMBARGO.md to AGENTS.md...
+Step 3: Splitting long lines in top-level AGENTS.md...
+Splitting lines over 4000 bytes in /nfs-share/aai30/projects/torchtitan/AGENTS.md
+Step 4: Copying top-level AGENTS.md to torchtitan/AGENTS.md...
+Step 5: Staging both AGENTS.md files...
+✓ Completed processing: Project root and torchtitan/
+
+=========================================
+Processing directory: torchtitan/datasets
+=========================================
+Step 1: Generating project summary (EMBARGO.md)...
+🚀 EMBARGO - Ultrafast Codebase Analysis
+📁 Input: torchtitan/datasets (targeting <1s)
+📄 Output: EMBARGO.md
+🎨 Format: llm-optimized
+🔧 Languages: ["python", "typescript", "javascript", "cpp", "rust", "java", "go", "csharp"]
+🔍 Scanning files...
+📊 Found 2 files to analyze
+⚡ Parsing files with cache optimization...
+📋 Cache hits: 2, Parsed: 0
+🏗️  Building dependency graph...
+🔗 Resolving function calls...
+🔗 Resolved 1 call edges
+⚡ Analysis completed in 0.01s
+✅ Analysis complete! Generated EMBARGO.md
+⏱️  Total execution time: 0.01s
+🎯 ULTRAFAST TARGET ACHIEVED! Sub-1 second execution ⚡
+Step 2: Moving EMBARGO.md to target directory and renaming to AGENTS.md...
+Step 3: Splitting long lines in AGENTS.md...
+Step 4: Staging the generated AGENTS.md file...
+✓ Completed processing: torchtitan/datasets
+
+=========================================
+Processing directory: torchtitan/models
+=========================================
+Step 1: Generating project summary (EMBARGO.md)...
+🚀 EMBARGO - Ultrafast Codebase Analysis
+📁 Input: torchtitan/models (targeting <1s)
+📄 Output: EMBARGO.md
+🎨 Format: llm-optimized
+🔧 Languages: ["python", "typescript", "javascript", "cpp", "rust", "java", "go", "csharp"]
+🔍 Scanning files...
+📊 Found 17 files to analyze
+⚡ Parsing files with cache optimization...
+📋 Cache hits: 17, Parsed: 0
+🏗️  Building dependency graph...
+🔗 Resolving function calls...
+🔗 Resolved 24 call edges
+⚡ Analysis completed in 0.02s
+✅ Analysis complete! Generated EMBARGO.md
+⏱️  Total execution time: 0.02s
+🎯 ULTRAFAST TARGET ACHIEVED! Sub-1 second execution ⚡
+Step 2: Moving EMBARGO.md to target directory and renaming to AGENTS.md...
+Step 3: Splitting long lines in AGENTS.md...
+Splitting lines over 4000 bytes in /nfs-share/aai30/projects/torchtitan/torchtitan/models/AGENTS.md
+Step 4: Staging the generated AGENTS.md file...
+✓ Completed processing: torchtitan/models
+
+=========================================
+Processing directory: torchtitan/models/deepseek_v3
+=========================================
+Step 1: Generating project summary (EMBARGO.md)...
+🚀 EMBARGO - Ultrafast Codebase Analysis
+📁 Input: torchtitan/models/deepseek_v3 (targeting <1s)
+📄 Output: EMBARGO.md
+🎨 Format: llm-optimized
+🔧 Languages: ["python", "typescript", "javascript", "cpp", "rust", "java", "go", "csharp"]
+🔍 Scanning files...
+📊 Found 6 files to analyze
+⚡ Parsing files with cache optimization...
+📋 Cache hits: 6, Parsed: 0
+🏗️  Building dependency graph...
+🔗 Resolving function calls...
+🔗 Resolved 8 call edges
+⚡ Analysis completed in 0.01s
+✅ Analysis complete! Generated EMBARGO.md
+⏱️  Total execution time: 0.01s
+🎯 ULTRAFAST TARGET ACHIEVED! Sub-1 second execution ⚡
+Step 2: Moving EMBARGO.md to target directory and renaming to AGENTS.md...
+Step 3: Splitting long lines in AGENTS.md...
+Step 4: Staging the generated AGENTS.md file...
+✓ Completed processing: torchtitan/models/deepseek_v3
+
+=========================================
+Processing directory: torchtitan/models/deepseek_v3/model
+=========================================
+Step 1: Generating project summary (EMBARGO.md)...
+🚀 EMBARGO - Ultrafast Codebase Analysis
+📁 Input: torchtitan/models/deepseek_v3/model (targeting <1s)
+📄 Output: EMBARGO.md
+🎨 Format: llm-optimized
+🔧 Languages: ["python", "typescript", "javascript", "cpp", "rust", "java", "go", "csharp"]
+🔍 Scanning files...
+📊 Found 4 files to analyze
+⚡ Parsing files with cache optimization...
+📋 Cache hits: 4, Parsed: 0
+🏗️  Building dependency graph...
+🔗 Resolving function calls...
+🔗 Resolved 7 call edges
+⚡ Analysis completed in 0.01s
+✅ Analysis complete! Generated EMBARGO.md
+⏱️  Total execution time: 0.01s
+🎯 ULTRAFAST TARGET ACHIEVED! Sub-1 second execution ⚡
+Step 2: Moving EMBARGO.md to target directory and renaming to AGENTS.md...
+Step 3: Splitting long lines in AGENTS.md...
+Step 4: Staging the generated AGENTS.md file...
+✓ Completed processing: torchtitan/models/deepseek_v3/model
+
+=========================================
+Processing directory: torchtitan/models/deepseek_v3/infra
+=========================================
+Step 1: Generating project summary (EMBARGO.md)...
+🚀 EMBARGO - Ultrafast Codebase Analysis
+📁 Input: torchtitan/models/deepseek_v3/infra (targeting <1s)
+📄 Output: EMBARGO.md
+🎨 Format: llm-optimized
+🔧 Languages: ["python", "typescript", "javascript", "cpp", "rust", "java", "go", "csharp"]
+🔍 Scanning files...
+📊 Found 1 files to analyze
+⚡ Parsing files with cache optimization...
+📋 Cache hits: 1, Parsed: 0
+🏗️  Building dependency graph...
+🔗 Resolving function calls...
+🔗 Resolved 1 call edges
+⚡ Analysis completed in 0.01s
+✅ Analysis complete! Generated EMBARGO.md
+⏱️  Total execution time: 0.01s
+🎯 ULTRAFAST TARGET ACHIEVED! Sub-1 second execution ⚡
+Step 2: Moving EMBARGO.md to target directory and renaming to AGENTS.md...
+Step 3: Splitting long lines in AGENTS.md...
+Step 4: Staging the generated AGENTS.md file...
+✓ Completed processing: torchtitan/models/deepseek_v3/infra
+
+=========================================
+Processing directory: torchtitan/models/llama3
+=========================================
+Step 1: Generating project summary (EMBARGO.md)...
+🚀 EMBARGO - Ultrafast Codebase Analysis
+📁 Input: torchtitan/models/llama3 (targeting <1s)
+📄 Output: EMBARGO.md
+🎨 Format: llm-optimized
+🔧 Languages: ["python", "typescript", "javascript", "cpp", "rust", "java", "go", "csharp"]
+🔍 Scanning files...
+📊 Found 6 files to analyze
+⚡ Parsing files with cache optimization...
+📋 Cache hits: 6, Parsed: 0
+🏗️  Building dependency graph...
+🔗 Resolving function calls...
+🔗 Resolved 10 call edges
+⚡ Analysis completed in 0.01s
+✅ Analysis complete! Generated EMBARGO.md
+⏱️  Total execution time: 0.01s
+🎯 ULTRAFAST TARGET ACHIEVED! Sub-1 second execution ⚡
+Step 2: Moving EMBARGO.md to target directory and renaming to AGENTS.md...
+Step 3: Splitting long lines in AGENTS.md...
+Step 4: Staging the generated AGENTS.md file...
+✓ Completed processing: torchtitan/models/llama3
+
+=========================================
+Processing directory: torchtitan/models/llama3/infra
+=========================================
+Step 1: Generating project summary (EMBARGO.md)...
+🚀 EMBARGO - Ultrafast Codebase Analysis
+📁 Input: torchtitan/models/llama3/infra (targeting <1s)
+📄 Output: EMBARGO.md
+🎨 Format: llm-optimized
+🔧 Languages: ["python", "typescript", "javascript", "cpp", "rust", "java", "go", "csharp"]
+🔍 Scanning files...
+📊 Found 2 files to analyze
+⚡ Parsing files with cache optimization...
+📋 Cache hits: 2, Parsed: 0
+🏗️  Building dependency graph...
+🔗 Resolving function calls...
+🔗 Resolved 5 call edges
+⚡ Analysis completed in 0.01s
+✅ Analysis complete! Generated EMBARGO.md
+⏱️  Total execution time: 0.01s
+🎯 ULTRAFAST TARGET ACHIEVED! Sub-1 second execution ⚡
+Step 2: Moving EMBARGO.md to target directory and renaming to AGENTS.md...
+Step 3: Splitting long lines in AGENTS.md...
+Step 4: Staging the generated AGENTS.md file...
+✓ Completed processing: torchtitan/models/llama3/infra
+
+=========================================
+Processing directory: torchtitan/models/llama3/model
+=========================================
+Step 1: Generating project summary (EMBARGO.md)...
+🚀 EMBARGO - Ultrafast Codebase Analysis
+📁 Input: torchtitan/models/llama3/model (targeting <1s)
+📄 Output: EMBARGO.md
+🎨 Format: llm-optimized
+🔧 Languages: ["python", "typescript", "javascript", "cpp", "rust", "java", "go", "csharp"]
+🔍 Scanning files...
+📊 Found 3 files to analyze
+⚡ Parsing files with cache optimization...
+📋 Cache hits: 3, Parsed: 0
+🏗️  Building dependency graph...
+🔗 Resolving function calls...
+🔗 Resolved 5 call edges
+⚡ Analysis completed in 0.01s
+✅ Analysis complete! Generated EMBARGO.md
+⏱️  Total execution time: 0.01s
+🎯 ULTRAFAST TARGET ACHIEVED! Sub-1 second execution ⚡
+Step 2: Moving EMBARGO.md to target directory and renaming to AGENTS.md...
+Step 3: Splitting long lines in AGENTS.md...
+Step 4: Staging the generated AGENTS.md file...
+✓ Completed processing: torchtitan/models/llama3/model
+
+=========================================
+Processing directory: torchtitan/models/llama3_ft
+=========================================
+Step 1: Generating project summary (EMBARGO.md)...
+🚀 EMBARGO - Ultrafast Codebase Analysis
+📁 Input: torchtitan/models/llama3_ft (targeting <1s)
+📄 Output: EMBARGO.md
+🎨 Format: llm-optimized
+🔧 Languages: ["python", "typescript", "javascript", "cpp", "rust", "java", "go", "csharp"]
+🔍 Scanning files...
+📊 Found 1 files to analyze
+⚡ Parsing files with cache optimization...
+📋 Cache hits: 1, Parsed: 0
+🏗️  Building dependency graph...
+🔗 Resolving function calls...
+🔗 Resolved 0 call edges
+⚡ Analysis completed in 0.00s
+✅ Analysis complete! Generated EMBARGO.md
+⏱️  Total execution time: 0.00s
+🎯 ULTRAFAST TARGET ACHIEVED! Sub-1 second execution ⚡
+Step 2: Moving EMBARGO.md to target directory and renaming to AGENTS.md...
+Step 3: Splitting long lines in AGENTS.md...
+Step 4: Staging the generated AGENTS.md file...
+✓ Completed processing: torchtitan/models/llama3_ft
+
+=========================================
+Processing directory: torchtitan/protocols
+=========================================
+Step 1: Generating project summary (EMBARGO.md)...
+🚀 EMBARGO - Ultrafast Codebase Analysis
+📁 Input: torchtitan/protocols (targeting <1s)
+📄 Output: EMBARGO.md
+🎨 Format: llm-optimized
+🔧 Languages: ["python", "typescript", "javascript", "cpp", "rust", "java", "go", "csharp"]
+🔍 Scanning files...
+📊 Found 5 files to analyze
+⚡ Parsing files with cache optimization...
+📋 Cache hits: 5, Parsed: 0
+🏗️  Building dependency graph...
+🔗 Resolving function calls...
+🔗 Resolved 0 call edges
+⚡ Analysis completed in 0.01s
+✅ Analysis complete! Generated EMBARGO.md
+⏱️  Total execution time: 0.01s
+🎯 ULTRAFAST TARGET ACHIEVED! Sub-1 second execution ⚡
+Step 2: Moving EMBARGO.md to target directory and renaming to AGENTS.md...
+Step 3: Splitting long lines in AGENTS.md...
+Step 4: Staging the generated AGENTS.md file...
+✓ Completed processing: torchtitan/protocols
+
+=========================================
+Processing directory: torchtitan/tools
+=========================================
+Step 1: Generating project summary (EMBARGO.md)...
+🚀 EMBARGO - Ultrafast Codebase Analysis
+📁 Input: torchtitan/tools (targeting <1s)
+📄 Output: EMBARGO.md
+🎨 Format: llm-optimized
+🔧 Languages: ["python", "typescript", "javascript", "cpp", "rust", "java", "go", "csharp"]
+🔍 Scanning files...
+📊 Found 3 files to analyze
+⚡ Parsing files with cache optimization...
+📋 Cache hits: 3, Parsed: 0
+🏗️  Building dependency graph...
+🔗 Resolving function calls...
+🔗 Resolved 0 call edges
+⚡ Analysis completed in 0.01s
+✅ Analysis complete! Generated EMBARGO.md
+⏱️  Total execution time: 0.01s
+🎯 ULTRAFAST TARGET ACHIEVED! Sub-1 second execution ⚡
+Step 2: Moving EMBARGO.md to target directory and renaming to AGENTS.md...
+Step 3: Splitting long lines in AGENTS.md...
+Step 4: Staging the generated AGENTS.md file...
+✓ Completed processing: torchtitan/tools
+
+=========================================
+Processing directory: torchtitan/distributed
+=========================================
+Step 1: Generating project summary (EMBARGO.md)...
+🚀 EMBARGO - Ultrafast Codebase Analysis
+📁 Input: torchtitan/distributed (targeting <1s)
+📄 Output: EMBARGO.md
+🎨 Format: llm-optimized
+🔧 Languages: ["python", "typescript", "javascript", "cpp", "rust", "java", "go", "csharp"]
+🔍 Scanning files...
+📊 Found 7 files to analyze
+⚡ Parsing files with cache optimization...
+📋 Cache hits: 7, Parsed: 0
+🏗️  Building dependency graph...
+🔗 Resolving function calls...
+🔗 Resolved 8 call edges
+⚡ Analysis completed in 0.01s
+✅ Analysis complete! Generated EMBARGO.md
+⏱️  Total execution time: 0.01s
+🎯 ULTRAFAST TARGET ACHIEVED! Sub-1 second execution ⚡
+Step 2: Moving EMBARGO.md to target directory and renaming to AGENTS.md...
+Step 3: Splitting long lines in AGENTS.md...
+Step 4: Staging the generated AGENTS.md file...
+✓ Completed processing: torchtitan/distributed
+
+=========================================
+Processing directory: torchtitan/components
+=========================================
+Step 1: Generating project summary (EMBARGO.md)...
+🚀 EMBARGO - Ultrafast Codebase Analysis
+📁 Input: torchtitan/components (targeting <1s)
+📄 Output: EMBARGO.md
+🎨 Format: llm-optimized
+🔧 Languages: ["python", "typescript", "javascript", "cpp", "rust", "java", "go", "csharp"]
+🔍 Scanning files...
+📊 Found 19 files to analyze
+⚡ Parsing files with cache optimization...
+📋 Cache hits: 19, Parsed: 0
+🏗️  Building dependency graph...
+🔗 Resolving function calls...
+🔗 Resolved 12 call edges
+⚡ Analysis completed in 0.02s
+✅ Analysis complete! Generated EMBARGO.md
+⏱️  Total execution time: 0.02s
+🎯 ULTRAFAST TARGET ACHIEVED! Sub-1 second execution ⚡
+Step 2: Moving EMBARGO.md to target directory and renaming to AGENTS.md...
+Step 3: Splitting long lines in AGENTS.md...
+Splitting lines over 4000 bytes in /nfs-share/aai30/projects/torchtitan/torchtitan/components/AGENTS.md
+Step 4: Staging the generated AGENTS.md file...
+✓ Completed processing: torchtitan/components
+
+=========================================
+Processing directory: torchtitan/components/ft
+=========================================
+Step 1: Generating project summary (EMBARGO.md)...
+🚀 EMBARGO - Ultrafast Codebase Analysis
+📁 Input: torchtitan/components/ft (targeting <1s)
+📄 Output: EMBARGO.md
+🎨 Format: llm-optimized
+🔧 Languages: ["python", "typescript", "javascript", "cpp", "rust", "java", "go", "csharp"]
+🔍 Scanning files...
+📊 Found 7 files to analyze
+⚡ Parsing files with cache optimization...
+📋 Cache hits: 7, Parsed: 0
+🏗️  Building dependency graph...
+🔗 Resolving function calls...
+🔗 Resolved 1 call edges
+⚡ Analysis completed in 0.01s
+✅ Analysis complete! Generated EMBARGO.md
+⏱️  Total execution time: 0.01s
+🎯 ULTRAFAST TARGET ACHIEVED! Sub-1 second execution ⚡
+Step 2: Moving EMBARGO.md to target directory and renaming to AGENTS.md...
+Step 3: Splitting long lines in AGENTS.md...
+Step 4: Staging the generated AGENTS.md file...
+✓ Completed processing: torchtitan/components/ft
+
+=========================================
+Processing directory: torchtitan/components/ft/diloco
+=========================================
+Step 1: Generating project summary (EMBARGO.md)...
+🚀 EMBARGO - Ultrafast Codebase Analysis
+📁 Input: torchtitan/components/ft/diloco (targeting <1s)
+📄 Output: EMBARGO.md
+🎨 Format: llm-optimized
+🔧 Languages: ["python", "typescript", "javascript", "cpp", "rust", "java", "go", "csharp"]
+🔍 Scanning files...
+📊 Found 3 files to analyze
+⚡ Parsing files with cache optimization...
+📋 Cache hits: 3, Parsed: 0
+🏗️  Building dependency graph...
+🔗 Resolving function calls...
+🔗 Resolved 1 call edges
+⚡ Analysis completed in 0.01s
+✅ Analysis complete! Generated EMBARGO.md
+⏱️  Total execution time: 0.01s
+🎯 ULTRAFAST TARGET ACHIEVED! Sub-1 second execution ⚡
+Step 2: Moving EMBARGO.md to target directory and renaming to AGENTS.md...
+Step 3: Splitting long lines in AGENTS.md...
+Step 4: Staging the generated AGENTS.md file...
+✓ Completed processing: torchtitan/components/ft/diloco
+
+=========================================
+Processing directory: torchtitan/components/ft/config
+=========================================
+Step 1: Generating project summary (EMBARGO.md)...
+🚀 EMBARGO - Ultrafast Codebase Analysis
+📁 Input: torchtitan/components/ft/config (targeting <1s)
+📄 Output: EMBARGO.md
+🎨 Format: llm-optimized
+🔧 Languages: ["python", "typescript", "javascript", "cpp", "rust", "java", "go", "csharp"]
+🔍 Scanning files...
+📊 Found 2 files to analyze
+⚡ Parsing files with cache optimization...
+📋 Cache hits: 2, Parsed: 0
+🏗️  Building dependency graph...
+🔗 Resolving function calls...
+🔗 Resolved 0 call edges
+⚡ Analysis completed in 0.00s
+✅ Analysis complete! Generated EMBARGO.md
+⏱️  Total execution time: 0.00s
+🎯 ULTRAFAST TARGET ACHIEVED! Sub-1 second execution ⚡
+Step 2: Moving EMBARGO.md to target directory and renaming to AGENTS.md...
+Step 3: Splitting long lines in AGENTS.md...
+Step 4: Staging the generated AGENTS.md file...
+✓ Completed processing: torchtitan/components/ft/config
+
+=========================================
+Processing directory: torchtitan/components/quantization
+=========================================
+Step 1: Generating project summary (EMBARGO.md)...
+🚀 EMBARGO - Ultrafast Codebase Analysis
+📁 Input: torchtitan/components/quantization (targeting <1s)
+📄 Output: EMBARGO.md
+🎨 Format: llm-optimized
+🔧 Languages: ["python", "typescript", "javascript", "cpp", "rust", "java", "go", "csharp"]
+🔍 Scanning files...
+📊 Found 4 files to analyze
+⚡ Parsing files with cache optimization...
+📋 Cache hits: 4, Parsed: 0
+🏗️  Building dependency graph...
+🔗 Resolving function calls...
+🔗 Resolved 0 call edges
+⚡ Analysis completed in 0.01s
+✅ Analysis complete! Generated EMBARGO.md
+⏱️  Total execution time: 0.01s
+🎯 ULTRAFAST TARGET ACHIEVED! Sub-1 second execution ⚡
+Step 2: Moving EMBARGO.md to target directory and renaming to AGENTS.md...
+Step 3: Splitting long lines in AGENTS.md...
+Step 4: Staging the generated AGENTS.md file...
+✓ Completed processing: torchtitan/components/quantization
+
+=========================================
+Processing directory: torchtitan/config
+=========================================
+Step 1: Generating project summary (EMBARGO.md)...
+🚀 EMBARGO - Ultrafast Codebase Analysis
+📁 Input: torchtitan/config (targeting <1s)
+📄 Output: EMBARGO.md
+🎨 Format: llm-optimized
+🔧 Languages: ["python", "typescript", "javascript", "cpp", "rust", "java", "go", "csharp"]
+🔍 Scanning files...
+📊 Found 3 files to analyze
+⚡ Parsing files with cache optimization...
+📋 Cache hits: 3, Parsed: 0
+🏗️  Building dependency graph...
+🔗 Resolving function calls...
+🔗 Resolved 0 call edges
+⚡ Analysis completed in 0.01s
+✅ Analysis complete! Generated EMBARGO.md
+⏱️  Total execution time: 0.01s
+🎯 ULTRAFAST TARGET ACHIEVED! Sub-1 second execution ⚡
+Step 2: Moving EMBARGO.md to target directory and renaming to AGENTS.md...
+Step 3: Splitting long lines in AGENTS.md...
+Step 4: Staging the generated AGENTS.md file...
+✓ Completed processing: torchtitan/config
+
+=========================================
+Processing directory: torchtitan/experiments
+=========================================
+Step 1: Generating project summary (EMBARGO.md)...
+🚀 EMBARGO - Ultrafast Codebase Analysis
+📁 Input: torchtitan/experiments (targeting <1s)
+📄 Output: EMBARGO.md
+🎨 Format: llm-optimized
+🔧 Languages: ["python", "typescript", "javascript", "cpp", "rust", "java", "go", "csharp"]
+🔍 Scanning files...
+📊 Found 156 files to analyze
+⚡ Parsing files with cache optimization...
+📋 Cache hits: 156, Parsed: 0
+🏗️  Building dependency graph...
+🔗 Resolving function calls...
+🔗 Resolved 493 call edges
+⚡ Analysis completed in 0.09s
+✅ Analysis complete! Generated EMBARGO.md
+⏱️  Total execution time: 0.10s
+🎯 ULTRAFAST TARGET ACHIEVED! Sub-1 second execution ⚡
+Step 2: Moving EMBARGO.md to target directory and renaming to AGENTS.md...
+Step 3: Splitting long lines in AGENTS.md...
+Splitting lines over 4000 bytes in /nfs-share/aai30/projects/torchtitan/torchtitan/experiments/AGENTS.md
+Step 4: Staging the generated AGENTS.md file...
+✓ Completed processing: torchtitan/experiments
+
+=========================================
+Processing directory: torchtitan/experiments/llama4
+=========================================
+Step 1: Generating project summary (EMBARGO.md)...
+🚀 EMBARGO - Ultrafast Codebase Analysis
+📁 Input: torchtitan/experiments/llama4 (targeting <1s)
+📄 Output: EMBARGO.md
+🎨 Format: llm-optimized
+🔧 Languages: ["python", "typescript", "javascript", "cpp", "rust", "java", "go", "csharp"]
+🔍 Scanning files...
+📊 Found 7 files to analyze
+⚡ Parsing files with cache optimization...
+📋 Cache hits: 7, Parsed: 0
+🏗️  Building dependency graph...
+🔗 Resolving function calls...
+🔗 Resolved 14 call edges
+⚡ Analysis completed in 0.01s
+✅ Analysis complete! Generated EMBARGO.md
+⏱️  Total execution time: 0.01s
+🎯 ULTRAFAST TARGET ACHIEVED! Sub-1 second execution ⚡
+Step 2: Moving EMBARGO.md to target directory and renaming to AGENTS.md...
+Step 3: Splitting long lines in AGENTS.md...
+Splitting lines over 4000 bytes in /nfs-share/aai30/projects/torchtitan/torchtitan/experiments/llama4/AGENTS.md
+Step 4: Staging the generated AGENTS.md file...
+✓ Completed processing: torchtitan/experiments/llama4
+
+=========================================
+Processing directory: torchtitan/experiments/llama4/infra
+=========================================
+Step 1: Generating project summary (EMBARGO.md)...
+🚀 EMBARGO - Ultrafast Codebase Analysis
+📁 Input: torchtitan/experiments/llama4/infra (targeting <1s)
+📄 Output: EMBARGO.md
+🎨 Format: llm-optimized
+🔧 Languages: ["python", "typescript", "javascript", "cpp", "rust", "java", "go", "csharp"]
+🔍 Scanning files...
+📊 Found 1 files to analyze
+⚡ Parsing files with cache optimization...
+📋 Cache hits: 1, Parsed: 0
+🏗️  Building dependency graph...
+🔗 Resolving function calls...
+🔗 Resolved 5 call edges
+⚡ Analysis completed in 0.01s
+✅ Analysis complete! Generated EMBARGO.md
+⏱️  Total execution time: 0.01s
+🎯 ULTRAFAST TARGET ACHIEVED! Sub-1 second execution ⚡
+Step 2: Moving EMBARGO.md to target directory and renaming to AGENTS.md...
+Step 3: Splitting long lines in AGENTS.md...
+Step 4: Staging the generated AGENTS.md file...
+✓ Completed processing: torchtitan/experiments/llama4/infra
+
+=========================================
+Processing directory: torchtitan/experiments/llama4/model
+=========================================
+Step 1: Generating project summary (EMBARGO.md)...
+🚀 EMBARGO - Ultrafast Codebase Analysis
+📁 Input: torchtitan/experiments/llama4/model (targeting <1s)
+📄 Output: EMBARGO.md
+🎨 Format: llm-optimized
+🔧 Languages: ["python", "typescript", "javascript", "cpp", "rust", "java", "go", "csharp"]
+🔍 Scanning files...
+📊 Found 3 files to analyze
+⚡ Parsing files with cache optimization...
+📋 Cache hits: 3, Parsed: 0
+🏗️  Building dependency graph...
+🔗 Resolving function calls...
+🔗 Resolved 5 call edges
+⚡ Analysis completed in 0.01s
+✅ Analysis complete! Generated EMBARGO.md
+⏱️  Total execution time: 0.01s
+🎯 ULTRAFAST TARGET ACHIEVED! Sub-1 second execution ⚡
+Step 2: Moving EMBARGO.md to target directory and renaming to AGENTS.md...
+Step 3: Splitting long lines in AGENTS.md...
+Step 4: Staging the generated AGENTS.md file...
+✓ Completed processing: torchtitan/experiments/llama4/model
+
+=========================================
+Processing directory: torchtitan/experiments/llama4/scripts
+=========================================
+Step 1: Generating project summary (EMBARGO.md)...
+🚀 EMBARGO - Ultrafast Codebase Analysis
+📁 Input: torchtitan/experiments/llama4/scripts (targeting <1s)
+📄 Output: EMBARGO.md
+🎨 Format: llm-optimized
+🔧 Languages: ["python", "typescript", "javascript", "cpp", "rust", "java", "go", "csharp"]
+🔍 Scanning files...
+📊 Found 2 files to analyze
+⚡ Parsing files with cache optimization...
+📋 Cache hits: 2, Parsed: 0
+🏗️  Building dependency graph...
+🔗 Resolving function calls...
+🔗 Resolved 4 call edges
+⚡ Analysis completed in 0.01s
+✅ Analysis complete! Generated EMBARGO.md
+⏱️  Total execution time: 0.01s
+🎯 ULTRAFAST TARGET ACHIEVED! Sub-1 second execution ⚡
+Step 2: Moving EMBARGO.md to target directory and renaming to AGENTS.md...
+Step 3: Splitting long lines in AGENTS.md...
+Step 4: Staging the generated AGENTS.md file...
+✓ Completed processing: torchtitan/experiments/llama4/scripts
+
+=========================================
+Processing directory: torchtitan/experiments/kernels/moe
+=========================================
+Step 1: Generating project summary (EMBARGO.md)...
+🚀 EMBARGO - Ultrafast Codebase Analysis
+📁 Input: torchtitan/experiments/kernels/moe (targeting <1s)
+📄 Output: EMBARGO.md
+🎨 Format: llm-optimized
+🔧 Languages: ["python", "typescript", "javascript", "cpp", "rust", "java", "go", "csharp"]
+🔍 Scanning files...
+📊 Found 4 files to analyze
+⚡ Parsing files with cache optimization...
+📋 Cache hits: 4, Parsed: 0
+🏗️  Building dependency graph...
+🔗 Resolving function calls...
+🔗 Resolved 16 call edges
+⚡ Analysis completed in 0.01s
+✅ Analysis complete! Generated EMBARGO.md
+⏱️  Total execution time: 0.01s
+🎯 ULTRAFAST TARGET ACHIEVED! Sub-1 second execution ⚡
+Step 2: Moving EMBARGO.md to target directory and renaming to AGENTS.md...
+Step 3: Splitting long lines in AGENTS.md...
+Step 4: Staging the generated AGENTS.md file...
+✓ Completed processing: torchtitan/experiments/kernels/moe
+
+=========================================
+Processing directory: torchtitan/experiments/kernels/moe/unit_tests
+=========================================
+Step 1: Generating project summary (EMBARGO.md)...
+🚀 EMBARGO - Ultrafast Codebase Analysis
+📁 Input: torchtitan/experiments/kernels/moe/unit_tests (targeting <1s)
+📄 Output: EMBARGO.md
+🎨 Format: llm-optimized
+🔧 Languages: ["python", "typescript", "javascript", "cpp", "rust", "java", "go", "csharp"]
+🔍 Scanning files...
+📊 Found 1 files to analyze
+⚡ Parsing files with cache optimization...
+📋 Cache hits: 1, Parsed: 0
+🏗️  Building dependency graph...
+🔗 Resolving function calls...
+🔗 Resolved 5 call edges
+⚡ Analysis completed in 0.01s
+✅ Analysis complete! Generated EMBARGO.md
+⏱️  Total execution time: 0.01s
+🎯 ULTRAFAST TARGET ACHIEVED! Sub-1 second execution ⚡
+Step 2: Moving EMBARGO.md to target directory and renaming to AGENTS.md...
+Step 3: Splitting long lines in AGENTS.md...
+Step 4: Staging the generated AGENTS.md file...
+✓ Completed processing: torchtitan/experiments/kernels/moe/unit_tests
+
+=========================================
+Processing directory: torchtitan/experiments/kernels/triton_mg_group_gemm
+=========================================
+Step 1: Generating project summary (EMBARGO.md)...
+🚀 EMBARGO - Ultrafast Codebase Analysis
+📁 Input: torchtitan/experiments/kernels/triton_mg_group_gemm (targeting <1s)
+📄 Output: EMBARGO.md
+🎨 Format: llm-optimized
+🔧 Languages: ["python", "typescript", "javascript", "cpp", "rust", "java", "go", "csharp"]
+🔍 Scanning files...
+📊 Found 9 files to analyze
+⚡ Parsing files with cache optimization...
+📋 Cache hits: 9, Parsed: 0
+🏗️  Building dependency graph...
+🔗 Resolving function calls...
+🔗 Resolved 50 call edges
+⚡ Analysis completed in 0.01s
+✅ Analysis complete! Generated EMBARGO.md
+⏱️  Total execution time: 0.01s
+🎯 ULTRAFAST TARGET ACHIEVED! Sub-1 second execution ⚡
+Step 2: Moving EMBARGO.md to target directory and renaming to AGENTS.md...
+Step 3: Splitting long lines in AGENTS.md...
+Splitting lines over 4000 bytes in /nfs-share/aai30/projects/torchtitan/torchtitan/experiments/kernels/triton_mg_group_gemm/AGENTS.md
+Step 4: Staging the generated AGENTS.md file...
+✓ Completed processing: torchtitan/experiments/kernels/triton_mg_group_gemm
+
+=========================================
+Processing directory: torchtitan/experiments/kernels/triton_mg_group_gemm/torchao_pr
+=========================================
+Step 1: Generating project summary (EMBARGO.md)...
+🚀 EMBARGO - Ultrafast Codebase Analysis
+📁 Input: torchtitan/experiments/kernels/triton_mg_group_gemm/torchao_pr (targeting <1s)
+📄 Output: EMBARGO.md
+🎨 Format: llm-optimized
+🔧 Languages: ["python", "typescript", "javascript", "cpp", "rust", "java", "go", "csharp"]
+🔍 Scanning files...
+📊 Found 7 files to analyze
+⚡ Parsing files with cache optimization...
+📋 Cache hits: 7, Parsed: 0
+🏗️  Building dependency graph...
+🔗 Resolving function calls...
+🔗 Resolved 34 call edges
+⚡ Analysis completed in 0.01s
+✅ Analysis complete! Generated EMBARGO.md
+⏱️  Total execution time: 0.01s
+🎯 ULTRAFAST TARGET ACHIEVED! Sub-1 second execution ⚡
+Step 2: Moving EMBARGO.md to target directory and renaming to AGENTS.md...
+Step 3: Splitting long lines in AGENTS.md...
+Step 4: Staging the generated AGENTS.md file...
+✓ Completed processing: torchtitan/experiments/kernels/triton_mg_group_gemm/torchao_pr
+
+=========================================
+Processing directory: torchtitan/experiments/kernels/triton_contiguous_group_gemm
+=========================================
+Step 1: Generating project summary (EMBARGO.md)...
+🚀 EMBARGO - Ultrafast Codebase Analysis
+📁 Input: torchtitan/experiments/kernels/triton_contiguous_group_gemm (targeting <1s)
+📄 Output: EMBARGO.md
+🎨 Format: llm-optimized
+🔧 Languages: ["python", "typescript", "javascript", "cpp", "rust", "java", "go", "csharp"]
+🔍 Scanning files...
+📊 Found 6 files to analyze
+⚡ Parsing files with cache optimization...
+📋 Cache hits: 6, Parsed: 0
+🏗️  Building dependency graph...
+🔗 Resolving function calls...
+🔗 Resolved 28 call edges
+⚡ Analysis completed in 0.01s
+✅ Analysis complete! Generated EMBARGO.md
+⏱️  Total execution time: 0.01s
+🎯 ULTRAFAST TARGET ACHIEVED! Sub-1 second execution ⚡
+Step 2: Moving EMBARGO.md to target directory and renaming to AGENTS.md...
+Step 3: Splitting long lines in AGENTS.md...
+Step 4: Staging the generated AGENTS.md file...
+✓ Completed processing: torchtitan/experiments/kernels/triton_contiguous_group_gemm
+
+=========================================
+Processing directory: torchtitan/experiments/forge
+=========================================
+Step 1: Generating project summary (EMBARGO.md)...
+🚀 EMBARGO - Ultrafast Codebase Analysis
+📁 Input: torchtitan/experiments/forge (targeting <1s)
+📄 Output: EMBARGO.md
+🎨 Format: llm-optimized
+🔧 Languages: ["python", "typescript", "javascript", "cpp", "rust", "java", "go", "csharp"]
+🔍 Scanning files...
+📊 Found 5 files to analyze
+⚡ Parsing files with cache optimization...
+📋 Cache hits: 5, Parsed: 0
+🏗️  Building dependency graph...
+🔗 Resolving function calls...
+🔗 Resolved 2 call edges
+⚡ Analysis completed in 0.01s
+✅ Analysis complete! Generated EMBARGO.md
+⏱️  Total execution time: 0.01s
+🎯 ULTRAFAST TARGET ACHIEVED! Sub-1 second execution ⚡
+Step 2: Moving EMBARGO.md to target directory and renaming to AGENTS.md...
+Step 3: Splitting long lines in AGENTS.md...
+Step 4: Staging the generated AGENTS.md file...
+✓ Completed processing: torchtitan/experiments/forge
+
+=========================================
+Processing directory: torchtitan/experiments/multimodal
+=========================================
+Step 1: Generating project summary (EMBARGO.md)...
+🚀 EMBARGO - Ultrafast Codebase Analysis
+📁 Input: torchtitan/experiments/multimodal (targeting <1s)
+📄 Output: EMBARGO.md
+🎨 Format: llm-optimized
+🔧 Languages: ["python", "typescript", "javascript", "cpp", "rust", "java", "go", "csharp"]
+🔍 Scanning files...
+📊 Found 11 files to analyze
+⚡ Parsing files with cache optimization...
+📋 Cache hits: 11, Parsed: 0
+🏗️  Building dependency graph...
+🔗 Resolving function calls...
+🔗 Resolved 19 call edges
+⚡ Analysis completed in 0.01s
+✅ Analysis complete! Generated EMBARGO.md
+⏱️  Total execution time: 0.01s
+🎯 ULTRAFAST TARGET ACHIEVED! Sub-1 second execution ⚡
+Step 2: Moving EMBARGO.md to target directory and renaming to AGENTS.md...
+Step 3: Splitting long lines in AGENTS.md...
+Splitting lines over 4000 bytes in /nfs-share/aai30/projects/torchtitan/torchtitan/experiments/multimodal/AGENTS.md
+Step 4: Staging the generated AGENTS.md file...
+✓ Completed processing: torchtitan/experiments/multimodal
+
+=========================================
+Processing directory: torchtitan/experiments/multimodal/tests
+=========================================
+Step 1: Generating project summary (EMBARGO.md)...
+🚀 EMBARGO - Ultrafast Codebase Analysis
+📁 Input: torchtitan/experiments/multimodal/tests (targeting <1s)
+📄 Output: EMBARGO.md
+🎨 Format: llm-optimized
+🔧 Languages: ["python", "typescript", "javascript", "cpp", "rust", "java", "go", "csharp"]
+🔍 Scanning files...
+📊 Found 3 files to analyze
+⚡ Parsing files with cache optimization...
+📋 Cache hits: 3, Parsed: 0
+🏗️  Building dependency graph...
+🔗 Resolving function calls...
+🔗 Resolved 0 call edges
+⚡ Analysis completed in 0.01s
+✅ Analysis complete! Generated EMBARGO.md
+⏱️  Total execution time: 0.01s
+🎯 ULTRAFAST TARGET ACHIEVED! Sub-1 second execution ⚡
+Step 2: Moving EMBARGO.md to target directory and renaming to AGENTS.md...
+Step 3: Splitting long lines in AGENTS.md...
+Step 4: Staging the generated AGENTS.md file...
+✓ Completed processing: torchtitan/experiments/multimodal/tests
+
+=========================================
+Processing directory: torchtitan/experiments/multimodal/tokenizer
+=========================================
+Step 1: Generating project summary (EMBARGO.md)...
+🚀 EMBARGO - Ultrafast Codebase Analysis
+📁 Input: torchtitan/experiments/multimodal/tokenizer (targeting <1s)
+📄 Output: EMBARGO.md
+🎨 Format: llm-optimized
+🔧 Languages: ["python", "typescript", "javascript", "cpp", "rust", "java", "go", "csharp"]
+🔍 Scanning files...
+📊 Found 1 files to analyze
+⚡ Parsing files with cache optimization...
+📋 Cache hits: 1, Parsed: 0
+🏗️  Building dependency graph...
+🔗 Resolving function calls...
+🔗 Resolved 0 call edges
+⚡ Analysis completed in 0.01s
+✅ Analysis complete! Generated EMBARGO.md
+⏱️  Total execution time: 0.01s
+🎯 ULTRAFAST TARGET ACHIEVED! Sub-1 second execution ⚡
+Step 2: Moving EMBARGO.md to target directory and renaming to AGENTS.md...
+Step 3: Splitting long lines in AGENTS.md...
+Step 4: Staging the generated AGENTS.md file...
+✓ Completed processing: torchtitan/experiments/multimodal/tokenizer
+
+=========================================
+Processing directory: torchtitan/experiments/deepseek_v3
+=========================================
+Step 1: Generating project summary (EMBARGO.md)...
+🚀 EMBARGO - Ultrafast Codebase Analysis
+📁 Input: torchtitan/experiments/deepseek_v3 (targeting <1s)
+📄 Output: EMBARGO.md
+🎨 Format: llm-optimized
+🔧 Languages: ["python", "typescript", "javascript", "cpp", "rust", "java", "go", "csharp"]
+🔍 Scanning files...
+📊 Found 25 files to analyze
+⚡ Parsing files with cache optimization...
+📋 Cache hits: 25, Parsed: 0
+🏗️  Building dependency graph...
+🔗 Resolving function calls...
+🔗 Resolved 74 call edges
+⚡ Analysis completed in 0.02s
+✅ Analysis complete! Generated EMBARGO.md
+⏱️  Total execution time: 0.02s
+🎯 ULTRAFAST TARGET ACHIEVED! Sub-1 second execution ⚡
+Step 2: Moving EMBARGO.md to target directory and renaming to AGENTS.md...
+Step 3: Splitting long lines in AGENTS.md...
+Splitting lines over 4000 bytes in /nfs-share/aai30/projects/torchtitan/torchtitan/experiments/deepseek_v3/AGENTS.md
+Step 4: Staging the generated AGENTS.md file...
+✓ Completed processing: torchtitan/experiments/deepseek_v3
+
+=========================================
+Processing directory: torchtitan/experiments/deepseek_v3/tokenizers
+=========================================
+Step 1: Generating project summary (EMBARGO.md)...
+🚀 EMBARGO - Ultrafast Codebase Analysis
+📁 Input: torchtitan/experiments/deepseek_v3/tokenizers (targeting <1s)
+📄 Output: EMBARGO.md
+🎨 Format: llm-optimized
+🔧 Languages: ["python", "typescript", "javascript", "cpp", "rust", "java", "go", "csharp"]
+🔍 Scanning files...
+📊 Found 1 files to analyze
+⚡ Parsing files with cache optimization...
+📋 Cache hits: 1, Parsed: 0
+🏗️  Building dependency graph...
+🔗 Resolving function calls...
+🔗 Resolved 0 call edges
+⚡ Analysis completed in 0.01s
+✅ Analysis complete! Generated EMBARGO.md
+⏱️  Total execution time: 0.01s
+🎯 ULTRAFAST TARGET ACHIEVED! Sub-1 second execution ⚡
+Step 2: Moving EMBARGO.md to target directory and renaming to AGENTS.md...
+Step 3: Splitting long lines in AGENTS.md...
+Step 4: Staging the generated AGENTS.md file...
+✓ Completed processing: torchtitan/experiments/deepseek_v3/tokenizers
+
+=========================================
+Processing directory: torchtitan/experiments/deepseek_v3/unit_testing
+=========================================
+Step 1: Generating project summary (EMBARGO.md)...
+🚀 EMBARGO - Ultrafast Codebase Analysis
+📁 Input: torchtitan/experiments/deepseek_v3/unit_testing (targeting <1s)
+📄 Output: EMBARGO.md
+🎨 Format: llm-optimized
+🔧 Languages: ["python", "typescript", "javascript", "cpp", "rust", "java", "go", "csharp"]
+🔍 Scanning files...
+📊 Found 4 files to analyze
+⚡ Parsing files with cache optimization...
+📋 Cache hits: 4, Parsed: 0
+🏗️  Building dependency graph...
+🔗 Resolving function calls...
+🔗 Resolved 17 call edges
+⚡ Analysis completed in 0.01s
+✅ Analysis complete! Generated EMBARGO.md
+⏱️  Total execution time: 0.01s
+🎯 ULTRAFAST TARGET ACHIEVED! Sub-1 second execution ⚡
+Step 2: Moving EMBARGO.md to target directory and renaming to AGENTS.md...
+Step 3: Splitting long lines in AGENTS.md...
+Step 4: Staging the generated AGENTS.md file...
+✓ Completed processing: torchtitan/experiments/deepseek_v3/unit_testing
+
+=========================================
+Processing directory: torchtitan/experiments/deepseek_v3/symm_mem_recipes
+=========================================
+Step 1: Generating project summary (EMBARGO.md)...
+🚀 EMBARGO - Ultrafast Codebase Analysis
+📁 Input: torchtitan/experiments/deepseek_v3/symm_mem_recipes (targeting <1s)
+📄 Output: EMBARGO.md
+🎨 Format: llm-optimized
+🔧 Languages: ["python", "typescript", "javascript", "cpp", "rust", "java", "go", "csharp"]
+🔍 Scanning files...
+📊 Found 4 files to analyze
+⚡ Parsing files with cache optimization...
+📋 Cache hits: 4, Parsed: 0
+🏗️  Building dependency graph...
+🔗 Resolving function calls...
+🔗 Resolved 0 call edges
+⚡ Analysis completed in 0.00s
+✅ Analysis complete! Generated EMBARGO.md
+⏱️  Total execution time: 0.01s
+🎯 ULTRAFAST TARGET ACHIEVED! Sub-1 second execution ⚡
+Step 2: Moving EMBARGO.md to target directory and renaming to AGENTS.md...
+Step 3: Splitting long lines in AGENTS.md...
+Step 4: Staging the generated AGENTS.md file...
+✓ Completed processing: torchtitan/experiments/deepseek_v3/symm_mem_recipes
+
+=========================================
+Processing directory: torchtitan/experiments/deepseek_v3/train_configs
+=========================================
+Step 1: Generating project summary (EMBARGO.md)...
+🚀 EMBARGO - Ultrafast Codebase Analysis
+📁 Input: torchtitan/experiments/deepseek_v3/train_configs (targeting <1s)
+📄 Output: EMBARGO.md
+🎨 Format: llm-optimized
+🔧 Languages: ["python", "typescript", "javascript", "cpp", "rust", "java", "go", "csharp"]
+🔍 Scanning files...
+📊 Found 1 files to analyze
+⚡ Parsing files with cache optimization...
+📋 Cache hits: 1, Parsed: 0
+🏗️  Building dependency graph...
+🔗 Resolving function calls...
+🔗 Resolved 0 call edges
+⚡ Analysis completed in 0.01s
+✅ Analysis complete! Generated EMBARGO.md
+⏱️  Total execution time: 0.01s
+🎯 ULTRAFAST TARGET ACHIEVED! Sub-1 second execution ⚡
+Step 2: Moving EMBARGO.md to target directory and renaming to AGENTS.md...
+Step 3: Splitting long lines in AGENTS.md...
+Step 4: Staging the generated AGENTS.md file...
+✓ Completed processing: torchtitan/experiments/deepseek_v3/train_configs
+
+=========================================
+Processing directory: torchtitan/experiments/deepseek_v3/infra
+=========================================
+Step 1: Generating project summary (EMBARGO.md)...
+🚀 EMBARGO - Ultrafast Codebase Analysis
+📁 Input: torchtitan/experiments/deepseek_v3/infra (targeting <1s)
+📄 Output: EMBARGO.md
+🎨 Format: llm-optimized
+🔧 Languages: ["python", "typescript", "javascript", "cpp", "rust", "java", "go", "csharp"]
+🔍 Scanning files...
+📊 Found 1 files to analyze
+⚡ Parsing files with cache optimization...
+📋 Cache hits: 1, Parsed: 0
+🏗️  Building dependency graph...
+🔗 Resolving function calls...
+🔗 Resolved 0 call edges
+⚡ Analysis completed in 0.01s
+✅ Analysis complete! Generated EMBARGO.md
+⏱️  Total execution time: 0.01s
+🎯 ULTRAFAST TARGET ACHIEVED! Sub-1 second execution ⚡
+Step 2: Moving EMBARGO.md to target directory and renaming to AGENTS.md...
+Step 3: Splitting long lines in AGENTS.md...
+Step 4: Staging the generated AGENTS.md file...
+✓ Completed processing: torchtitan/experiments/deepseek_v3/infra
+
+=========================================
+Processing directory: torchtitan/experiments/flux
+=========================================
+Step 1: Generating project summary (EMBARGO.md)...
+🚀 EMBARGO - Ultrafast Codebase Analysis
+📁 Input: torchtitan/experiments/flux (targeting <1s)
+📄 Output: EMBARGO.md
+🎨 Format: llm-optimized
+🔧 Languages: ["python", "typescript", "javascript", "cpp", "rust", "java", "go", "csharp"]
+🔍 Scanning files...
+📊 Found 24 files to analyze
+⚡ Parsing files with cache optimization...
+📋 Cache hits: 24, Parsed: 0
+🏗️  Building dependency graph...
+🔗 Resolving function calls...
+🔗 Resolved 47 call edges
+⚡ Analysis completed in 0.02s
+✅ Analysis complete! Generated EMBARGO.md
+⏱️  Total execution time: 0.02s
+🎯 ULTRAFAST TARGET ACHIEVED! Sub-1 second execution ⚡
+Step 2: Moving EMBARGO.md to target directory and renaming to AGENTS.md...
+Step 3: Splitting long lines in AGENTS.md...
+Splitting lines over 4000 bytes in /nfs-share/aai30/projects/torchtitan/torchtitan/experiments/flux/AGENTS.md
+Step 4: Staging the generated AGENTS.md file...
+✓ Completed processing: torchtitan/experiments/flux
+
+=========================================
+Processing directory: torchtitan/experiments/flux/infra
+=========================================
+Step 1: Generating project summary (EMBARGO.md)...
+🚀 EMBARGO - Ultrafast Codebase Analysis
+📁 Input: torchtitan/experiments/flux/infra (targeting <1s)
+📄 Output: EMBARGO.md
+🎨 Format: llm-optimized
+🔧 Languages: ["python", "typescript", "javascript", "cpp", "rust", "java", "go", "csharp"]
+🔍 Scanning files...
+📊 Found 1 files to analyze
+⚡ Parsing files with cache optimization...
+📋 Cache hits: 1, Parsed: 0
+🏗️  Building dependency graph...
+🔗 Resolving function calls...
+🔗 Resolved 2 call edges
+⚡ Analysis completed in 0.01s
+✅ Analysis complete! Generated EMBARGO.md
+⏱️  Total execution time: 0.01s
+🎯 ULTRAFAST TARGET ACHIEVED! Sub-1 second execution ⚡
+Step 2: Moving EMBARGO.md to target directory and renaming to AGENTS.md...
+Step 3: Splitting long lines in AGENTS.md...
+Step 4: Staging the generated AGENTS.md file...
+✓ Completed processing: torchtitan/experiments/flux/infra
+
+=========================================
+Processing directory: torchtitan/experiments/flux/tests
+=========================================
+Step 1: Generating project summary (EMBARGO.md)...
+🚀 EMBARGO - Ultrafast Codebase Analysis
+📁 Input: torchtitan/experiments/flux/tests (targeting <1s)
+📄 Output: EMBARGO.md
+🎨 Format: llm-optimized
+🔧 Languages: ["python", "typescript", "javascript", "cpp", "rust", "java", "go", "csharp"]
+🔍 Scanning files...
+📊 Found 5 files to analyze
+⚡ Parsing files with cache optimization...
+📋 Cache hits: 5, Parsed: 0
+🏗️  Building dependency graph...
+🔗 Resolving function calls...
+🔗 Resolved 3 call edges
+⚡ Analysis completed in 0.01s
+✅ Analysis complete! Generated EMBARGO.md
+⏱️  Total execution time: 0.01s
+🎯 ULTRAFAST TARGET ACHIEVED! Sub-1 second execution ⚡
+Step 2: Moving EMBARGO.md to target directory and renaming to AGENTS.md...
+Step 3: Splitting long lines in AGENTS.md...
+Step 4: Staging the generated AGENTS.md file...
+✓ Completed processing: torchtitan/experiments/flux/tests
+
+=========================================
+Processing directory: torchtitan/experiments/flux/tests/assets/cc12m_test
+=========================================
+Step 1: Generating project summary (EMBARGO.md)...
+🚀 EMBARGO - Ultrafast Codebase Analysis
+📁 Input: torchtitan/experiments/flux/tests/assets/cc12m_test (targeting <1s)
+📄 Output: EMBARGO.md
+🎨 Format: llm-optimized
+🔧 Languages: ["python", "typescript", "javascript", "cpp", "rust", "java", "go", "csharp"]
+🔍 Scanning files...
+📊 Found 1 files to analyze
+⚡ Parsing files with cache optimization...
+📋 Cache hits: 1, Parsed: 0
+🏗️  Building dependency graph...
+🔗 Resolving function calls...
+🔗 Resolved 0 call edges
+⚡ Analysis completed in 0.00s
+✅ Analysis complete! Generated EMBARGO.md
+⏱️  Total execution time: 0.00s
+🎯 ULTRAFAST TARGET ACHIEVED! Sub-1 second execution ⚡
+Step 2: Moving EMBARGO.md to target directory and renaming to AGENTS.md...
+Step 3: Splitting long lines in AGENTS.md...
+Step 4: Staging the generated AGENTS.md file...
+✓ Completed processing: torchtitan/experiments/flux/tests/assets/cc12m_test
+
+=========================================
+Processing directory: torchtitan/experiments/flux/tests/unit_tests
+=========================================
+Step 1: Generating project summary (EMBARGO.md)...
+🚀 EMBARGO - Ultrafast Codebase Analysis
+📁 Input: torchtitan/experiments/flux/tests/unit_tests (targeting <1s)
+📄 Output: EMBARGO.md
+🎨 Format: llm-optimized
+🔧 Languages: ["python", "typescript", "javascript", "cpp", "rust", "java", "go", "csharp"]
+🔍 Scanning files...
+📊 Found 2 files to analyze
+⚡ Parsing files with cache optimization...
+📋 Cache hits: 2, Parsed: 0
+🏗️  Building dependency graph...
+🔗 Resolving function calls...
+🔗 Resolved 0 call edges
+⚡ Analysis completed in 0.01s
+✅ Analysis complete! Generated EMBARGO.md
+⏱️  Total execution time: 0.01s
+🎯 ULTRAFAST TARGET ACHIEVED! Sub-1 second execution ⚡
+Step 2: Moving EMBARGO.md to target directory and renaming to AGENTS.md...
+Step 3: Splitting long lines in AGENTS.md...
+Step 4: Staging the generated AGENTS.md file...
+✓ Completed processing: torchtitan/experiments/flux/tests/unit_tests
+
+=========================================
+Processing directory: torchtitan/experiments/flux/inference
+=========================================
+Step 1: Generating project summary (EMBARGO.md)...
+🚀 EMBARGO - Ultrafast Codebase Analysis
+📁 Input: torchtitan/experiments/flux/inference (targeting <1s)
+📄 Output: EMBARGO.md
+🎨 Format: llm-optimized
+🔧 Languages: ["python", "typescript", "javascript", "cpp", "rust", "java", "go", "csharp"]
+🔍 Scanning files...
+📊 Found 1 files to analyze
+⚡ Parsing files with cache optimization...
+📋 Cache hits: 1, Parsed: 0
+🏗️  Building dependency graph...
+🔗 Resolving function calls...
+🔗 Resolved 0 call edges
+⚡ Analysis completed in 0.01s
+✅ Analysis complete! Generated EMBARGO.md
+⏱️  Total execution time: 0.01s
+🎯 ULTRAFAST TARGET ACHIEVED! Sub-1 second execution ⚡
+Step 2: Moving EMBARGO.md to target directory and renaming to AGENTS.md...
+Step 3: Splitting long lines in AGENTS.md...
+Step 4: Staging the generated AGENTS.md file...
+✓ Completed processing: torchtitan/experiments/flux/inference
+
+=========================================
+Processing directory: torchtitan/experiments/flux/scripts
+=========================================
+Step 1: Generating project summary (EMBARGO.md)...
+🚀 EMBARGO - Ultrafast Codebase Analysis
+📁 Input: torchtitan/experiments/flux/scripts (targeting <1s)
+📄 Output: EMBARGO.md
+🎨 Format: llm-optimized
+🔧 Languages: ["python", "typescript", "javascript", "cpp", "rust", "java", "go", "csharp"]
+🔍 Scanning files...
+📊 Found 1 files to analyze
+⚡ Parsing files with cache optimization...
+📋 Cache hits: 1, Parsed: 0
+🏗️  Building dependency graph...
+🔗 Resolving function calls...
+🔗 Resolved 0 call edges
+⚡ Analysis completed in 0.01s
+✅ Analysis complete! Generated EMBARGO.md
+⏱️  Total execution time: 0.01s
+🎯 ULTRAFAST TARGET ACHIEVED! Sub-1 second execution ⚡
+Step 2: Moving EMBARGO.md to target directory and renaming to AGENTS.md...
+Step 3: Splitting long lines in AGENTS.md...
+Step 4: Staging the generated AGENTS.md file...
+✓ Completed processing: torchtitan/experiments/flux/scripts
+
+=========================================
+Processing directory: torchtitan/experiments/flux/dataset
+=========================================
+Step 1: Generating project summary (EMBARGO.md)...
+🚀 EMBARGO - Ultrafast Codebase Analysis
+📁 Input: torchtitan/experiments/flux/dataset (targeting <1s)
+📄 Output: EMBARGO.md
+🎨 Format: llm-optimized
+🔧 Languages: ["python", "typescript", "javascript", "cpp", "rust", "java", "go", "csharp"]
+🔍 Scanning files...
+📊 Found 2 files to analyze
+⚡ Parsing files with cache optimization...
+📋 Cache hits: 2, Parsed: 0
+🏗️  Building dependency graph...
+🔗 Resolving function calls...
+🔗 Resolved 5 call edges
+⚡ Analysis completed in 0.01s
+✅ Analysis complete! Generated EMBARGO.md
+⏱️  Total execution time: 0.01s
+🎯 ULTRAFAST TARGET ACHIEVED! Sub-1 second execution ⚡
+Step 2: Moving EMBARGO.md to target directory and renaming to AGENTS.md...
+Step 3: Splitting long lines in AGENTS.md...
+Step 4: Staging the generated AGENTS.md file...
+✓ Completed processing: torchtitan/experiments/flux/dataset
+
+=========================================
+Processing directory: torchtitan/experiments/flux/model
+=========================================
+Step 1: Generating project summary (EMBARGO.md)...
+🚀 EMBARGO - Ultrafast Codebase Analysis
+📁 Input: torchtitan/experiments/flux/model (targeting <1s)
+📄 Output: EMBARGO.md
+🎨 Format: llm-optimized
+🔧 Languages: ["python", "typescript", "javascript", "cpp", "rust", "java", "go", "csharp"]
+🔍 Scanning files...
+📊 Found 7 files to analyze
+⚡ Parsing files with cache optimization...
+📋 Cache hits: 7, Parsed: 0
+🏗️  Building dependency graph...
+🔗 Resolving function calls...
+🔗 Resolved 13 call edges
+⚡ Analysis completed in 0.01s
+✅ Analysis complete! Generated EMBARGO.md
+⏱️  Total execution time: 0.01s
+🎯 ULTRAFAST TARGET ACHIEVED! Sub-1 second execution ⚡
+Step 2: Moving EMBARGO.md to target directory and renaming to AGENTS.md...
+Step 3: Splitting long lines in AGENTS.md...
+Step 4: Staging the generated AGENTS.md file...
+✓ Completed processing: torchtitan/experiments/flux/model
+
+=========================================
+Processing directory: torchtitan/experiments/vlm
+=========================================
+Step 1: Generating project summary (EMBARGO.md)...
+🚀 EMBARGO - Ultrafast Codebase Analysis
+📁 Input: torchtitan/experiments/vlm (targeting <1s)
+📄 Output: EMBARGO.md
+🎨 Format: llm-optimized
+🔧 Languages: ["python", "typescript", "javascript", "cpp", "rust", "java", "go", "csharp"]
+🔍 Scanning files...
+📊 Found 11 files to analyze
+⚡ Parsing files with cache optimization...
+📋 Cache hits: 11, Parsed: 0
+🏗️  Building dependency graph...
+🔗 Resolving function calls...
+🔗 Resolved 14 call edges
+⚡ Analysis completed in 0.01s
+✅ Analysis complete! Generated EMBARGO.md
+⏱️  Total execution time: 0.01s
+🎯 ULTRAFAST TARGET ACHIEVED! Sub-1 second execution ⚡
+Step 2: Moving EMBARGO.md to target directory and renaming to AGENTS.md...
+Step 3: Splitting long lines in AGENTS.md...
+Step 4: Staging the generated AGENTS.md file...
+✓ Completed processing: torchtitan/experiments/vlm
+
+=========================================
+Processing directory: torchtitan/experiments/vlm/datasets
+=========================================
+Step 1: Generating project summary (EMBARGO.md)...
+🚀 EMBARGO - Ultrafast Codebase Analysis
+📁 Input: torchtitan/experiments/vlm/datasets (targeting <1s)
+📄 Output: EMBARGO.md
+🎨 Format: llm-optimized
+🔧 Languages: ["python", "typescript", "javascript", "cpp", "rust", "java", "go", "csharp"]
+🔍 Scanning files...
+📊 Found 5 files to analyze
+⚡ Parsing files with cache optimization...
+📋 Cache hits: 5, Parsed: 0
+🏗️  Building dependency graph...
+🔗 Resolving function calls...
+🔗 Resolved 10 call edges
+⚡ Analysis completed in 0.01s
+✅ Analysis complete! Generated EMBARGO.md
+⏱️  Total execution time: 0.01s
+🎯 ULTRAFAST TARGET ACHIEVED! Sub-1 second execution ⚡
+Step 2: Moving EMBARGO.md to target directory and renaming to AGENTS.md...
+Step 3: Splitting long lines in AGENTS.md...
+Step 4: Staging the generated AGENTS.md file...
+✓ Completed processing: torchtitan/experiments/vlm/datasets
+
+=========================================
+Processing directory: torchtitan/experiments/vlm/datasets/utils
+=========================================
+Step 1: Generating project summary (EMBARGO.md)...
+🚀 EMBARGO - Ultrafast Codebase Analysis
+📁 Input: torchtitan/experiments/vlm/datasets/utils (targeting <1s)
+📄 Output: EMBARGO.md
+🎨 Format: llm-optimized
+🔧 Languages: ["python", "typescript", "javascript", "cpp", "rust", "java", "go", "csharp"]
+🔍 Scanning files...
+📊 Found 3 files to analyze
+⚡ Parsing files with cache optimization...
+📋 Cache hits: 3, Parsed: 0
+🏗️  Building dependency graph...
+🔗 Resolving function calls...
+🔗 Resolved 4 call edges
+⚡ Analysis completed in 0.01s
+✅ Analysis complete! Generated EMBARGO.md
+⏱️  Total execution time: 0.01s
+🎯 ULTRAFAST TARGET ACHIEVED! Sub-1 second execution ⚡
+Step 2: Moving EMBARGO.md to target directory and renaming to AGENTS.md...
+Step 3: Splitting long lines in AGENTS.md...
+Step 4: Staging the generated AGENTS.md file...
+✓ Completed processing: torchtitan/experiments/vlm/datasets/utils
+
+=========================================
+Processing directory: torchtitan/experiments/vlm/infra
+=========================================
+Step 1: Generating project summary (EMBARGO.md)...
+🚀 EMBARGO - Ultrafast Codebase Analysis
+📁 Input: torchtitan/experiments/vlm/infra (targeting <1s)
+📄 Output: EMBARGO.md
+🎨 Format: llm-optimized
+🔧 Languages: ["python", "typescript", "javascript", "cpp", "rust", "java", "go", "csharp"]
+🔍 Scanning files...
+📊 Found 1 files to analyze
+⚡ Parsing files with cache optimization...
+📋 Cache hits: 1, Parsed: 0
+🏗️  Building dependency graph...
+🔗 Resolving function calls...
+🔗 Resolved 2 call edges
+⚡ Analysis completed in 0.01s
+✅ Analysis complete! Generated EMBARGO.md
+⏱️  Total execution time: 0.01s
+🎯 ULTRAFAST TARGET ACHIEVED! Sub-1 second execution ⚡
+Step 2: Moving EMBARGO.md to target directory and renaming to AGENTS.md...
+Step 3: Splitting long lines in AGENTS.md...
+Step 4: Staging the generated AGENTS.md file...
+✓ Completed processing: torchtitan/experiments/vlm/infra
+
+=========================================
+Processing directory: torchtitan/experiments/vlm/assets
+=========================================
+Step 1: Generating project summary (EMBARGO.md)...
+🚀 EMBARGO - Ultrafast Codebase Analysis
+📁 Input: torchtitan/experiments/vlm/assets (targeting <1s)
+📄 Output: EMBARGO.md
+🎨 Format: llm-optimized
+🔧 Languages: ["python", "typescript", "javascript", "cpp", "rust", "java", "go", "csharp"]
+🔍 Scanning files...
+📊 Found 1 files to analyze
+⚡ Parsing files with cache optimization...
+📋 Cache hits: 1, Parsed: 0
+🏗️  Building dependency graph...
+🔗 Resolving function calls...
+🔗 Resolved 0 call edges
+⚡ Analysis completed in 0.01s
+✅ Analysis complete! Generated EMBARGO.md
+⏱️  Total execution time: 0.01s
+🎯 ULTRAFAST TARGET ACHIEVED! Sub-1 second execution ⚡
+Step 2: Moving EMBARGO.md to target directory and renaming to AGENTS.md...
+Step 3: Splitting long lines in AGENTS.md...
+Step 4: Staging the generated AGENTS.md file...
+✓ Completed processing: torchtitan/experiments/vlm/assets
+
+=========================================
+Processing directory: torchtitan/experiments/vlm/model
+=========================================
+Step 1: Generating project summary (EMBARGO.md)...
+🚀 EMBARGO - Ultrafast Codebase Analysis
+📁 Input: torchtitan/experiments/vlm/model (targeting <1s)
+📄 Output: EMBARGO.md
+🎨 Format: llm-optimized
+🔧 Languages: ["python", "typescript", "javascript", "cpp", "rust", "java", "go", "csharp"]
+🔍 Scanning files...
+📊 Found 3 files to analyze
+⚡ Parsing files with cache optimization...
+📋 Cache hits: 3, Parsed: 0
+🏗️  Building dependency graph...
+🔗 Resolving function calls...
+🔗 Resolved 2 call edges
+⚡ Analysis completed in 0.01s
+✅ Analysis complete! Generated EMBARGO.md
+⏱️  Total execution time: 0.01s
+🎯 ULTRAFAST TARGET ACHIEVED! Sub-1 second execution ⚡
+Step 2: Moving EMBARGO.md to target directory and renaming to AGENTS.md...
+Step 3: Splitting long lines in AGENTS.md...
+Step 4: Staging the generated AGENTS.md file...
+✓ Completed processing: torchtitan/experiments/vlm/model
+
+=========================================
+Processing directory: torchtitan/experiments/simple_fsdp
+=========================================
+Step 1: Generating project summary (EMBARGO.md)...
+🚀 EMBARGO - Ultrafast Codebase Analysis
+📁 Input: torchtitan/experiments/simple_fsdp (targeting <1s)
+📄 Output: EMBARGO.md
+🎨 Format: llm-optimized
+🔧 Languages: ["python", "typescript", "javascript", "cpp", "rust", "java", "go", "csharp"]
+🔍 Scanning files...
+📊 Found 10 files to analyze
+⚡ Parsing files with cache optimization...
+📋 Cache hits: 10, Parsed: 0
+🏗️  Building dependency graph...
+🔗 Resolving function calls...
+🔗 Resolved 5 call edges
+⚡ Analysis completed in 0.01s
+✅ Analysis complete! Generated EMBARGO.md
+⏱️  Total execution time: 0.01s
+🎯 ULTRAFAST TARGET ACHIEVED! Sub-1 second execution ⚡
+Step 2: Moving EMBARGO.md to target directory and renaming to AGENTS.md...
+Step 3: Splitting long lines in AGENTS.md...
+Step 4: Staging the generated AGENTS.md file...
+✓ Completed processing: torchtitan/experiments/simple_fsdp
+
+=========================================
+Processing directory: torchtitan/experiments/simple_fsdp/llama3
+=========================================
+Step 1: Generating project summary (EMBARGO.md)...
+🚀 EMBARGO - Ultrafast Codebase Analysis
+📁 Input: torchtitan/experiments/simple_fsdp/llama3 (targeting <1s)
+📄 Output: EMBARGO.md
+🎨 Format: llm-optimized
+🔧 Languages: ["python", "typescript", "javascript", "cpp", "rust", "java", "go", "csharp"]
+🔍 Scanning files...
+📊 Found 3 files to analyze
+⚡ Parsing files with cache optimization...
+📋 Cache hits: 3, Parsed: 0
+🏗️  Building dependency graph...
+🔗 Resolving function calls...
+🔗 Resolved 0 call edges
+⚡ Analysis completed in 0.01s
+✅ Analysis complete! Generated EMBARGO.md
+⏱️  Total execution time: 0.01s
+🎯 ULTRAFAST TARGET ACHIEVED! Sub-1 second execution ⚡
+Step 2: Moving EMBARGO.md to target directory and renaming to AGENTS.md...
+Step 3: Splitting long lines in AGENTS.md...
+Step 4: Staging the generated AGENTS.md file...
+✓ Completed processing: torchtitan/experiments/simple_fsdp/llama3
+
+=========================================
+Processing directory: torchtitan/experiments/simple_fsdp/tests
+=========================================
+Step 1: Generating project summary (EMBARGO.md)...
+🚀 EMBARGO - Ultrafast Codebase Analysis
+📁 Input: torchtitan/experiments/simple_fsdp/tests (targeting <1s)
+📄 Output: EMBARGO.md
+🎨 Format: llm-optimized
+🔧 Languages: ["python", "typescript", "javascript", "cpp", "rust", "java", "go", "csharp"]
+🔍 Scanning files...
+📊 Found 3 files to analyze
+⚡ Parsing files with cache optimization...
+📋 Cache hits: 3, Parsed: 0
+🏗️  Building dependency graph...
+🔗 Resolving function calls...
+🔗 Resolved 0 call edges
+⚡ Analysis completed in 0.01s
+✅ Analysis complete! Generated EMBARGO.md
+⏱️  Total execution time: 0.01s
+🎯 ULTRAFAST TARGET ACHIEVED! Sub-1 second execution ⚡
+Step 2: Moving EMBARGO.md to target directory and renaming to AGENTS.md...
+Step 3: Splitting long lines in AGENTS.md...
+Step 4: Staging the generated AGENTS.md file...
+✓ Completed processing: torchtitan/experiments/simple_fsdp/tests
+
+=========================================
+Processing directory: torchtitan/experiments/simple_fsdp/deepseek_v3
+=========================================
+Step 1: Generating project summary (EMBARGO.md)...
+🚀 EMBARGO - Ultrafast Codebase Analysis
+📁 Input: torchtitan/experiments/simple_fsdp/deepseek_v3 (targeting <1s)
+📄 Output: EMBARGO.md
+🎨 Format: llm-optimized
+🔧 Languages: ["python", "typescript", "javascript", "cpp", "rust", "java", "go", "csharp"]
+🔍 Scanning files...
+📊 Found 3 files to analyze
+⚡ Parsing files with cache optimization...
+📋 Cache hits: 3, Parsed: 0
+🏗️  Building dependency graph...
+🔗 Resolving function calls...
+🔗 Resolved 0 call edges
+⚡ Analysis completed in 0.00s
+✅ Analysis complete! Generated EMBARGO.md
+⏱️  Total execution time: 0.01s
+🎯 ULTRAFAST TARGET ACHIEVED! Sub-1 second execution ⚡
+Step 2: Moving EMBARGO.md to target directory and renaming to AGENTS.md...
+Step 3: Splitting long lines in AGENTS.md...
+Step 4: Staging the generated AGENTS.md file...
+✓ Completed processing: torchtitan/experiments/simple_fsdp/deepseek_v3
+
+=========================================
+Processing directory: torchtitan/experiments/qwen3
+=========================================
+Step 1: Generating project summary (EMBARGO.md)...
+🚀 EMBARGO - Ultrafast Codebase Analysis
+📁 Input: torchtitan/experiments/qwen3 (targeting <1s)
+📄 Output: EMBARGO.md
+🎨 Format: llm-optimized
+🔧 Languages: ["python", "typescript", "javascript", "cpp", "rust", "java", "go", "csharp"]
+🔍 Scanning files...
+📊 Found 5 files to analyze
+⚡ Parsing files with cache optimization...
+📋 Cache hits: 5, Parsed: 0
+🏗️  Building dependency graph...
+🔗 Resolving function calls...
+🔗 Resolved 8 call edges
+⚡ Analysis completed in 0.01s
+✅ Analysis complete! Generated EMBARGO.md
+⏱️  Total execution time: 0.01s
+🎯 ULTRAFAST TARGET ACHIEVED! Sub-1 second execution ⚡
+Step 2: Moving EMBARGO.md to target directory and renaming to AGENTS.md...
+Step 3: Splitting long lines in AGENTS.md...
+Step 4: Staging the generated AGENTS.md file...
+✓ Completed processing: torchtitan/experiments/qwen3
+
+=========================================
+Processing directory: torchtitan/experiments/qwen3/model
+=========================================
+Step 1: Generating project summary (EMBARGO.md)...
+🚀 EMBARGO - Ultrafast Codebase Analysis
+📁 Input: torchtitan/experiments/qwen3/model (targeting <1s)
+📄 Output: EMBARGO.md
+🎨 Format: llm-optimized
+🔧 Languages: ["python", "typescript", "javascript", "cpp", "rust", "java", "go", "csharp"]
+🔍 Scanning files...
+📊 Found 3 files to analyze
+⚡ Parsing files with cache optimization...
+📋 Cache hits: 3, Parsed: 0
+🏗️  Building dependency graph...
+🔗 Resolving function calls...
+🔗 Resolved 7 call edges
+⚡ Analysis completed in 0.01s
+✅ Analysis complete! Generated EMBARGO.md
+⏱️  Total execution time: 0.01s
+🎯 ULTRAFAST TARGET ACHIEVED! Sub-1 second execution ⚡
+Step 2: Moving EMBARGO.md to target directory and renaming to AGENTS.md...
+Step 3: Splitting long lines in AGENTS.md...
+Step 4: Staging the generated AGENTS.md file...
+✓ Completed processing: torchtitan/experiments/qwen3/model
+
+=========================================
+Processing directory: torchtitan/experiments/qwen3/infra
+=========================================
+Step 1: Generating project summary (EMBARGO.md)...
+🚀 EMBARGO - Ultrafast Codebase Analysis
+📁 Input: torchtitan/experiments/qwen3/infra (targeting <1s)
+📄 Output: EMBARGO.md
+🎨 Format: llm-optimized
+🔧 Languages: ["python", "typescript", "javascript", "cpp", "rust", "java", "go", "csharp"]
+🔍 Scanning files...
+📊 Found 1 files to analyze
+⚡ Parsing files with cache optimization...
+📋 Cache hits: 1, Parsed: 0
+🏗️  Building dependency graph...
+🔗 Resolving function calls...
+🔗 Resolved 1 call edges
+⚡ Analysis completed in 0.01s
+✅ Analysis complete! Generated EMBARGO.md
+⏱️  Total execution time: 0.01s
+🎯 ULTRAFAST TARGET ACHIEVED! Sub-1 second execution ⚡
+Step 2: Moving EMBARGO.md to target directory and renaming to AGENTS.md...
+Step 3: Splitting long lines in AGENTS.md...
+Step 4: Staging the generated AGENTS.md file...
+✓ Completed processing: torchtitan/experiments/qwen3/infra
+
+=========================================
+Processing directory: torchtitan/experiments/fl
+=========================================
+Step 1: Generating project summary (EMBARGO.md)...
+🚀 EMBARGO - Ultrafast Codebase Analysis
+📁 Input: torchtitan/experiments/fl (targeting <1s)
+📄 Output: EMBARGO.md
+🎨 Format: llm-optimized
+🔧 Languages: ["python", "typescript", "javascript", "cpp", "rust", "java", "go", "csharp"]
+🔍 Scanning files...
+📊 Found 38 files to analyze
+⚡ Parsing files with cache optimization...
+📋 Cache hits: 38, Parsed: 0
+🏗️  Building dependency graph...
+🔗 Resolving function calls...
+🔗 Resolved 116 call edges
+⚡ Analysis completed in 0.02s
+✅ Analysis complete! Generated EMBARGO.md
+⏱️  Total execution time: 0.03s
+🎯 ULTRAFAST TARGET ACHIEVED! Sub-1 second execution ⚡
+Step 2: Moving EMBARGO.md to target directory and renaming to AGENTS.md...
+Step 3: Splitting long lines in AGENTS.md...
+Splitting lines over 4000 bytes in /nfs-share/aai30/projects/torchtitan/torchtitan/experiments/fl/AGENTS.md
+Step 4: Staging the generated AGENTS.md file...
+✓ Completed processing: torchtitan/experiments/fl
+
+=========================================
+Processing directory: torchtitan/experiments/fl/models
+=========================================
+Step 1: Generating project summary (EMBARGO.md)...
+🚀 EMBARGO - Ultrafast Codebase Analysis
+📁 Input: torchtitan/experiments/fl/models (targeting <1s)
+📄 Output: EMBARGO.md
+🎨 Format: llm-optimized
+🔧 Languages: ["python", "typescript", "javascript", "cpp", "rust", "java", "go", "csharp"]
+🔍 Scanning files...
+📊 Found 14 files to analyze
+⚡ Parsing files with cache optimization...
+📋 Cache hits: 14, Parsed: 0
+🏗️  Building dependency graph...
+🔗 Resolving function calls...
+🔗 Resolved 6 call edges
+⚡ Analysis completed in 0.01s
+✅ Analysis complete! Generated EMBARGO.md
+⏱️  Total execution time: 0.01s
+🎯 ULTRAFAST TARGET ACHIEVED! Sub-1 second execution ⚡
+Step 2: Moving EMBARGO.md to target directory and renaming to AGENTS.md...
+Step 3: Splitting long lines in AGENTS.md...
+Step 4: Staging the generated AGENTS.md file...
+✓ Completed processing: torchtitan/experiments/fl/models
+
+=========================================
+Processing directory: torchtitan/experiments/fl/models/llama3_mup
+=========================================
+Step 1: Generating project summary (EMBARGO.md)...
+🚀 EMBARGO - Ultrafast Codebase Analysis
+📁 Input: torchtitan/experiments/fl/models/llama3_mup (targeting <1s)
+📄 Output: EMBARGO.md
+🎨 Format: llm-optimized
+🔧 Languages: ["python", "typescript", "javascript", "cpp", "rust", "java", "go", "csharp"]
+🔍 Scanning files...
+📊 Found 9 files to analyze
+⚡ Parsing files with cache optimization...
+📋 Cache hits: 9, Parsed: 0
+🏗️  Building dependency graph...
+🔗 Resolving function calls...
+🔗 Resolved 1 call edges
+⚡ Analysis completed in 0.01s
+✅ Analysis complete! Generated EMBARGO.md
+⏱️  Total execution time: 0.01s
+🎯 ULTRAFAST TARGET ACHIEVED! Sub-1 second execution ⚡
+Step 2: Moving EMBARGO.md to target directory and renaming to AGENTS.md...
+Step 3: Splitting long lines in AGENTS.md...
+Step 4: Staging the generated AGENTS.md file...
+✓ Completed processing: torchtitan/experiments/fl/models/llama3_mup
+
+=========================================
+Processing directory: torchtitan/experiments/fl/models/llama3_mup/infra
+=========================================
+Step 1: Generating project summary (EMBARGO.md)...
+🚀 EMBARGO - Ultrafast Codebase Analysis
+📁 Input: torchtitan/experiments/fl/models/llama3_mup/infra (targeting <1s)
+📄 Output: EMBARGO.md
+🎨 Format: llm-optimized
+🔧 Languages: ["python", "typescript", "javascript", "cpp", "rust", "java", "go", "csharp"]
+🔍 Scanning files...
+📊 Found 2 files to analyze
+⚡ Parsing files with cache optimization...
+📋 Cache hits: 2, Parsed: 0
+🏗️  Building dependency graph...
+🔗 Resolving function calls...
+🔗 Resolved 0 call edges
+⚡ Analysis completed in 0.00s
+✅ Analysis complete! Generated EMBARGO.md
+⏱️  Total execution time: 0.00s
+🎯 ULTRAFAST TARGET ACHIEVED! Sub-1 second execution ⚡
+Step 2: Moving EMBARGO.md to target directory and renaming to AGENTS.md...
+Step 3: Splitting long lines in AGENTS.md...
+Step 4: Staging the generated AGENTS.md file...
+✓ Completed processing: torchtitan/experiments/fl/models/llama3_mup/infra
+
+=========================================
+Processing directory: torchtitan/experiments/fl/models/llama3_mup/tests
+=========================================
+Step 1: Generating project summary (EMBARGO.md)...
+🚀 EMBARGO - Ultrafast Codebase Analysis
+📁 Input: torchtitan/experiments/fl/models/llama3_mup/tests (targeting <1s)
+📄 Output: EMBARGO.md
+🎨 Format: llm-optimized
+🔧 Languages: ["python", "typescript", "javascript", "cpp", "rust", "java", "go", "csharp"]
+🔍 Scanning files...
+📊 Found 1 files to analyze
+⚡ Parsing files with cache optimization...
+📋 Cache hits: 1, Parsed: 0
+🏗️  Building dependency graph...
+🔗 Resolving function calls...
+🔗 Resolved 0 call edges
+⚡ Analysis completed in 0.01s
+✅ Analysis complete! Generated EMBARGO.md
+⏱️  Total execution time: 0.01s
+🎯 ULTRAFAST TARGET ACHIEVED! Sub-1 second execution ⚡
+Step 2: Moving EMBARGO.md to target directory and renaming to AGENTS.md...
+Step 3: Splitting long lines in AGENTS.md...
+Step 4: Staging the generated AGENTS.md file...
+✓ Completed processing: torchtitan/experiments/fl/models/llama3_mup/tests
+
+=========================================
+Processing directory: torchtitan/experiments/fl/models/llama3_mup/model
+=========================================
+Step 1: Generating project summary (EMBARGO.md)...
+🚀 EMBARGO - Ultrafast Codebase Analysis
+📁 Input: torchtitan/experiments/fl/models/llama3_mup/model (targeting <1s)
+📄 Output: EMBARGO.md
+🎨 Format: llm-optimized
+🔧 Languages: ["python", "typescript", "javascript", "cpp", "rust", "java", "go", "csharp"]
+🔍 Scanning files...
+📊 Found 4 files to analyze
+⚡ Parsing files with cache optimization...
+📋 Cache hits: 4, Parsed: 0
+🏗️  Building dependency graph...
+🔗 Resolving function calls...
+🔗 Resolved 1 call edges
+⚡ Analysis completed in 0.01s
+✅ Analysis complete! Generated EMBARGO.md
+⏱️  Total execution time: 0.01s
+🎯 ULTRAFAST TARGET ACHIEVED! Sub-1 second execution ⚡
+Step 2: Moving EMBARGO.md to target directory and renaming to AGENTS.md...
+Step 3: Splitting long lines in AGENTS.md...
+Step 4: Staging the generated AGENTS.md file...
+✓ Completed processing: torchtitan/experiments/fl/models/llama3_mup/model
+
+=========================================
+Processing directory: torchtitan/experiments/fl/models/llama3_mup/train_configs
+=========================================
+Step 1: Generating project summary (EMBARGO.md)...
+🚀 EMBARGO - Ultrafast Codebase Analysis
+📁 Input: torchtitan/experiments/fl/models/llama3_mup/train_configs (targeting <1s)
+📄 Output: EMBARGO.md
+🎨 Format: llm-optimized
+🔧 Languages: ["python", "typescript", "javascript", "cpp", "rust", "java", "go", "csharp"]
+🔍 Scanning files...
+📊 Found 1 files to analyze
+⚡ Parsing files with cache optimization...
+📋 Cache hits: 1, Parsed: 0
+🏗️  Building dependency graph...
+🔗 Resolving function calls...
+🔗 Resolved 0 call edges
+⚡ Analysis completed in 0.01s
+✅ Analysis complete! Generated EMBARGO.md
+⏱️  Total execution time: 0.01s
+🎯 ULTRAFAST TARGET ACHIEVED! Sub-1 second execution ⚡
+Step 2: Moving EMBARGO.md to target directory and renaming to AGENTS.md...
+Step 3: Splitting long lines in AGENTS.md...
+Step 4: Staging the generated AGENTS.md file...
+✓ Completed processing: torchtitan/experiments/fl/models/llama3_mup/train_configs
+
+=========================================
+Processing directory: torchtitan/experiments/fl/models/mosaic_llama3_mup
+=========================================
+Step 1: Generating project summary (EMBARGO.md)...
+🚀 EMBARGO - Ultrafast Codebase Analysis
+📁 Input: torchtitan/experiments/fl/models/mosaic_llama3_mup (targeting <1s)
+📄 Output: EMBARGO.md
+🎨 Format: llm-optimized
+🔧 Languages: ["python", "typescript", "javascript", "cpp", "rust", "java", "go", "csharp"]
+🔍 Scanning files...
+📊 Found 1 files to analyze
+⚡ Parsing files with cache optimization...
+📋 Cache hits: 1, Parsed: 0
+🏗️  Building dependency graph...
+🔗 Resolving function calls...
+🔗 Resolved 0 call edges
+⚡ Analysis completed in 0.01s
+✅ Analysis complete! Generated EMBARGO.md
+⏱️  Total execution time: 0.01s
+🎯 ULTRAFAST TARGET ACHIEVED! Sub-1 second execution ⚡
+Step 2: Moving EMBARGO.md to target directory and renaming to AGENTS.md...
+Step 3: Splitting long lines in AGENTS.md...
+Step 4: Staging the generated AGENTS.md file...
+✓ Completed processing: torchtitan/experiments/fl/models/mosaic_llama3_mup
+
+=========================================
+Processing directory: torchtitan/experiments/fl/models/mosaic_llama3
+=========================================
+Step 1: Generating project summary (EMBARGO.md)...
+🚀 EMBARGO - Ultrafast Codebase Analysis
+📁 Input: torchtitan/experiments/fl/models/mosaic_llama3 (targeting <1s)
+📄 Output: EMBARGO.md
+🎨 Format: llm-optimized
+🔧 Languages: ["python", "typescript", "javascript", "cpp", "rust", "java", "go", "csharp"]
+🔍 Scanning files...
+📊 Found 1 files to analyze
+⚡ Parsing files with cache optimization...
+📋 Cache hits: 1, Parsed: 0
+🏗️  Building dependency graph...
+🔗 Resolving function calls...
+🔗 Resolved 0 call edges
+⚡ Analysis completed in 0.01s
+✅ Analysis complete! Generated EMBARGO.md
+⏱️  Total execution time: 0.01s
+🎯 ULTRAFAST TARGET ACHIEVED! Sub-1 second execution ⚡
+Step 2: Moving EMBARGO.md to target directory and renaming to AGENTS.md...
+Step 3: Splitting long lines in AGENTS.md...
+Step 4: Staging the generated AGENTS.md file...
+✓ Completed processing: torchtitan/experiments/fl/models/mosaic_llama3
+
+=========================================
+Processing directory: torchtitan/experiments/fl/dataloader
+=========================================
+Step 1: Generating project summary (EMBARGO.md)...
+🚀 EMBARGO - Ultrafast Codebase Analysis
+📁 Input: torchtitan/experiments/fl/dataloader (targeting <1s)
+📄 Output: EMBARGO.md
+🎨 Format: llm-optimized
+🔧 Languages: ["python", "typescript", "javascript", "cpp", "rust", "java", "go", "csharp"]
+🔍 Scanning files...
+📊 Found 2 files to analyze
+⚡ Parsing files with cache optimization...
+📋 Cache hits: 2, Parsed: 0
+🏗️  Building dependency graph...
+🔗 Resolving function calls...
+🔗 Resolved 24 call edges
+⚡ Analysis completed in 0.01s
+✅ Analysis complete! Generated EMBARGO.md
+⏱️  Total execution time: 0.01s
+🎯 ULTRAFAST TARGET ACHIEVED! Sub-1 second execution ⚡
+Step 2: Moving EMBARGO.md to target directory and renaming to AGENTS.md...
+Step 3: Splitting long lines in AGENTS.md...
+Step 4: Staging the generated AGENTS.md file...
+✓ Completed processing: torchtitan/experiments/fl/dataloader
+
+=========================================
+Processing directory: torchtitan/experiments/fl/optimizers
+=========================================
+Step 1: Generating project summary (EMBARGO.md)...
+🚀 EMBARGO - Ultrafast Codebase Analysis
+📁 Input: torchtitan/experiments/fl/optimizers (targeting <1s)
+📄 Output: EMBARGO.md
+🎨 Format: llm-optimized
+🔧 Languages: ["python", "typescript", "javascript", "cpp", "rust", "java", "go", "csharp"]
+🔍 Scanning files...
+📊 Found 8 files to analyze
+⚡ Parsing files with cache optimization...
+📋 Cache hits: 8, Parsed: 0
+🏗️  Building dependency graph...
+🔗 Resolving function calls...
+🔗 Resolved 32 call edges
+⚡ Analysis completed in 0.01s
+✅ Analysis complete! Generated EMBARGO.md
+⏱️  Total execution time: 0.01s
+🎯 ULTRAFAST TARGET ACHIEVED! Sub-1 second execution ⚡
+Step 2: Moving EMBARGO.md to target directory and renaming to AGENTS.md...
+Step 3: Splitting long lines in AGENTS.md...
+Splitting lines over 4000 bytes in /nfs-share/aai30/projects/torchtitan/torchtitan/experiments/fl/optimizers/AGENTS.md
+Step 4: Staging the generated AGENTS.md file...
+✓ Completed processing: torchtitan/experiments/fl/optimizers
+
+=========================================
+Processing directory: torchtitan/experiments/fl/configs
+=========================================
+Step 1: Generating project summary (EMBARGO.md)...
+🚀 EMBARGO - Ultrafast Codebase Analysis
+📁 Input: torchtitan/experiments/fl/configs (targeting <1s)
+📄 Output: EMBARGO.md
+🎨 Format: llm-optimized
+🔧 Languages: ["python", "typescript", "javascript", "cpp", "rust", "java", "go", "csharp"]
+🔍 Scanning files...
+📊 Found 3 files to analyze
+⚡ Parsing files with cache optimization...
+📋 Cache hits: 3, Parsed: 0
+🏗️  Building dependency graph...
+🔗 Resolving function calls...
+🔗 Resolved 1 call edges
+⚡ Analysis completed in 0.01s
+✅ Analysis complete! Generated EMBARGO.md
+⏱️  Total execution time: 0.01s
+🎯 ULTRAFAST TARGET ACHIEVED! Sub-1 second execution ⚡
+Step 2: Moving EMBARGO.md to target directory and renaming to AGENTS.md...
+Step 3: Splitting long lines in AGENTS.md...
+Step 4: Staging the generated AGENTS.md file...
+✓ Completed processing: torchtitan/experiments/fl/configs
+
+Step 6: Cleaning up any stray EMBARGO.md files...
+✓ Cleanup complete
+
+=========================================
+Script finished. All AGENTS.md files have been staged.
+=========================================

@@ -4,14 +4,14 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 
+"""State dict adapter bridging MuP LLaMA3 checkpoints and TorchTitan."""
 
 from torchtitan.models.llama3.model.state_dict_adapter import Llama3StateDictAdapter
 from .mup_args import TransformerModelArgs
 
 
 class Llama3MuPStateDictAdapter(Llama3StateDictAdapter):
-    """
-    State dict adapter for Llama3 MuP model.
+    """State dict adapter for Llama3 MuP model.
 
     Inherits from the standard Llama3StateDictAdapter and extends the mapping
     to handle MuP-specific features:
@@ -54,7 +54,7 @@ class Llama3MuPStateDictAdapter(Llama3StateDictAdapter):
         self,
         model_args: TransformerModelArgs,
         hf_assets_path: str | None,
-    ):
+    ) -> None:
         # Initialize base adapter with standard Llama3 mappings
         super().__init__(model_args, hf_assets_path)
 

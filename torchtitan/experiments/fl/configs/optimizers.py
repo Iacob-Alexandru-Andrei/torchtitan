@@ -7,7 +7,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import torch
 
@@ -42,6 +42,9 @@ class DesLocConfig:
     pin_memory: bool = True
     """Whether to pin the CPU buffers used for the DES-LOC backups."""
 
+    quorum_timeout_seconds: int = 60
+    """Timeout (seconds) to wait for TorchFT quorum formation during DES-LOC sync."""
+
     def resolved_backup_device(self) -> torch.device | None:
         """Convert the configured ``backup_device`` into a ``torch.device``."""
         device = self.backup_device
@@ -70,6 +73,9 @@ class DesLocConfig:
 class MosaicOptimizerConfig(BaseOptimizer):
     """Mosaic-specific optimizer config with additional hyperparameters."""
 
+    desloc: DesLocConfig = field(default_factory=DesLocConfig)
+    """Optional DES-LOC configuration."""
+
     vs: tuple[float, ...] = (0.7,)
     """vs hyperparameters for quasi-hyperbolic optimizers (each optimizer extracts as many as needed)"""
 
@@ -86,6 +92,11 @@ class MosaicOptimizerConfig(BaseOptimizer):
 
     def __post_init__(self) -> None:
         """Auto-initialize beta1 and beta2 from betas if betas is provided."""
+        if isinstance(self.desloc, dict):
+            self.desloc = DesLocConfig(**self.desloc)
+        if self.desloc.quorum_timeout_seconds <= 0:
+            msg = "desloc.quorum_timeout_seconds must be positive"
+            raise ValueError(msg)
         if self.betas is not None and len(self.betas) >= _MIN_BETAS_LENGTH:
             # If betas is provided, it always overrides beta1 and beta2
             # beta1 comes from the first element, beta2 from the last element
