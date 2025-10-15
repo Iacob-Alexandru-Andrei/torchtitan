@@ -63,8 +63,8 @@ convert_hf_to_dcp_with_gpus.py→[convert_to_titan_fqns((fqn: str))→{extract_l
 ## DEPENDENCY_PATTERNS
 
 ### EDGE_PATTERNS
-Contains: 19 edges
 Call: 4 edges
+Contains: 19 edges
 
 ### CROSS_CLUSTER_FLOW
 

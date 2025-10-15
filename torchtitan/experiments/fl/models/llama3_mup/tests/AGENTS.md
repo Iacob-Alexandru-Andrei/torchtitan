@@ -48,7 +48,7 @@ You are analyzing a codebase dependency graph optimized for AI understanding. Th
 ---
 
 # CODE_GRAPH
-NODES:9 EDGES:4
+NODES:18 EDGES:9
 
 ## DIRECTORY_TREE
 ROOT: torchtitan/experiments/fl/models/llama3_mup/tests/
@@ -56,14 +56,14 @@ ROOT: torchtitan/experiments/fl/models/llama3_mup/tests/
 ## ARCHITECTURAL_CLUSTERS
 
 ### DATA_MODELS
-NODES:9 CALL_DEPTH:1
+NODES:18 CALL_DEPTH:1
 
-test_mup_model.py→[setUp((self)),test_model_initialization((self))[TEST],test_forward_pass((self))[TEST],test_weight_initialization((self))[TEST]] 
+test_mup_model.py→[setUp((self)),_get_expected_mup_eps((self,base_eps: float)),test_model_initialization((self))[TEST],test_forward_pass((self))[TEST],test_weight_initialization((self))[TEST],test_optimizer_overrides_build_param_groups((self))[HOT,TEST],test_optimizer_overrides_disabled_when_hidden_scaling_off((self))[TEST],test_mosaic_builder_integrates_mup_overrides((self))[HOT,TEST],test_mosaic_builder_desloc_requires_ft((self))[HOT,TEST]] 
 
 ## DEPENDENCY_PATTERNS
 
 ### EDGE_PATTERNS
-Contains: 4 edges
+Contains: 9 edges
 
 ### CROSS_CLUSTER_FLOW
 
