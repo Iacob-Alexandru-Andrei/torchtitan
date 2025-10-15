@@ -117,6 +117,7 @@ class UnigramSetupResult:
     """Result of configuring unigram metrics for a stream subset."""
 
     collate_fn: Callable
+    group_key: str | None = None
 
 
 @dataclass(frozen=True)
@@ -127,7 +128,7 @@ class ParallelDataLoaderRequest:
     dp_world_size: int
     runtime: MosaicRuntimeConfig
     collate_fn: Callable | None = None
-    group_key: str | None
+    group_key: str | None = None
 
 
 @dataclass(frozen=True)
@@ -432,7 +433,7 @@ def _materialize_streams(
             )
         elif root_local is not None:
             logger.warning(
-                "Stream %s is missing a local path; root_remote was provided.",
+                "Stream %s is missing a local path; root_local was provided.",
                 name,
             )
 

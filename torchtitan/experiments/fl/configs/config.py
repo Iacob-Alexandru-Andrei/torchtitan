@@ -57,7 +57,7 @@ class MosaicTokenizerConfig:
                 ``kwargs`` forwarded to the underlying builder.
 
         Returns:
-            mosaictokenizerconfig: Typed configuration wrapping the provided
+            MosaicTokenizerConfig: Typed configuration wrapping the provided
             mapping.
         """
         return cls(name=str(data.get("name", "")), kwargs=_as_dict(data.get("kwargs")))
@@ -71,7 +71,7 @@ class MosaicTokenizerConfig:
                 with ``name`` and ``kwargs`` keys.
 
         Returns:
-            mosaictokenizerconfig: Valid configuration describing the tokenizer
+            MosaicTokenizerConfig: Valid configuration describing the tokenizer
             to instantiate.
 
         Raises:
@@ -149,7 +149,7 @@ class MosaicDataLoaderConfig:
             data: Mapping describing the dataset factory and runtime overrides.
 
         Returns:
-            mosaicdataloaderconfig: Normalized dataclass mirroring the mapping
+            MosaicDataLoaderConfig: Normalized dataclass mirroring the mapping
             structure.
         """
         known_keys = {
@@ -219,7 +219,7 @@ class MosaicDataLoaderConfig:
                 CLI arguments.
 
         Returns:
-            mosaicdataloaderconfig: Normalized dataclass ready for downstream
+            MosaicDataLoaderConfig: Normalized dataclass ready for downstream
             consumption.
 
         Raises:
@@ -528,7 +528,7 @@ class FLMetricsConfigEnvelope:
                 section.
 
         Returns:
-            flmetricsconfigenvelope: Envelope wrapping a fully-typed
+            FLMetricsConfigEnvelope: Envelope wrapping a fully-typed
             :class:`MetricsConfig` instance.
         """
         optimizer_monitor_dict = _as_dict(data.get("optimizer_monitor"))
@@ -558,7 +558,7 @@ class FLMetricsConfigEnvelope:
                 files.
 
         Returns:
-            flmetricsconfigenvelope: Normalized wrapper for downstream code.
+            FLMetricsConfigEnvelope: Normalized wrapper for downstream code.
 
         Raises:
             TypeError: If ``value`` cannot be converted into a metrics config.
@@ -732,7 +732,7 @@ class S3CheckpointingConfig:
             data: Mapping containing bucket information and runtime flags.
 
         Returns:
-            s3checkpointingconfig: Dataclass populated with the mapping values.
+            S3CheckpointingConfig: Dataclass populated with the mapping values.
         """
         run_uuid = data.get("run_uuid")
         remote_checkpoint_folder = data.get("remote_checkpoint_folder")
@@ -771,7 +771,7 @@ class S3CheckpointingConfig:
                 produced by configuration parsing.
 
         Returns:
-            s3checkpointingconfig: Normalized configuration with appropriate
+            S3CheckpointingConfig: Normalized configuration with appropriate
             defaults applied.
 
         Raises:
