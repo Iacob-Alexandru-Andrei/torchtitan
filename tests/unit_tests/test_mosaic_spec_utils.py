@@ -130,7 +130,10 @@ if not hasattr(_schedules, "ScheduleZBVZeroBubble"):
 
     _schedules.ScheduleZBVZeroBubble = _ScheduleZBVZeroBubble
 
-from torchtitan.experiments.fl.models.utils import ensure_mosaic_spec
+from torchtitan.experiments.fl.models.utils import (
+    MosaicSpecOverrides,
+    ensure_mosaic_spec,
+)
 from torchtitan.protocols import train_spec as train_spec_module
 from torchtitan.protocols.train_spec import (
     register_train_spec,
@@ -191,19 +194,23 @@ def test_ensure_mosaic_spec_is_idempotent_for_multiple_models() -> None:
         mosaic_a = ensure_mosaic_spec(
             base_spec_a.name,
             spec_name="mosaic_test_a",
-            dataloader_fn=_dummy_builder,
-            tokenizer_fn=_dummy_builder,
-            metrics_processor_fn=_dummy_builder,
+            overrides=MosaicSpecOverrides(
+                dataloader=_dummy_builder,
+                tokenizer=_dummy_builder,
+                metrics_processor=_dummy_builder,
+            ),
         )
         mosaic_b = ensure_mosaic_spec(
             base_spec_b.name,
             spec_name="mosaic_test_b",
-            dataloader_fn=_dummy_builder,
-            tokenizer_fn=_dummy_builder,
-            metrics_processor_fn=_dummy_builder,
-            optimizers_fn=_dummy_builder,
-            validator_fn=_dummy_builder,
-            post_transform=_post_transform,
+            overrides=MosaicSpecOverrides(
+                dataloader=_dummy_builder,
+                tokenizer=_dummy_builder,
+                metrics_processor=_dummy_builder,
+                optimizers=_dummy_builder,
+                validator=_dummy_builder,
+                post_transform=_post_transform,
+            ),
         )
 
         assert mosaic_a == "mosaic_test_a"
@@ -224,9 +231,11 @@ def test_ensure_mosaic_spec_is_idempotent_for_multiple_models() -> None:
             ensure_mosaic_spec(
                 base_spec_a.name,
                 spec_name="mosaic_test_a",
-                dataloader_fn=_dummy_builder,
-                tokenizer_fn=_dummy_builder,
-                metrics_processor_fn=_dummy_builder,
+                overrides=MosaicSpecOverrides(
+                    dataloader=_dummy_builder,
+                    tokenizer=_dummy_builder,
+                    metrics_processor=_dummy_builder,
+                ),
             )
             == "mosaic_test_a"
         )
@@ -236,12 +245,14 @@ def test_ensure_mosaic_spec_is_idempotent_for_multiple_models() -> None:
             ensure_mosaic_spec(
                 base_spec_b.name,
                 spec_name="mosaic_test_b",
-                dataloader_fn=_dummy_builder,
-                tokenizer_fn=_dummy_builder,
-                metrics_processor_fn=_dummy_builder,
-                optimizers_fn=_dummy_builder,
-                validator_fn=_dummy_builder,
-                post_transform=_post_transform,
+                overrides=MosaicSpecOverrides(
+                    dataloader=_dummy_builder,
+                    tokenizer=_dummy_builder,
+                    metrics_processor=_dummy_builder,
+                    optimizers=_dummy_builder,
+                    validator=_dummy_builder,
+                    post_transform=_post_transform,
+                ),
             )
             == "mosaic_test_b"
         )
@@ -275,9 +286,11 @@ def test_ensure_mosaic_spec_updates_existing_spec_with_new_overrides() -> None:
         spec_name = ensure_mosaic_spec(
             base_spec.name,
             spec_name="mosaic_update",
-            dataloader_fn=_dummy_builder,
-            tokenizer_fn=_dummy_builder,
-            metrics_processor_fn=_dummy_builder,
+            overrides=MosaicSpecOverrides(
+                dataloader=_dummy_builder,
+                tokenizer=_dummy_builder,
+                metrics_processor=_dummy_builder,
+            ),
         )
         initial_spec = train_spec_module.get_train_spec(spec_name)
         assert initial_spec.build_optimizers_fn is _dummy_builder
@@ -294,12 +307,14 @@ def test_ensure_mosaic_spec_updates_existing_spec_with_new_overrides() -> None:
         ensure_mosaic_spec(
             base_spec.name,
             spec_name=spec_name,
-            dataloader_fn=_dummy_builder,
-            tokenizer_fn=_dummy_builder,
-            metrics_processor_fn=_dummy_builder,
-            optimizers_fn=lambda *args, **kwargs: None,
-            validator_fn=_dummy_builder,
-            post_transform=_post_transform,
+            overrides=MosaicSpecOverrides(
+                dataloader=_dummy_builder,
+                tokenizer=_dummy_builder,
+                metrics_processor=_dummy_builder,
+                optimizers=lambda *args, **kwargs: None,
+                validator=_dummy_builder,
+                post_transform=_post_transform,
+            ),
         )
 
         updated_spec = train_spec_module.get_train_spec(spec_name)

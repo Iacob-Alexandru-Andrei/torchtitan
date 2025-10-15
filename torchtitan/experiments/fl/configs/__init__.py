@@ -27,6 +27,17 @@ class MosaicConfigManager(ConfigManager):
         super().__init__(MosaicJobConfig)
 
     def parse_args(self, args: list[str] = sys.argv[1:]) -> MosaicJobConfig:
+        """Return a type-stable Mosaic job config parsed from CLI arguments.
+
+        Args:
+            args: Command line arguments to interpret. Defaults to ``sys.argv``
+                without the executable name.
+
+        Returns:
+            mosaicjobconfig: Configuration object with the dataloader and
+            tokenizer sections coerced into the strongly typed dataclasses used
+            by the FL stack.
+        """
         config = super().parse_args(args)
         return ensure_mosaic_job_config_types(config)
 

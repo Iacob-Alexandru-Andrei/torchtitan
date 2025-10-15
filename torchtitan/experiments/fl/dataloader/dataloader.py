@@ -4,7 +4,7 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 
-"""Adapters for using Mosaic streaming dataloaders with TorchTitan."""
+"""Mosaic streaming dataloader integration for TorchTitan FL experiments."""
 
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ import ast
 import inspect
 import json
 import os
-import pickle
+from contextlib import suppress
 import posixpath
 import shutil
 from collections import Counter
@@ -20,7 +20,7 @@ from collections.abc import Callable, Mapping, Sequence
 from copy import deepcopy
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 from urllib.parse import urlparse
 
 import torch
@@ -59,6 +59,7 @@ if TYPE_CHECKING:
         MosaicJobConfig,
         UnigramMetricConfig,
     )
+    from torchtitan.experiments.fl.s3_checkpoint import RemoteUploaderDownloader
 
 _SHM_CLEANED: bool = False
 
@@ -116,7 +117,43 @@ class UnigramSetupResult:
     """Result of configuring unigram metrics for a stream subset."""
 
     collate_fn: Callable
-    group_key: str | None
+    group_key: str | None = None
+
+
+@dataclass(frozen=True)
+class ParallelDataLoaderRequest:
+    """Parameters required to construct a :class:`MosaicParallelAwareDataloader`."""
+
+    dp_rank: int
+    dp_world_size: int
+    runtime: MosaicRuntimeConfig
+    collate_fn: Callable | None = None
+    group_key: str | None = None
+
+
+@dataclass(frozen=True)
+class DataloaderBuildRequest:
+    """Input parameters required to build a Mosaic dataloader."""
+
+    job_config: MosaicJobConfig
+    tokenizer: BaseTokenizer
+    dp_world_size: int
+    dp_rank: int
+    split: str
+    default_drop_last: bool
+
+
+@dataclass(frozen=True)
+class UnigramMetricContext:
+    """Aggregated context used to build unigram metrics."""
+
+    streams: list[Stream] | None
+    default_split: str
+    tokenizer: BaseTokenizer
+    config: UnigramMetricConfig
+    group_key: str
+    dataset_root_remote: str | None
+    dataset_split_remote: str | None
 
 
 def _is_uri(path: str | None) -> bool:
@@ -134,11 +171,15 @@ def _join_remote_path(root: str | None, path: str | None) -> str | None:
 
 
 def _join_local_path(root: str | None, path: str | None) -> str | None:
+    """Join ``root`` and ``path`` using :class:`pathlib.Path` semantics."""
     if path is None or root is None:
         return path
-    if os.path.isabs(path):
-        return path
-    return os.path.join(root, path)
+
+    candidate = Path(path)
+    if candidate.is_absolute():
+        return str(candidate)
+
+    return str(Path(root) / candidate)
 
 
 def _flatten_stream_configs(streams_cfg: Any) -> dict[str, dict[str, Any]]:
@@ -218,6 +259,281 @@ def _collect_group_stream_entries(group: Mapping[str, Any]) -> list[Any]:
     raise TypeError(msg)
 
 
+def _normalize_sampling_mode(mode_raw: Any) -> str:
+    """Normalize the sampling group mode into a lowercase string."""
+    return str(mode_raw or "grouped").lower()
+
+
+def _should_concat_sampling_groups(mode: str, sampling_groups_cfg: Any) -> bool:
+    """Return ``True`` when sampling groups should be concatenated."""
+    return bool(sampling_groups_cfg) and mode in {
+        "concat",
+        "concatenate",
+        "merged",
+        "merge",
+        "combined",
+        "unified",
+        "all",
+    }
+
+
+def _resolve_group_candidate(
+    entry: Any,
+    *,
+    flattened: dict[str, dict[str, Any]],
+    group: Mapping[str, Any],
+    entry_index: int,
+) -> dict[str, Any]:
+    """Resolve a sampling group entry into a concrete stream mapping."""
+    if isinstance(entry, str):
+        if entry not in flattened:
+            msg = (
+                f"Sampling group '{group.get('name')}' references unknown stream '{entry}'"
+            )
+            raise KeyError(msg)
+        candidate = deepcopy(flattened[entry])
+        candidate.setdefault("name", entry)
+        return candidate
+
+    if isinstance(entry, Mapping):
+        entry_dict = dict(entry)
+        name = entry_dict.get("name")
+        base = entry_dict.get("base")
+        base_cfg: dict[str, Any] = {}
+        if base and base in flattened:
+            base_cfg = deepcopy(flattened[base])
+        elif name and name in flattened:
+            base_cfg = deepcopy(flattened[name])
+        candidate = {
+            **base_cfg,
+            **{k: v for k, v in entry_dict.items() if k != "base"},
+        }
+        if name:
+            candidate.setdefault("name", name)
+        else:
+            candidate.setdefault("name", f"{group.get('name')}_stream_{entry_index}")
+        return candidate
+
+    msg = "Sampling group stream entries must be mappings, sequences, or strings"
+    raise TypeError(msg)
+
+
+def _aggregate_sampling_groups(
+    flattened: dict[str, dict[str, Any]],
+    sampling_groups_cfg: Any,
+    mode_raw: Any,
+) -> dict[str, dict[str, Any]]:
+    """Concatenate sampling groups into a unified stream catalog."""
+    sampling_groups = _normalize_sampling_groups(sampling_groups_cfg)
+    aggregated: list[dict[str, Any]] = []
+    seen: set[tuple[Any, ...]] = set()
+
+    for group in sampling_groups:
+        entries = _collect_group_stream_entries(group)
+        for index, entry in enumerate(entries):
+            candidate = _resolve_group_candidate(
+                entry,
+                flattened=flattened,
+                group=group,
+                entry_index=index,
+            )
+            candidate.setdefault("name", f"stream_{len(aggregated)}")
+            identifier = (
+                candidate.get("name"),
+                candidate.get("local"),
+                candidate.get("remote"),
+                candidate.get("split"),
+            )
+            if identifier in seen:
+                continue
+            seen.add(identifier)
+            aggregated.append(candidate)
+
+    if aggregated:
+        logger.info(
+            "Concatenating %s sampling group(s) into a unified stream list (%s entries total).",
+            len(sampling_groups),
+            len(aggregated),
+        )
+        return {cfg["name"]: cfg for cfg in aggregated}
+
+    logger.warning(
+        "sampling_groups_mode was set to '%s' but no streams were resolved; falling back to the original stream catalog.",
+        mode_raw,
+    )
+    return flattened
+
+
+def _resolve_group_stream_names(
+    flattened: dict[str, dict[str, Any]], sampling_groups_cfg: Any
+) -> list[list[str]] | None:
+    """Resolve stream names referenced by sampling groups."""
+    sampling_groups = _normalize_sampling_groups(sampling_groups_cfg)
+    group_stream_names: list[list[str]] = []
+
+    for group in sampling_groups:
+        resolved_names: list[str] = []
+        entries = _collect_group_stream_entries(group)
+        for entry in entries:
+            candidate_name: str | None = None
+            if isinstance(entry, str):
+                candidate_name = entry
+            elif isinstance(entry, Mapping):
+                entry_dict = dict(entry)
+                candidate_name = entry_dict.get("name") or entry_dict.get("base")
+                if not candidate_name:
+                    candidate_name = group.get("name")
+
+            if candidate_name is None:
+                continue
+            if candidate_name not in flattened:
+                logger.warning(
+                    "Sampling group '%s' references unknown stream '%s'.",
+                    group.get("name"),
+                    candidate_name,
+                )
+                continue
+            resolved_names.append(candidate_name)
+
+        if resolved_names:
+            group_stream_names.append(resolved_names)
+
+    return group_stream_names or None
+
+
+def _materialize_streams(
+    flattened: dict[str, dict[str, Any]],
+    *,
+    root_remote: str | None,
+    root_local: str | None,
+) -> tuple[list[Stream], list[str]]:
+    """Instantiate :class:`Stream` objects from flattened configuration maps."""
+    streams: list[Stream] = []
+    stream_names: list[str] = []
+
+    for name, stream_cfg in flattened.items():
+        stream_kwargs = {
+            key: value for key, value in dict(stream_cfg).items() if value is not None
+        }
+        stream_kwargs.pop("name", None)
+
+        if "remote" in stream_kwargs:
+            stream_kwargs["remote"] = _join_remote_path(
+                root_remote, stream_kwargs["remote"]
+            )
+        elif root_remote is not None:
+            logger.warning(
+                "Stream %s is missing a remote path; root_remote was provided.",
+                name,
+            )
+
+        if "local" in stream_kwargs:
+            stream_kwargs["local"] = _join_local_path(
+                root_local, stream_kwargs["local"]
+            )
+        elif root_local is not None:
+            logger.warning(
+                "Stream %s is missing a local path; root_local was provided.",
+                name,
+            )
+
+        streams.append(Stream(**stream_kwargs))
+        stream_names.append(name)
+
+    logger.info("Built %d streams for Mosaic dataloader", len(streams))
+    return streams, stream_names
+
+
+def _compute_group_indices(
+    group_stream_names: list[list[str]] | None, stream_names: list[str]
+) -> list[list[int]] | None:
+    """Map group stream names to indices in the instantiated stream list."""
+    if not group_stream_names:
+        return None
+
+    name_to_index = {stream_name: idx for idx, stream_name in enumerate(stream_names)}
+    group_indices: list[list[int]] = []
+    for names in group_stream_names:
+        indices = [name_to_index[name] for name in names if name in name_to_index]
+        if indices:
+            group_indices.append(indices)
+
+    if not group_indices:
+        return None
+
+    logger.info(
+        "Resolved %d sampling group(s) for grouped Mosaic streams.",
+        len(group_indices),
+    )
+    for idx, indices in enumerate(group_indices):
+        selected = [stream_names[i] for i in indices]
+        logger.info("Group %d contains streams: %s", idx, selected)
+    return group_indices
+
+
+def _resolve_unigram_remote_path(
+    remote_uri: str,
+    *,
+    root_remote: str | None,
+    split: str,
+) -> tuple[str, str] | None:
+    """Return the S3 bucket and key for a unigram statistics file."""
+    parsed = urlparse(remote_uri)
+    if parsed.scheme != "s3":
+        logger.warning(
+            "Unigram metric download skipped for %s (unsupported scheme '%s').",
+            remote_uri,
+            parsed.scheme or "unknown",
+        )
+        return None
+
+    bucket = parsed.netloc
+    remote_path = parsed.path.lstrip("/")
+    root_prefix = ""
+
+    if root_remote:
+        root_parsed = urlparse(root_remote)
+        if root_parsed.scheme not in ("", "s3"):
+            logger.warning(
+                "Unigram metric download skipped for %s (unsupported root scheme '%s').",
+                remote_uri,
+                root_parsed.scheme,
+            )
+            return None
+        if root_parsed.netloc:
+            bucket = root_parsed.netloc
+        root_prefix = root_parsed.path.lstrip("/")
+        if root_prefix and remote_path.startswith(root_prefix):
+            remote_path = remote_path[len(root_prefix) :].lstrip("/")
+
+    first_segment = remote_path.split("/", 1)[0] if remote_path else ""
+    split_component = split if split and first_segment != split else ""
+
+    remote_key_parts = [part for part in (root_prefix, remote_path) if part]
+    if split_component:
+        remote_key_parts.append(split_component)
+    remote_key_parts.append("1_gram.json")
+
+    remote_key = posixpath.join(*remote_key_parts)
+    return bucket, remote_key
+
+
+def _create_remote_unigram_client(
+    bucket: str, config: UnigramMetricConfig
+) -> RemoteUploaderDownloader:
+    """Create the remote uploader/downloader used for unigram metrics."""
+    remote_up_down = create_remote_up_down(
+        bucket_name=bucket,
+        prefix="",
+        num_attempts=config.num_attempts,
+        client_config=config.client_config,
+    )
+    remote_up_down._run_name = (  # pyright: ignore[reportAttributeAccessIssue]
+        "unigram_metrics"
+    )
+    return remote_up_down
+
+
 def _select_dataset_config(
     dataset_cfg: Mapping[str, Any] | None, split: str
 ) -> dict[str, Any]:
@@ -231,6 +547,69 @@ def _select_dataset_config(
         merged.update(cfg.pop(split, {}) or {})
         return merged
     return cfg
+
+
+def _resolve_unigram_cache_path(
+    stream: Stream,
+    *,
+    root_remote: str | None,
+    dataset_split: str | None,
+    default_split: str,
+    config: UnigramMetricConfig,
+) -> tuple[Path, Path]:
+    """Determine the cache and split-specific unigram file locations."""
+    local_root = getattr(stream, "local", None)
+    stream_split = getattr(stream, "split", None) or dataset_split or default_split
+
+    if not local_root:
+        message = f"Stream '{getattr(stream, 'name', 'unknown')}' is missing a local path."
+        raise RuntimeError(message)
+
+    local_root_path = Path(local_root)
+    cache_path = local_root_path / "1_gram.json"
+    split_dir = local_root_path / stream_split if stream_split else local_root_path
+    split_path = split_dir / "1_gram.json"
+
+    if split_path.exists():
+        return cache_path, split_path
+    if cache_path.exists():
+        return cache_path, split_path
+
+    downloaded = _maybe_download_unigram_file(
+        getattr(stream, "remote", None),
+        root_remote,
+        stream_split or "",
+        cache_path,
+        config,
+    )
+    if not downloaded and not cache_path.exists():
+        message = (
+            "Unigram frequency file not found for stream "
+            f"'{getattr(stream, 'name', 'unknown')}' at {cache_path}"
+        )
+        raise RuntimeError(message)
+
+    return cache_path, split_path
+
+
+def _materialize_split_cache(cache_path: Path, split_path: Path) -> None:
+    """Ensure split-specific unigram files reuse the global cache when possible."""
+    if split_path == cache_path:
+        return
+
+    try:
+        split_path.parent.mkdir(parents=True, exist_ok=True)
+        if not split_path.exists():
+            try:
+                os.link(cache_path, split_path)
+            except OSError:
+                shutil.copy2(cache_path, split_path)
+    except Exception as exc:  # noqa: BLE001
+        logger.debug(
+            "Unable to materialize split-specific unigram cache at %s: %s",
+            split_path,
+            exc,
+        )
 
 
 def _extract_streams(dataset_cfg: dict[str, Any]) -> StreamExtractionResult:
@@ -252,157 +631,20 @@ def _extract_streams(dataset_cfg: dict[str, Any]) -> StreamExtractionResult:
         )
 
     flattened = _flatten_stream_configs(streams_cfg)
-    group_stream_names: list[list[str]] | None = None
+    sampling_mode = _normalize_sampling_mode(sampling_groups_mode_raw)
+    group_stream_names = None
 
-    sampling_groups_mode = str(sampling_groups_mode_raw or "grouped").lower()
-    concat_aliases = {
-        "concat",
-        "concatenate",
-        "merged",
-        "merge",
-        "combined",
-        "unified",
-        "all",
-    }
-    if sampling_groups_cfg and sampling_groups_mode in concat_aliases:
-        sampling_groups = _normalize_sampling_groups(sampling_groups_cfg)
-        aggregated: list[dict[str, Any]] = []
-        seen: set[tuple[Any, ...]] = set()
-
-        for group in sampling_groups:
-            entries = _collect_group_stream_entries(group)
-            for index, entry in enumerate(entries):
-                if isinstance(entry, str):
-                    if entry not in flattened:
-                        msg = f"Sampling group '{group.get('name')}' references unknown stream '{entry}'"
-                        raise KeyError(msg)
-                    candidate = deepcopy(flattened[entry])
-                    candidate.setdefault("name", entry)
-                elif isinstance(entry, Mapping):
-                    entry_dict = dict(entry)
-                    name = entry_dict.get("name")
-                    base = entry_dict.get("base")
-                    base_cfg: dict[str, Any] = {}
-                    if base and base in flattened:
-                        base_cfg = deepcopy(flattened[base])
-                    elif name and name in flattened:
-                        base_cfg = deepcopy(flattened[name])
-                    candidate = {
-                        **base_cfg,
-                        **{k: v for k, v in entry_dict.items() if k != "base"},
-                    }
-                    if name:
-                        candidate.setdefault("name", name)
-                    elif "name" not in candidate or candidate["name"] is None:
-                        candidate["name"] = f"{group.get('name')}_stream_{index}"
-                else:
-                    msg = "Sampling group stream entries must be mappings, sequences, or strings"
-                    raise TypeError(msg)
-
-                candidate.setdefault("name", f"stream_{len(aggregated)}")
-                identifier = (
-                    candidate.get("name"),
-                    candidate.get("local"),
-                    candidate.get("remote"),
-                    candidate.get("split"),
-                )
-                if identifier in seen:
-                    continue
-                seen.add(identifier)
-                aggregated.append(candidate)
-
-        if aggregated:
-            flattened = {cfg["name"]: cfg for cfg in aggregated}
-            logger.info(
-                "Concatenating %s sampling group(s) into a unified stream list (%s entries total).",
-                len(sampling_groups),
-                len(aggregated),
-            )
-        else:
-            logger.warning(
-                "sampling_groups_mode was set to '%s' but no streams were resolved; "
-                "falling back to the original stream catalog.",
-                sampling_groups_mode_raw,
-            )
+    if _should_concat_sampling_groups(sampling_mode, sampling_groups_cfg):
+        flattened = _aggregate_sampling_groups(
+            flattened, sampling_groups_cfg, sampling_groups_mode_raw
+        )
     elif sampling_groups_cfg:
-        sampling_groups = _normalize_sampling_groups(sampling_groups_cfg)
-        group_stream_names = []
-        for group in sampling_groups:
-            resolved_names: list[str] = []
-            entries = _collect_group_stream_entries(group)
-            for entry in entries:
-                candidate_name: str | None = None
-                if isinstance(entry, str):
-                    candidate_name = entry
-                elif isinstance(entry, Mapping):
-                    entry_dict = dict(entry)
-                    candidate_name = entry_dict.get("name") or entry_dict.get("base")
-                if not candidate_name and isinstance(entry, Mapping):
-                    # fallback to generated name if missing
-                    candidate_name = group.get("name")
-                if candidate_name is None:
-                    continue
-                if candidate_name not in flattened:
-                    logger.warning(
-                        "Sampling group '%s' references unknown stream '%s'.",
-                        group.get("name"),
-                        candidate_name,
-                    )
-                    continue
-                resolved_names.append(candidate_name)
-            if resolved_names:
-                group_stream_names.append(resolved_names)
+        group_stream_names = _resolve_group_stream_names(flattened, sampling_groups_cfg)
 
-    streams: list[Stream] = []
-    stream_names: list[str] = []
-    for name, stream_cfg in flattened.items():
-        stream_kwargs = dict(stream_cfg)
-        stream_kwargs = {
-            key: value for key, value in stream_kwargs.items() if value is not None
-        }
-        stream_kwargs.pop("name", None)
-
-        if "remote" in stream_kwargs:
-            stream_kwargs["remote"] = _join_remote_path(
-                root_remote, stream_kwargs["remote"]
-            )
-        elif root_remote is not None:
-            logger.warning(
-                "Stream %s is missing a remote path; root_remote was provided.",
-                name,
-            )
-
-        if "local" in stream_kwargs:
-            stream_kwargs["local"] = _join_local_path(
-                root_local, stream_kwargs["local"]
-            )
-        elif root_local is not None:
-            logger.warning(
-                "Stream %s is missing a local path; root_local was provided.", name
-            )
-
-        streams.append(Stream(**stream_kwargs))
-        stream_names.append(name)
-
-    logger.info("Built %d streams for Mosaic dataloader", len(streams))
-    group_indices: list[list[int]] | None = None
-    if group_stream_names:
-        name_to_index = {
-            stream_name: idx for idx, stream_name in enumerate(stream_names)
-        }
-        group_indices = []
-        for names in group_stream_names:
-            indices = [name_to_index[name] for name in names if name in name_to_index]
-            if indices:
-                group_indices.append(indices)
-        if group_indices:
-            logger.info(
-                "Resolved %d sampling group(s) for grouped Mosaic streams.",
-                len(group_indices),
-            )
-            for idx, indices in enumerate(group_indices):
-                selected = [stream_names[i] for i in indices]
-                logger.info("Group %d contains streams: %s", idx, selected)
+    streams, stream_names = _materialize_streams(
+        flattened, root_remote=root_remote, root_local=root_local
+    )
+    group_indices = _compute_group_indices(group_stream_names, stream_names)
     return StreamExtractionResult(
         streams=streams or None,
         dataset_config=dataset_cfg,
@@ -422,66 +664,18 @@ def _maybe_download_unigram_file(
     if not remote_uri or not config.download_missing:
         return False
 
-    parsed = urlparse(remote_uri)
-    if parsed.scheme != "s3":
-        logger.warning(
-            "Unigram metric download skipped for %s (unsupported scheme '%s').",
-            remote_uri,
-            parsed.scheme or "unknown",
-        )
+    resolved = _resolve_unigram_remote_path(
+        remote_uri, root_remote=root_remote, split=split
+    )
+    if resolved is None:
         return False
 
-    bucket = parsed.netloc
-    remote_path = parsed.path.lstrip("/")
-
-    root_prefix = ""
-    if root_remote:
-        root_parsed = urlparse(root_remote)
-        if root_parsed.scheme not in ("", "s3"):
-            logger.warning(
-                "Unigram metric download skipped for %s (unsupported root scheme '%s').",
-                remote_uri,
-                root_parsed.scheme,
-            )
-            return False
-        if root_parsed.netloc:
-            bucket = root_parsed.netloc
-        root_prefix = root_parsed.path.lstrip("/")
-        if root_prefix and remote_path.startswith(root_prefix):
-            remote_path = remote_path[len(root_prefix) :].lstrip("/")
-
-    stream_relative = remote_path
-
-    first_segment = stream_relative.split("/", 1)[0] if stream_relative else ""
-    split_component = ""
-    if split and first_segment != split:
-        split_component = split
-
-    remote_key_parts: list[str] = []
-    if root_prefix:
-        remote_key_parts.append(root_prefix)
-    if stream_relative:
-        remote_key_parts.append(stream_relative)
-    if split_component:
-        remote_key_parts.append(split_component)
-    remote_key_parts.append("1_gram.json")
-    remote_key = posixpath.join(*remote_key_parts)
-
-    remote_up_down = create_remote_up_down(
-        bucket_name=bucket,
-        prefix="",
-        num_attempts=config.num_attempts,
-        client_config=config.client_config,
-    )
-    remote_up_down._run_name = (
-        "unigram_metrics"  # pyright: ignore[reportAttributeAccessIssue]
-    )
+    bucket, remote_key = resolved
+    remote_up_down = _create_remote_unigram_client(bucket, config)
 
     try:
         destination.parent.mkdir(parents=True, exist_ok=True)
         download_file_from_s3(remote_up_down, remote_key, destination)
-        logger.info("Downloaded unigram frequencies to %s", destination)
-        return True
     except FileNotFoundError as exc:
         logger.warning(
             "Unigram frequency file %s not found in remote location %s: %s",
@@ -498,11 +692,12 @@ def _maybe_download_unigram_file(
             exc,
         )
         return False
+    else:
+        logger.info("Downloaded unigram frequencies to %s", destination)
+        return True
     finally:
-        try:
+        with suppress(Exception):
             remote_up_down.close()
-        except Exception:  # noqa: BLE001
-            pass
 
 
 def _load_stream_unigram_counts(
@@ -513,53 +708,17 @@ def _load_stream_unigram_counts(
     default_split: str,
     config: UnigramMetricConfig,
 ) -> Counter:
-    local_root = getattr(stream, "local", None)
-    stream_split = getattr(stream, "split", None) or dataset_split or default_split
+    cache_path, split_path = _resolve_unigram_cache_path(
+        stream,
+        root_remote=root_remote,
+        dataset_split=dataset_split,
+        default_split=default_split,
+        config=config,
+    )
 
-    if not local_root:
-        message = (
-            f"Stream '{getattr(stream, 'name', 'unknown')}' is missing a local path."
-        )
-        raise RuntimeError(message)
-
-    local_root_path = Path(local_root)
-    cache_path = local_root_path / "1_gram.json"
-    split_dir = local_root_path / stream_split if stream_split else local_root_path
-    split_path = split_dir / "1_gram.json"
-
-    unigram_path: Path | None = None
-    if split_path.exists():
-        unigram_path = split_path
-    elif cache_path.exists():
-        unigram_path = cache_path
-
-    if unigram_path is None:
-        downloaded = _maybe_download_unigram_file(
-            getattr(stream, "remote", None),
-            root_remote,
-            stream_split,
-            cache_path,
-            config,
-        )
-        if not downloaded and not cache_path.exists():
-            message = f"Unigram frequency file not found for stream '{getattr(stream, 'name', 'unknown')}' at {cache_path}"
-            raise RuntimeError(message)
-        unigram_path = cache_path
-
-    if unigram_path is cache_path and split_path != cache_path:
-        try:
-            split_dir.mkdir(parents=True, exist_ok=True)
-            if not split_path.exists():
-                try:
-                    os.link(cache_path, split_path)
-                except OSError:
-                    shutil.copy2(cache_path, split_path)
-        except Exception as exc:  # noqa: BLE001
-            logger.debug(
-                "Unable to materialize split-specific unigram cache at %s: %s",
-                split_path,
-                exc,
-            )
+    unigram_path = split_path if split_path.exists() else cache_path
+    if unigram_path is cache_path:
+        _materialize_split_cache(cache_path, split_path)
 
     try:
         with unigram_path.open("r", encoding="utf-8") as handle:
@@ -747,7 +906,7 @@ def _setup_unigram_metric(
     unigram_group_key = f"{split}/{group_label}"
 
     try:
-        unigram_metric = _build_unigram_metric_for_group(
+        context = UnigramMetricContext(
             streams=assignment.streams,
             default_split=split,
             tokenizer=tokenizer,
@@ -756,6 +915,7 @@ def _setup_unigram_metric(
             dataset_root_remote=assignment.dataset_root_remote,
             dataset_split_remote=assignment.dataset_split_remote,
         )
+        unigram_metric = _build_unigram_metric_for_group(context)
     except Exception as exc:
         if job_config.unigram_metric.allow_failures:
             logger.warning(
@@ -775,40 +935,34 @@ def _setup_unigram_metric(
 
 
 def _build_unigram_metric_for_group(
-    streams: list[Stream] | None,
-    default_split: str,
-    tokenizer: BaseTokenizer,
-    config: UnigramMetricConfig,
-    group_key: str,
-    dataset_root_remote: str | None,
-    dataset_split_remote: str | None,
+    context: UnigramMetricContext,
 ) -> PureUnigramCrossEntropy | None:
-    if not config.enable or not streams:
+    if not context.config.enable or not context.streams:
         return None
 
-    _ = tokenizer  # Tokenizer is unused; kept for API compatibility.
+    _ = context.tokenizer  # Tokenizer is unused; kept for API compatibility.
 
     aggregate_counts: Counter = Counter()
-    for stream in streams:
+    for stream in context.streams:
         counts = _load_stream_unigram_counts(
             stream,
-            root_remote=dataset_root_remote,
-            dataset_split=dataset_split_remote,
-            default_split=default_split,
-            config=config,
+            root_remote=context.dataset_root_remote,
+            dataset_split=context.dataset_split_remote,
+            default_split=context.default_split,
+            config=context.config,
         )
         aggregate_counts.update(counts)
 
     if not aggregate_counts:
         message = (
-            f"No unigram counts collected for group '{group_key}'. "
+            f"No unigram counts collected for group '{context.group_key}'. "
             "Ensure 1_gram.json files are available for the configured streams."
         )
         raise RuntimeError(message)
 
     max_token_id = max(aggregate_counts)
     if max_token_id < 0:
-        message = f"Invalid token ids encountered for group '{group_key}'."
+        message = f"Invalid token ids encountered for group '{context.group_key}'."
         raise RuntimeError(message)
 
     probabilities = torch.zeros(max_token_id + 1, dtype=torch.float32)
@@ -818,30 +972,34 @@ def _build_unigram_metric_for_group(
 
     total = probabilities.sum().item()
     if total <= 0:
-        message = f"Aggregate unigram counts sum to zero for group '{group_key}'."
+        message = (
+            f"Aggregate unigram counts sum to zero for group '{context.group_key}'."
+        )
         raise RuntimeError(message)
 
     probabilities /= total
 
     logger.info(
         "Constructed unigram probabilities for %s (total tokens=%d).",
-        group_key,
+        context.group_key,
         int(total),
     )
     return PureUnigramCrossEntropy(
         probabilities,
-        ignore_index=config.ignore_index,
+        ignore_index=context.config.ignore_index,
     )
 
 
 class StatefulStreamingTextDataset(StreamingTextDataset):
-    """A stateful wrapper around StreamingTextDataset that internally tracks the number
-    of samples yielded. This makes it compatible with dataloaders like TorchTitan's
-    StatefulDataLoader that do not pass arguments to the dataset's state_dict method.
+    """Stateful wrapper that keeps track of yielded samples.
+
+    This makes the dataset compatible with dataloaders like TorchTitan's
+    ``StatefulDataLoader`` that do not pass arguments to the dataset's
+    :meth:`state_dict` method.
 
     Args:
-        *args: Positional arguments to pass to StreamingTextDataset.
-        **kwargs: Keyword arguments to pass to StreamingTextDataset.
+        *args: Positional arguments to pass to :class:`StreamingTextDataset`.
+        **kwargs: Keyword arguments to pass to :class:`StreamingTextDataset`.
     """
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
@@ -849,14 +1007,12 @@ class StatefulStreamingTextDataset(StreamingTextDataset):
         self._num_samples_yielded = 0
 
     def __getitem__(self, idx: int) -> dict[str, list[int]] | torch.Tensor:
-        """Overrides the parent method to increment the internal sample counter
-        each time an item is fetched.
-        """
+        """Increment the internal counter each time an item is fetched."""
         self._num_samples_yielded += 1
         return super().__getitem__(idx)
 
     def state_dict(
-        self, num_samples: int | None = None, from_beginning: bool = True
+        self, num_samples: int | None = None, *, from_beginning: bool = True
     ) -> dict[str, Any]:
         """Saves the dataset's state.
 
@@ -904,37 +1060,28 @@ class MosaicParallelAwareDataloader(StatefulDataLoader, BaseDataLoader):
     batch_size: int
 
     def __init__(
-        self,
-        dataset: StatefulStreamingTextDataset,
-        dp_rank: int,
-        dp_world_size: int,
-        batch_size: int,
-        collate_fn: Callable | None = None,
-        num_workers: int = 0,
-        prefetch_factor: int | None = 2,
-        pin_memory: bool = True,
-        persistent_workers: bool = True,
-        drop_last: bool = True,
+        self, dataset: StatefulStreamingTextDataset, request: ParallelDataLoaderRequest
     ) -> None:
-        self.dp_world_size = dp_world_size
-        self.dp_rank = dp_rank
-        self.batch_size = batch_size
+        runtime = request.runtime
+        self.dp_world_size = request.dp_world_size
+        self.dp_rank = request.dp_rank
+        self.batch_size = runtime.batch_size
         super().__init__(
             dataset,
-            batch_size=batch_size,
-            collate_fn=collate_fn,
-            num_workers=num_workers,
-            prefetch_factor=prefetch_factor,
-            pin_memory=pin_memory,
-            persistent_workers=persistent_workers,
-            drop_last=drop_last,
+            batch_size=runtime.batch_size,
+            collate_fn=request.collate_fn,
+            num_workers=runtime.num_workers,
+            prefetch_factor=runtime.prefetch_factor,
+            pin_memory=runtime.pin_memory,
+            persistent_workers=runtime.persistent_workers,
+            drop_last=runtime.drop_last,
         )
-        self._rank_id = f"dp_rank_{dp_rank}"
+        self._rank_id = f"dp_rank_{request.dp_rank}"
 
     def state_dict(self) -> dict[str, Any]:
         """Save dataloader state for checkpointing."""
         return {
-            self._rank_id: pickle.dumps(super().state_dict()),
+            self._rank_id: deepcopy(super().state_dict()),
             "world_size": self.dp_world_size,
         }
 
@@ -952,12 +1099,12 @@ class MosaicParallelAwareDataloader(StatefulDataLoader, BaseDataLoader):
         assert (
             self.dp_world_size == state_dict["world_size"]
         ), "dp_degree is inconsistent before and after checkpoint, dataloader resharding is not supported yet."
-        super().load_state_dict(pickle.loads(state_dict[self._rank_id]))
+        loader_state = state_dict[self._rank_id]
+        super().load_state_dict(deepcopy(loader_state))
 
 
 def titan_collate_fn(batch: list[Any]) -> tuple[dict[str, torch.Tensor], torch.Tensor]:
-    """Collates samples from StreamingTextDataset and formats them for the
-    TorchTitan training loop.
+    """Collate samples from :class:`StreamingTextDataset` for TorchTitan.
 
     Args:
         batch: A list of samples from the dataset.
@@ -985,26 +1132,20 @@ def titan_collate_fn(batch: list[Any]) -> tuple[dict[str, torch.Tensor], torch.T
 
 
 def _build_mosaic_dataloader(
-    *,
-    job_config: MosaicJobConfig,
-    tokenizer: BaseTokenizer,
-    dp_world_size: int,
-    dp_rank: int,
-    split: str,
-    default_drop_last: bool,
+    request: DataloaderBuildRequest,
 ) -> MosaicParallelAwareDataloader:
     normalized = _normalize_mosaic_dataloader_config(
-        job_config,
-        split=split,
-        default_drop_last=default_drop_last,
+        request.job_config,
+        split=request.split,
+        default_drop_last=request.default_drop_last,
     )
-    mosaic_cfg = job_config.mosaic_dataloader
+    mosaic_cfg = request.job_config.mosaic_dataloader
     if not mosaic_cfg.dataset:
         msg = "mosaic_dataloader config must define a dataset section."
         raise ValueError(msg)
 
     dataset_cfg_raw = deepcopy(mosaic_cfg.dataset)
-    dataset_cfg = _select_dataset_config(dataset_cfg_raw, split)
+    dataset_cfg = _select_dataset_config(dataset_cfg_raw, request.split)
 
     # Extract dataloader-specific config
     num_workers = mosaic_cfg.num_workers
@@ -1012,11 +1153,13 @@ def _build_mosaic_dataloader(
     pin_memory = mosaic_cfg.pin_memory
     persistent_workers = mosaic_cfg.persistent_workers
     drop_last = (
-        mosaic_cfg.drop_last if mosaic_cfg.drop_last is not None else default_drop_last
+        mosaic_cfg.drop_last
+        if mosaic_cfg.drop_last is not None
+        else request.default_drop_last
     )
 
     # Allow per-split overrides
-    split_overrides = mosaic_cfg.get_split_overrides(split)
+    split_overrides = mosaic_cfg.get_split_overrides(request.split)
     if split_overrides:
         num_workers = split_overrides.get("num_workers", num_workers)
         prefetch_factor = split_overrides.get("prefetch_factor", prefetch_factor)
@@ -1047,8 +1190,8 @@ def _build_mosaic_dataloader(
     extraction = _extract_streams(normalized.dataset_config)
     assignment = _select_stream_subset(
         extraction,
-        dp_rank=dp_rank,
-        dp_world_size=dp_world_size,
+        dp_rank=request.dp_rank,
+        dp_world_size=request.dp_world_size,
     )
 
     dataset_factory_config = _prepare_dataset_kwargs(
@@ -1058,31 +1201,26 @@ def _build_mosaic_dataloader(
 
     unigram_setup = _setup_unigram_metric(
         assignment,
-        job_config=job_config,
-        split=split,
-        tokenizer=tokenizer,
+        job_config=request.job_config,
+        split=request.split,
+        tokenizer=request.tokenizer,
     )
 
     text_dataset = _create_streaming_dataset(
         assignment=assignment,
-        tokenizer=tokenizer,
+        tokenizer=request.tokenizer,
         dataset_config=dataset_factory_config,
         batch_size=normalized.runtime.batch_size,
-        split=split,
+        split=request.split,
     )
 
-    return MosaicParallelAwareDataloader(
-        dataset=text_dataset,
-        dp_rank=dp_rank,
-        dp_world_size=dp_world_size,
-        batch_size=normalized.runtime.batch_size,
+    loader_request = ParallelDataLoaderRequest(
+        dp_rank=request.dp_rank,
+        dp_world_size=request.dp_world_size,
+        runtime=normalized.runtime,
         collate_fn=unigram_setup.collate_fn,
-        num_workers=normalized.runtime.num_workers,
-        prefetch_factor=normalized.runtime.prefetch_factor,
-        pin_memory=normalized.runtime.pin_memory,
-        persistent_workers=normalized.runtime.persistent_workers,
-        drop_last=normalized.runtime.drop_last,
     )
+    return MosaicParallelAwareDataloader(text_dataset, loader_request)
 
 
 def build_mosaic_dataloader(
@@ -1093,7 +1231,7 @@ def build_mosaic_dataloader(
     job_config: MosaicJobConfig,
 ) -> MosaicParallelAwareDataloader:
     """Build a Mosaic dataloader for the training split."""
-    return _build_mosaic_dataloader(
+    request = DataloaderBuildRequest(
         job_config=job_config,
         tokenizer=tokenizer,
         dp_world_size=dp_world_size,
@@ -1101,6 +1239,7 @@ def build_mosaic_dataloader(
         split="train",
         default_drop_last=True,
     )
+    return _build_mosaic_dataloader(request)
 
 
 def build_mosaic_validation_dataloader(
@@ -1128,7 +1267,7 @@ def build_mosaic_validation_dataloader(
         It may be removed in a future release; downstream callers should not rely
         on it.
     """
-    return _build_mosaic_dataloader(
+    request = DataloaderBuildRequest(
         job_config=job_config,
         tokenizer=tokenizer,
         dp_world_size=dp_world_size,
@@ -1136,6 +1275,7 @@ def build_mosaic_validation_dataloader(
         split="val",
         default_drop_last=False,
     )
+    return _build_mosaic_dataloader(request)
 
 
 __all__ = [

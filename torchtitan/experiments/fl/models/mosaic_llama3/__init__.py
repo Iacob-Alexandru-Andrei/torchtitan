@@ -8,7 +8,10 @@
 from dataclasses import replace
 
 from torchtitan.experiments.fl.models.constants import MOSAIC_LLAMA_VOCAB_SIZE
-from torchtitan.experiments.fl.models.utils import ensure_mosaic_spec
+from torchtitan.experiments.fl.models.utils import (
+    MosaicSpecOverrides,
+    ensure_mosaic_spec,
+)
 from torchtitan.experiments.fl.optimizer_builder import build_mosaic_optimizers
 from torchtitan.experiments.fl.validate import build_mosaic_validator
 from torchtitan.protocols.train_spec import (
@@ -30,8 +33,10 @@ def get_train_spec() -> TrainSpec:
     spec_name = ensure_mosaic_spec(
         "llama3",
         spec_name="mosaic_llama3",
-        optimizers_fn=build_mosaic_optimizers,
-        validator_fn=build_mosaic_validator,
-        post_transform=_update_vocab_sizes,
+        overrides=MosaicSpecOverrides(
+            optimizers=build_mosaic_optimizers,
+            validator=build_mosaic_validator,
+            post_transform=_update_vocab_sizes,
+        ),
     )
     return get_registered_train_spec(spec_name)

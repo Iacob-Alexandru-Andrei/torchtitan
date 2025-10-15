@@ -50,10 +50,33 @@ class MosaicTokenizerConfig:
 
     @classmethod
     def from_dict(cls, data: Mapping[str, Any]) -> MosaicTokenizerConfig:
+        """Instantiate the configuration from a mapping payload.
+
+        Args:
+            data: Mapping describing the tokenizer ``name`` and optional
+                ``kwargs`` forwarded to the underlying builder.
+
+        Returns:
+            MosaicTokenizerConfig: Typed configuration wrapping the provided
+            mapping.
+        """
         return cls(name=str(data.get("name", "")), kwargs=_as_dict(data.get("kwargs")))
 
     @classmethod
     def coerce(cls, value: Any) -> MosaicTokenizerConfig:
+        """Convert arbitrary inputs into a :class:`MosaicTokenizerConfig`.
+
+        Args:
+            value: Existing :class:`MosaicTokenizerConfig` instance or a mapping
+                with ``name`` and ``kwargs`` keys.
+
+        Returns:
+            MosaicTokenizerConfig: Valid configuration describing the tokenizer
+            to instantiate.
+
+        Raises:
+            TypeError: If ``value`` cannot be interpreted as a tokenizer config.
+        """
         if isinstance(value, cls):
             return value
         if isinstance(value, Mapping):
@@ -120,6 +143,15 @@ class MosaicDataLoaderConfig:
 
     @classmethod
     def from_dict(cls, data: Mapping[str, Any]) -> MosaicDataLoaderConfig:
+        """Instantiate a dataloader config from an arbitrary mapping.
+
+        Args:
+            data: Mapping describing the dataset factory and runtime overrides.
+
+        Returns:
+            MosaicDataLoaderConfig: Normalized dataclass mirroring the mapping
+            structure.
+        """
         known_keys = {
             "name",
             "dataset",
@@ -180,6 +212,19 @@ class MosaicDataLoaderConfig:
 
     @classmethod
     def coerce(cls, value: Any) -> MosaicDataLoaderConfig:
+        """Convert raw configuration payloads into a dataclass instance.
+
+        Args:
+            value: :class:`MosaicDataLoaderConfig` or a mapping read from TOML or
+                CLI arguments.
+
+        Returns:
+            MosaicDataLoaderConfig: Normalized dataclass ready for downstream
+            consumption.
+
+        Raises:
+            TypeError: If ``value`` cannot be interpreted as a dataloader config.
+        """
         if isinstance(value, cls):
             return value
         if isinstance(value, Mapping):
@@ -188,6 +233,15 @@ class MosaicDataLoaderConfig:
         raise TypeError(msg)
 
     def get_split_overrides(self, split: str) -> dict[str, Any]:
+        """Return per-split overrides merged onto the default dataset config.
+
+        Args:
+            split: Dataset split identifier, such as ``"train"`` or ``"val"``.
+
+        Returns:
+            dict[str, any]: Mapping of overrides to apply for the requested
+            split.
+        """
         overrides = self.split_overrides.get(split)
         if overrides is None:
             return {}
@@ -467,6 +521,16 @@ class FLMetricsConfigEnvelope:
 
     @classmethod
     def from_dict(cls, data: Mapping[str, Any]) -> FLMetricsConfigEnvelope:
+        """Create a typed metrics configuration from a mapping payload.
+
+        Args:
+            data: Mapping containing nested dictionaries for each metrics
+                section.
+
+        Returns:
+            FLMetricsConfigEnvelope: Envelope wrapping a fully-typed
+            :class:`MetricsConfig` instance.
+        """
         optimizer_monitor_dict = _as_dict(data.get("optimizer_monitor"))
         activation_monitor_dict = _as_dict(data.get("activation_monitor"))
         lr_monitor_dict = _as_dict(data.get("lr_monitor"))
@@ -486,6 +550,19 @@ class FLMetricsConfigEnvelope:
 
     @classmethod
     def coerce(cls, value: Any) -> FLMetricsConfigEnvelope:
+        """Ensure the provided value is a typed metrics configuration.
+
+        Args:
+            value: Existing :class:`FLMetricsConfigEnvelope`, raw
+                :class:`MetricsConfig`, or mapping parsed from configuration
+                files.
+
+        Returns:
+            FLMetricsConfigEnvelope: Normalized wrapper for downstream code.
+
+        Raises:
+            TypeError: If ``value`` cannot be converted into a metrics config.
+        """
         if isinstance(value, cls):
             return value
         if isinstance(value, MetricsConfig):
@@ -496,30 +573,37 @@ class FLMetricsConfigEnvelope:
         raise TypeError(msg)
 
     def unwrap(self) -> MetricsConfig:
+        """Expose the underlying :class:`MetricsConfig` instance."""
         return self.metrics
 
     @property
     def optimizer_monitor(self) -> OptimizerMonitorConfig:
+        """Typed accessor for the optimizer monitor section."""
         return self.metrics.optimizer_monitor
 
     @property
     def activation_monitor(self) -> ActivationMonitorConfig:
+        """Typed accessor for the activation monitor section."""
         return self.metrics.activation_monitor
 
     @property
     def lr_monitor(self) -> LRMonitorConfig:
+        """Typed accessor for the learning-rate monitor section."""
         return self.metrics.lr_monitor
 
     @property
     def betas_monitor(self) -> BetasMonitorConfig:
+        """Typed accessor for the optimizer betas monitor section."""
         return self.metrics.betas_monitor
 
     @property
     def vs_monitor(self) -> VSMonitorConfig:
+        """Typed accessor for the quasi-hyperbolic ``v`` monitor section."""
         return self.metrics.vs_monitor
 
     @property
     def hyperparameter_switch(self) -> HyperparameterSwitchConfig:
+        """Typed accessor for the hyperparameter switch configuration."""
         return self.metrics.hyperparameter_switch
 
 
@@ -642,6 +726,14 @@ class S3CheckpointingConfig:
 
     @classmethod
     def from_dict(cls, data: Mapping[str, Any]) -> S3CheckpointingConfig:
+        """Create an S3 checkpointing configuration from a raw mapping.
+
+        Args:
+            data: Mapping containing bucket information and runtime flags.
+
+        Returns:
+            S3CheckpointingConfig: Dataclass populated with the mapping values.
+        """
         run_uuid = data.get("run_uuid")
         remote_checkpoint_folder = data.get("remote_checkpoint_folder")
         upload_staging_folder = data.get("upload_staging_folder")
@@ -672,6 +764,19 @@ class S3CheckpointingConfig:
 
     @classmethod
     def coerce(cls, value: Any) -> S3CheckpointingConfig:
+        """Convert values into :class:`S3CheckpointingConfig` instances.
+
+        Args:
+            value: Either an existing :class:`S3CheckpointingConfig` or a mapping
+                produced by configuration parsing.
+
+        Returns:
+            S3CheckpointingConfig: Normalized configuration with appropriate
+            defaults applied.
+
+        Raises:
+            TypeError: If ``value`` cannot be interpreted as a checkpoint config.
+        """
         if isinstance(value, cls):
             return value
         if isinstance(value, Mapping):
