@@ -63,8 +63,8 @@ __init__.py→[parse_args((self,args: list[str] = sys.argv[1:]))→{config::ensu
 ## DEPENDENCY_PATTERNS
 
 ### EDGE_PATTERNS
-Call: 1 edges
 Contains: 2 edges
+Call: 1 edges
 
 ### CROSS_CLUSTER_FLOW
 
