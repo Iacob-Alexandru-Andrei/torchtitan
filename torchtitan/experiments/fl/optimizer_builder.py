@@ -7,7 +7,8 @@
 
 from __future__ import annotations
 
-from typing import Any, TYPE_CHECKING
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Any
 
 import torch
 
@@ -20,7 +21,10 @@ from torchtitan.experiments.fl.configs.optimizers import (
     DesLocConfig,
     MosaicOptimizerConfig,
 )
-from torchtitan.experiments.fl.desloc import DesLocFTOptimizersContainer
+from torchtitan.experiments.fl.desloc import (
+    DesLocFTOptimizersConfig,
+    DesLocFTOptimizersContainer,
+)
 from torchtitan.experiments.fl.optimizers import (
     ADOPT,
     AggMoAdamW,
@@ -35,6 +39,27 @@ if TYPE_CHECKING:
 
     from torchtitan.components.ft import FTManager
     from torchtitan.distributed import ParallelDims
+
+@dataclass(frozen=True)
+class OptimizerContainerRequest:
+    """Input payload for building a TorchTitan optimizer container."""
+
+    model_parts: list[torch.nn.Module]
+    optimizer_cls: type[Optimizer]
+    optimizer_kwargs: dict[str, Any]
+    config: MosaicOptimizerConfig
+    parallel_dims: ParallelDims
+    ft_manager: FTManager | None
+    param_groups: list[dict[str, Any]] | None
+
+
+@dataclass(frozen=True)
+class DeslocContainerRequest:
+    """Request data for constructing a DES-LOC-enabled optimizer container."""
+
+    base: OptimizerContainerRequest
+    desloc_cfg: DesLocConfig
+
 
 _BASE_OPTIMIZER_CLASSES: dict[str, type[Optimizer]] = {
     "Adam": torch.optim.Adam,
@@ -90,52 +115,6 @@ def _normalize_mosaic_optimizer_config(
 
     return config, extra_kwargs
 
-    optim_in_bwd = optimizer_config.early_step_in_backward
-    if optim_in_bwd:
-        if parallel_dims.ep_enabled:
-            msg = "Optimizers in backward is not supported with Expert Parallel."
-            raise NotImplementedError(msg)
-        if parallel_dims.pp_enabled:
-            msg = "Optimizers in backward is not supported with Pipeline Parallel."
-            raise NotImplementedError(msg)
-        if ft_manager and ft_manager.enabled:
-            msg = "TorchFT is not supported with optimizers in backward."
-            raise NotImplementedError(msg)
-
-    if desloc_enabled and not (ft_manager and ft_manager.enabled):
-        msg = "DES-LOC requires TorchFT to be enabled. Set fault_tolerance.enable to true."
-        raise ValueError(msg)
-
-    name = optimizer_config.name
-    beta1 = optimizer_config.beta1
-    beta2 = optimizer_config.beta2
-
-    optim_implementation = optimizer_config.implementation
-    assert optim_implementation in ["fused", "foreach", "for-loop"]
-
-    optimizer_classes = {
-        "Adam": torch.optim.Adam,
-        "AdamW": torch.optim.AdamW,
-        "ADOPT": ADOPT,
-        "QHADOPT": QHADOPT,
-        "QHAdamW": QHAdamW,
-        "DecoupledAdamW": DecoupledAdamW,
-        "AggMoAdopt": AggMoAdopt,
-        "AggMoAdamW": AggMoAdamW,
-    }
-    if name not in optimizer_classes:
-        msg = f"Optimizer {name} not added."
-        raise NotImplementedError(msg)
-    optimizer_classes[name]
-
-    # For AggMo optimizers, use get_betas_tuple() to construct proper betas
-    (
-        optimizer_config.get_betas_tuple()
-        if name in ["AggMoAdopt", "AggMoAdamW"]
-        else (beta1, beta2)
-    )
-    return None
-
 
 def _build_optimizer_kwargs(
     config: MosaicOptimizerConfig, extra_kwargs: dict[str, Any]
@@ -155,16 +134,12 @@ def _build_optimizer_kwargs(
     return optimizer_kwargs
 
 
-def _build_desloc_container(
-    *,
-    model_parts: list[torch.nn.Module],
-    optimizer_cls: type[Optimizer],
-    optimizer_kwargs: dict[str, Any],
-    desloc_cfg: DesLocConfig,
-    parallel_dims: ParallelDims,
-    ft_manager: FTManager,
-    param_groups: list[dict[str, Any]] | None,
-) -> OptimizersContainer:
+def _build_desloc_container(request: DeslocContainerRequest) -> OptimizersContainer:
+    """Instantiate an optimizer container with DES-LOC synchronization enabled."""
+    parallel_dims = request.base.parallel_dims
+    ft_manager = request.base.ft_manager
+    assert ft_manager is not None  # defensive: enforced by caller
+
     if parallel_dims.ep_enabled:
         msg = "DES-LOC is not supported with Expert Parallel."
         raise NotImplementedError(msg)
@@ -172,94 +147,88 @@ def _build_desloc_container(
         msg = "DES-LOC is not supported with Pipeline Parallel."
         raise NotImplementedError(msg)
 
-    return DesLocFTOptimizersContainer(
-        model_parts,
-        optimizer_cls,
-        optimizer_kwargs,
-        ft_manager.manager,
-        desloc_cfg,
+    desloc_config = DesLocFTOptimizersConfig(
+        model_parts=request.base.model_parts,
+        optimizer_cls=request.base.optimizer_cls,
+        optimizer_kwargs=request.base.optimizer_kwargs,
+        ft_manager=ft_manager.manager,
+        desloc_config=request.desloc_cfg,
         use_ft_optimizer=ft_manager.use_async_quorum,
-        param_groups=param_groups,
+        param_groups=request.base.param_groups,
     )
+    return DesLocFTOptimizersContainer(desloc_config)
 
 
-def _build_optimizer_container(
-    *,
-    model_parts: list[torch.nn.Module],
-    optimizer_cls: type[Optimizer],
-    optimizer_kwargs: dict[str, Any],
-    config: MosaicOptimizerConfig,
-    parallel_dims: ParallelDims,
-    ft_manager: FTManager | None,
-    param_groups: list[dict[str, Any]] | None,
-) -> OptimizersContainer:
-    optim_in_bwd = config.early_step_in_backward
+def _validate_optim_in_backward(request: OptimizerContainerRequest) -> None:
+    """Validate the configuration for optimizers that step during backward."""
+    if not request.config.early_step_in_backward:
+        return
 
-    if optim_in_bwd:
-        if parallel_dims.ep_enabled:
-            msg = "Optimizers in backward is not supported with Expert Parallel."
-            raise NotImplementedError(msg)
-        if parallel_dims.pp_enabled:
-            msg = "Optimizers in backward is not supported with Pipeline Parallel."
-            raise NotImplementedError(msg)
-        if ft_manager and ft_manager.enabled:
-            msg = "TorchFT is not supported with optimizers in backward."
-            raise NotImplementedError(msg)
+    parallel_dims = request.parallel_dims
+    if parallel_dims.ep_enabled:
+        msg = "Optimizers in backward is not supported with Expert Parallel."
+        raise NotImplementedError(msg)
+    if parallel_dims.pp_enabled:
+        msg = "Optimizers in backward is not supported with Pipeline Parallel."
+        raise NotImplementedError(msg)
+    ft_manager = request.ft_manager
+    if ft_manager and ft_manager.enabled:
+        msg = "TorchFT is not supported with optimizers in backward."
+        raise NotImplementedError(msg)
 
+
+def _build_optimizer_container(request: OptimizerContainerRequest) -> OptimizersContainer:
+    """Construct the appropriate optimizer container for the given request."""
+    _validate_optim_in_backward(request)
+
+    config = request.config
     desloc_cfg = config.desloc
+
     if desloc_cfg.enabled:
-        if optim_in_bwd:
-            msg = "DES-LOC does not support optimizers in backward. Disable early_step_in_backward."
+        if config.early_step_in_backward:
+            msg = (
+                "DES-LOC does not support optimizers in backward. "
+                "Disable early_step_in_backward."
+            )
             raise NotImplementedError(msg)
+
+        ft_manager = request.ft_manager
         if ft_manager is None or not ft_manager.enabled:
-            msg = "DES-LOC requires TorchFT to be enabled. Set fault_tolerance.enable to true."
+            msg = (
+                "DES-LOC requires TorchFT to be enabled. "
+                "Set fault_tolerance.enable to true."
+            )
             raise ValueError(msg)
-        # If the configuration was loaded from a file or passed as a dictionary,
-        # desloc_cfg may still be a dict. Convert it to ensure type consistency.
+
         if isinstance(desloc_cfg, dict):  # pragma: no cover - defensive conversion
             desloc_cfg = DesLocConfig(**desloc_cfg)
             config.desloc = desloc_cfg
+
         return _build_desloc_container(
-            model_parts=model_parts,
-            optimizer_cls=optimizer_cls,
-            optimizer_kwargs=optimizer_kwargs,
-            desloc_cfg=desloc_cfg,
-            parallel_dims=parallel_dims,
-            ft_manager=ft_manager,
-            param_groups=param_groups,
+            DeslocContainerRequest(base=request, desloc_cfg=desloc_cfg)
         )
 
-    if desloc_cfg is not None and desloc_cfg.enabled and ft_manager:
-        return DesLocFTOptimizersContainer(
-            model_parts,
-            optimizer_cls,
-            optimizer_kwargs,
-            ft_manager.manager,
-            desloc_cfg,
-            use_ft_optimizer=ft_manager.use_async_quorum,
-            param_groups=param_groups,
-        )
-
-    if optim_in_bwd:
+    if config.early_step_in_backward:
         return OptimizersInBackwardContainer(
-            model_parts, optimizer_cls, optimizer_kwargs
+            request.model_parts, request.optimizer_cls, request.optimizer_kwargs
         )
 
+    ft_manager = request.ft_manager
     if ft_manager and ft_manager.enabled:
         return FTOptimizersContainer(
-            model_parts,
-            optimizer_cls,
-            optimizer_kwargs,
+            request.model_parts,
+            request.optimizer_cls,
+            request.optimizer_kwargs,
             ft_manager.manager,
             use_ft_optimizer=ft_manager.use_async_quorum,
-            param_groups=param_groups,
+            param_groups=request.param_groups,
         )
 
     return OptimizersContainer(
-        model_parts,
-        optimizer_cls,
-        optimizer_kwargs,
-        param_groups=param_groups,
+        request.model_parts,
+        request.optimizer_cls,
+        request.optimizer_kwargs,
+        param_groups=request.param_groups,
     )
 
 
@@ -278,11 +247,13 @@ def build_mosaic_optimizers(
     optimizer_kwargs = _build_optimizer_kwargs(normalized_config, extra_kwargs)
 
     return _build_optimizer_container(
-        model_parts=model_parts,
-        optimizer_cls=optimizer_cls,
-        optimizer_kwargs=optimizer_kwargs,
-        config=normalized_config,
-        parallel_dims=parallel_dims,
-        ft_manager=ft_manager,
-        param_groups=param_groups,
+        OptimizerContainerRequest(
+            model_parts=model_parts,
+            optimizer_cls=optimizer_cls,
+            optimizer_kwargs=optimizer_kwargs,
+            config=normalized_config,
+            parallel_dims=parallel_dims,
+            ft_manager=ft_manager,
+            param_groups=param_groups,
+        )
     )

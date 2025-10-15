@@ -10,7 +10,8 @@ from __future__ import annotations
 import contextlib
 
 import math
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterator, Mapping, Sequence
+from dataclasses import dataclass
 from enum import Enum
 from typing import Any, TYPE_CHECKING
 
@@ -31,6 +32,28 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
     from torch.distributed.device_mesh import DeviceMesh
+    from torch.optim import Optimizer
+
+    from torchtitan.experiments.fl.configs.config import (
+        ActivationMonitorConfig,
+        BetasMonitorConfig,
+        HyperparameterSwitchConfig,
+        LRMonitorConfig,
+        OptimizerMonitorConfig,
+        VSMonitorConfig,
+    )
+
+
+@dataclass(frozen=True)
+class HyperparameterSwitchParams:
+    """Configuration payload for :class:`HyperparameterSwitchCallback`."""
+
+    enabled: bool
+    steps: Sequence[int]
+    new_vs: Sequence[float] | None
+    new_betas: Sequence[float] | None
+    reset_momenta: Sequence[str]
+    log_metrics: bool
 
 
 class AggregationType(Enum):
@@ -160,12 +183,14 @@ def collect_unigram_metrics(*, reset: bool = True) -> tuple[float, int]:
 
 
 def reset_unigram_metrics() -> None:
+    """Reset tracked unigram loss accumulators to zero."""
     for metric in _UNIGRAM_METRICS:
         metric.sum_loss.zero_()
         metric.total_items.zero_()
 
 
 def update_unigram_metrics(labels: Tensor) -> None:
+    """Update registered unigram metrics with the latest batch labels."""
     if not _UNIGRAM_METRICS:
         return
     for metric in _UNIGRAM_METRICS:
@@ -262,6 +287,7 @@ class ActivationMonitor(Callback):
         self._model_ref: torch.nn.Module | None = None
 
     def setup(self, context: CallbackSetupContext) -> None:
+        """Register activation hooks when the first model shard is available."""
         if not self.enabled or self._registered:
             return
         if not context.model_parts:
@@ -271,11 +297,13 @@ class ActivationMonitor(Callback):
         self._model_ref = model
 
     def on_step_end(self, context: CallbackStepContext) -> None:
+        """Finalize metrics at the end of each logging interval."""
         if not self.enabled or not self._registered:
             return
         self.finalize(context.step, context.logger, context.mesh)
 
     def close(self) -> None:
+        """Remove hooks and release references when training ends."""
         if self._pre_handle is not None:
             self._pre_handle.remove()
             self._pre_handle = None
@@ -630,6 +658,7 @@ class OptimizerMonitor(Callback):
         self._model_ref: torch.nn.Module | None = None
 
     def setup(self, context: CallbackSetupContext) -> None:
+        """Store a reference to the first model shard for later logging."""
         if context.model_parts:
             self._model_ref = context.model_parts[0]
 
@@ -810,6 +839,7 @@ class LRMonitor(Callback):
         self.enabled = enabled
 
     def on_step_end(self, context: CallbackStepContext) -> None:
+        """Log the current learning rates when the interval is reached."""
         if not self.enabled or self.interval <= 0:
             return
         if context.optimizers is None:
@@ -838,33 +868,53 @@ class BetasMonitor(Callback):
         self.enabled = enabled
 
     def on_step_end(self, context: CallbackStepContext) -> None:
-        if not self.enabled or self.interval <= 0:
-            return
-        if context.optimizers is None:
-            return
-        if context.step % self.interval != 0:
+        """Record beta hyperparameters for each optimizer group when enabled."""
+        if not self._should_log(context):
             return
 
-        metrics: dict[str, float] = {}
-        for optimizer in context.optimizers:
-            name = optimizer.__class__.__name__
-            for idx, group in enumerate(optimizer.param_groups):
-                betas = group.get("betas")
-                if betas is None:
-                    continue
-                if isinstance(betas, Sequence) and not isinstance(betas, (str, bytes)):
-                    beta_values = list(betas)
-                else:
-                    beta_values = [betas]
-                for beta_idx, beta_value in enumerate(beta_values, start=1):
-                    if isinstance(beta_value, torch.Tensor):
-                        beta_scalar = float(beta_value.detach().item())
-                    else:
-                        beta_scalar = float(beta_value)
-                    metrics[f"beta{beta_idx}-{name}/group{idx}"] = beta_scalar
-
+        metrics = dict(self._collect_metrics(context.optimizers))
         if metrics:
             context.logger.log(metrics, context.step)
+
+    def _should_log(self, context: CallbackStepContext) -> bool:
+        """Return ``True`` when beta metrics should be emitted for the step."""
+        if not self.enabled or self.interval <= 0:
+            return False
+        if context.optimizers is None:
+            return False
+        return context.step % self.interval == 0
+
+    def _collect_metrics(
+        self, optimizers: Sequence[torch.optim.Optimizer]
+    ) -> Iterator[tuple[str, float]]:
+        for name, group_idx, group in self._iter_param_groups(optimizers):
+            betas = group.get("betas")
+            if betas is None:
+                continue
+            for beta_idx, beta_value in enumerate(self._iter_values(betas), start=1):
+                yield (
+                    f"beta{beta_idx}-{name}/group{group_idx}",
+                    self._as_float(beta_value),
+                )
+
+    def _iter_param_groups(
+        self, optimizers: Sequence[torch.optim.Optimizer]
+    ) -> Iterator[tuple[str, int, dict[str, Any]]]:
+        for optimizer in optimizers:
+            name = optimizer.__class__.__name__
+            for group_idx, group in enumerate(optimizer.param_groups):
+                yield name, group_idx, group
+
+    def _iter_values(self, betas: Any) -> Iterator[Any]:
+        if isinstance(betas, Sequence) and not isinstance(betas, (str, bytes)):
+            yield from betas
+        else:
+            yield betas
+
+    def _as_float(self, value: Any) -> float:
+        if isinstance(value, torch.Tensor):
+            return float(value.detach().item())
+        return float(value)
 
 
 class VSMonitor(Callback):
@@ -875,6 +925,7 @@ class VSMonitor(Callback):
         self.enabled = enabled
 
     def on_step_end(self, context: CallbackStepContext) -> None:
+        """Log quasi-hyperbolic ``v`` parameters at the configured cadence."""
         if not self.enabled or self.interval <= 0:
             return
         if context.optimizers is None:
@@ -909,36 +960,46 @@ class VSMonitor(Callback):
 class HyperparameterSwitchCallback(Callback):
     """Switch optimizer betas/vs at configured steps and optionally reset momenta."""
 
-    def __init__(
-        self,
-        *,
-        enabled: bool,
-        steps: Sequence[int],
-        new_vs: Sequence[float] | None,
-        new_betas: Sequence[float] | None,
-        reset_momenta: Sequence[str],
-        log_metrics: bool,
-    ) -> None:
-        self.enabled = enabled and bool(steps)
-        self.steps = {int(step) for step in steps if step >= 0}
-        self.new_vs = tuple(float(v) for v in new_vs) if new_vs is not None else None
-        self.new_betas = (
-            tuple(float(b) for b in new_betas) if new_betas is not None else None
+    def __init__(self, params: HyperparameterSwitchParams) -> None:
+        self.enabled = params.enabled and bool(params.steps)
+        self.steps = {int(step) for step in params.steps if step >= 0}
+        self.new_vs = (
+            tuple(float(v) for v in params.new_vs)
+            if params.new_vs is not None
+            else None
         )
-        self.reset_momenta = tuple(reset_momenta)
-        self.log_metrics = log_metrics
+        self.new_betas = (
+            tuple(float(b) for b in params.new_betas)
+            if params.new_betas is not None
+            else None
+        )
+        self.reset_momenta = tuple(params.reset_momenta)
+        self.log_metrics = params.log_metrics
         self._applied_steps: set[int] = set()
 
     def on_step_end(self, context: CallbackStepContext) -> None:
-        if not self.enabled:
+        """Apply configured hyperparameter switches when their step is reached."""
+        if not self._should_apply(context.step):
             return
-        step = context.step
-        if step not in self.steps or step in self._applied_steps:
-            return
+
         optimizers = context.optimizers
         if optimizers is None:
             return
 
+        self._apply_switches(optimizers)
+        self._log_switch_metrics(context)
+        self._applied_steps.add(context.step)
+
+    def _should_apply(self, step: int) -> bool:
+        """Return ``True`` if the switch logic should run for the given step."""
+        if not self.enabled:
+            return False
+        if step not in self.steps:
+            return False
+        return step not in self._applied_steps
+
+    def _apply_switches(self, optimizers: Sequence[Optimizer]) -> None:
+        """Mutate optimizer hyperparameters according to the configured switches."""
         for optimizer in optimizers:
             if self.new_vs is not None:
                 self._update_group_values(optimizer.param_groups, "vs", self.new_vs)
@@ -949,18 +1010,20 @@ class HyperparameterSwitchCallback(Callback):
             if self.reset_momenta:
                 self._reset_momenta(optimizer.state)
 
-        if self.log_metrics:
-            payload: dict[str, float] = {}
-            if self.new_vs is not None:
-                for idx, value in enumerate(self.new_vs):
-                    payload[f"hyper_switch/v{idx}"] = value
-            if self.new_betas is not None:
-                for idx, value in enumerate(self.new_betas, start=1):
-                    payload[f"hyper_switch/beta{idx}"] = value
-            if payload:
-                context.logger.log(payload, step)
+    def _log_switch_metrics(self, context: CallbackStepContext) -> None:
+        """Emit logging payload summarizing the applied hyperparameter switches."""
+        if not self.log_metrics:
+            return
 
-        self._applied_steps.add(step)
+        payload: dict[str, float] = {}
+        if self.new_vs is not None:
+            for idx, value in enumerate(self.new_vs):
+                payload[f"hyper_switch/v{idx}"] = value
+        if self.new_betas is not None:
+            for idx, value in enumerate(self.new_betas, start=1):
+                payload[f"hyper_switch/beta{idx}"] = value
+        if payload:
+            context.logger.log(payload, context.step)
 
     def _update_group_values(
         self, param_groups: list[dict[str, Any]], key: str, values: tuple[float, ...]
@@ -1015,11 +1078,6 @@ class FLMetricsProcessor(MetricsProcessor):
 
         optimizer_config = fl_metrics_config.optimizer_monitor
         activation_config = fl_metrics_config.activation_monitor
-        activation_enabled = activation_config.enabled or (
-            activation_config.interval > 0
-        )
-        activation_interval = activation_config.interval
-        ignore_types = activation_config.ignore_module_types
         lr_config = fl_metrics_config.lr_monitor
         betas_config = fl_metrics_config.betas_monitor
         vs_config = fl_metrics_config.vs_monitor
@@ -1027,82 +1085,109 @@ class FLMetricsProcessor(MetricsProcessor):
 
         self.callbacks: list[Callback] = []
 
-        if optimizer_config.interval > 0:
-            self.optimizer_monitor: OptimizerMonitor | None = OptimizerMonitor(
-                interval=optimizer_config.interval,
-                only_global=optimizer_config.only_global,
-                log_optimizer_metrics=optimizer_config.log_metrics,
-            )
-            self.callbacks.append(self.optimizer_monitor)
-        else:
-            self.optimizer_monitor = None
+        self.optimizer_monitor = self._init_optimizer_monitor(optimizer_config)
+        self.activation_monitor = self._init_activation_monitor(activation_config)
+        self.lr_monitor = self._init_lr_monitor(lr_config)
+        self.betas_monitor = self._init_betas_monitor(betas_config)
+        self.vs_monitor = self._init_vs_monitor(vs_config)
+        self.hyperparameter_switch = self._init_hyperparameter_switch(
+            hyper_switch_config
+        )
 
-        if activation_enabled:
-            self.activation_monitor: ActivationMonitor | None = ActivationMonitor(
-                interval=activation_interval,
-                ignore_module_types=ignore_types if ignore_types else (),
-                gradient_accumulation_steps=activation_config.gradient_accumulation_steps,
-                enabled_metrics=activation_config.enabled_metrics,
-            )
-            self.callbacks.append(self.activation_monitor)
-        else:
-            self.activation_monitor = None
+        self._callbacks_setup_done = False
 
-        if lr_config.enabled and lr_config.interval > 0:
-            self.lr_monitor: LRMonitor | None = LRMonitor(
-                interval=lr_config.interval,
-                enabled=lr_config.enabled,
-            )
-            self.callbacks.append(self.lr_monitor)
-        else:
-            self.lr_monitor = None
+    def _init_optimizer_monitor(
+        self, optimizer_config: OptimizerMonitorConfig
+    ) -> OptimizerMonitor | None:
+        if optimizer_config.interval <= 0:
+            return None
+        monitor = OptimizerMonitor(
+            interval=optimizer_config.interval,
+            only_global=optimizer_config.only_global,
+            log_optimizer_metrics=optimizer_config.log_metrics,
+        )
+        self.callbacks.append(monitor)
+        return monitor
 
-        if betas_config.enabled and betas_config.interval > 0:
-            self.betas_monitor: BetasMonitor | None = BetasMonitor(
-                interval=betas_config.interval,
-                enabled=betas_config.enabled,
-            )
-            self.callbacks.append(self.betas_monitor)
-        else:
-            self.betas_monitor = None
+    def _init_activation_monitor(
+        self, activation_config: ActivationMonitorConfig
+    ) -> ActivationMonitor | None:
+        activation_enabled = activation_config.enabled or (
+            activation_config.interval > 0
+        )
+        if not activation_enabled:
+            return None
+        monitor = ActivationMonitor(
+            interval=activation_config.interval,
+            ignore_module_types=(
+                activation_config.ignore_module_types
+                if activation_config.ignore_module_types
+                else ()
+            ),
+            gradient_accumulation_steps=activation_config.gradient_accumulation_steps,
+            enabled_metrics=activation_config.enabled_metrics,
+        )
+        self.callbacks.append(monitor)
+        return monitor
 
-        if vs_config.enabled and vs_config.interval > 0:
-            self.vs_monitor: VSMonitor | None = VSMonitor(
-                interval=vs_config.interval,
-                enabled=vs_config.enabled,
-            )
-            self.callbacks.append(self.vs_monitor)
-        else:
-            self.vs_monitor = None
+    def _init_lr_monitor(self, lr_config: LRMonitorConfig) -> LRMonitor | None:
+        if not (lr_config.enabled and lr_config.interval > 0):
+            return None
+        monitor = LRMonitor(
+            interval=lr_config.interval,
+            enabled=lr_config.enabled,
+        )
+        self.callbacks.append(monitor)
+        return monitor
 
-        if hyper_switch_config.enabled and hyper_switch_config.steps:
-            steps = tuple(int(step) for step in hyper_switch_config.steps)
-            new_vs = (
+    def _init_betas_monitor(
+        self, betas_config: BetasMonitorConfig
+    ) -> BetasMonitor | None:
+        if not (betas_config.enabled and betas_config.interval > 0):
+            return None
+        monitor = BetasMonitor(
+            interval=betas_config.interval,
+            enabled=betas_config.enabled,
+        )
+        self.callbacks.append(monitor)
+        return monitor
+
+    def _init_vs_monitor(self, vs_config: VSMonitorConfig) -> VSMonitor | None:
+        if not (vs_config.enabled and vs_config.interval > 0):
+            return None
+        monitor = VSMonitor(
+            interval=vs_config.interval,
+            enabled=vs_config.enabled,
+        )
+        self.callbacks.append(monitor)
+        return monitor
+
+    def _init_hyperparameter_switch(
+        self, hyper_switch_config: HyperparameterSwitchConfig
+    ) -> HyperparameterSwitchCallback | None:
+        if not (hyper_switch_config.enabled and hyper_switch_config.steps):
+            return None
+        params = HyperparameterSwitchParams(
+            enabled=hyper_switch_config.enabled,
+            steps=tuple(int(step) for step in hyper_switch_config.steps),
+            new_vs=(
                 tuple(hyper_switch_config.new_vs)
                 if hyper_switch_config.new_vs is not None
                 else None
-            )
-            new_betas = (
+            ),
+            new_betas=(
                 tuple(hyper_switch_config.new_betas)
                 if hyper_switch_config.new_betas is not None
                 else None
-            )
-            reset_momenta = tuple(hyper_switch_config.reset_momenta)
-            self.hyperparameter_switch: HyperparameterSwitchCallback | None = (
-                HyperparameterSwitchCallback(
-                    enabled=hyper_switch_config.enabled,
-                    steps=steps,
-                    new_vs=new_vs,
-                    new_betas=new_betas,
-                    reset_momenta=reset_momenta,
-                    log_metrics=hyper_switch_config.log_metrics,
-                )
-            )
-            self.callbacks.append(self.hyperparameter_switch)
-        else:
-            self.hyperparameter_switch = None
-
-        self._callbacks_setup_done = False
+            ),
+            reset_momenta=tuple(hyper_switch_config.reset_momenta),
+            log_metrics=hyper_switch_config.log_metrics,
+        )
+        switch_callback = HyperparameterSwitchCallback(params)
+        if not switch_callback.enabled:
+            return None
+        self.callbacks.append(switch_callback)
+        return switch_callback
 
     def should_log(self, step: int) -> bool:
         """Determine if metrics should be logged at the current step.
@@ -1239,6 +1324,7 @@ class FLMetricsProcessor(MetricsProcessor):
         self._run_step_callbacks(step, mesh)
 
     def log_validation(self, loss: float, step: int) -> None:
+        """Log validation metrics and run validation-specific callbacks."""
         super().log_validation(loss, step)
         mesh = (
             self.parallel_dims.world_mesh["dp_cp"]
@@ -1252,6 +1338,7 @@ class FLMetricsProcessor(MetricsProcessor):
         self._run_validation_callbacks(loss, step)
 
     def close(self) -> None:
+        """Close registered callbacks and flush any pending metrics."""
         for callback in self.callbacks:
             callback.close()
         super().close()

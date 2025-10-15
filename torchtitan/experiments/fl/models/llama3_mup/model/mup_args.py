@@ -1,11 +1,5 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates.
-# All rights reserved.
-#
-# This source code is licensed under the BSD-style license found in the
-# LICENSE file in the root directory of this source tree.
-#
-# Copyright (c) Meta Platforms, Inc. All Rights Reserved.
-
+"""Dataclasses defining MuP-specific configuration for LLaMA models."""
 
 from dataclasses import dataclass, field
 from typing import Any
@@ -17,6 +11,8 @@ from torchtitan.models.llama3.model.args import (
 
 @dataclass
 class MuPConfig:
+    """Options controlling MuP/CompleteP behaviour."""
+
     mup_enabled: bool = False
     mup_disable_attention_scaling: bool = True
     mup_disable_hidden_lr_scaling: bool = False
@@ -31,6 +27,8 @@ class MuPConfig:
 
 @dataclass
 class ModelInitConfig:
+    """Initialization overrides for MuP-tuned models."""
+
     init_std: float = 0.02
     emb_init_std: float | None = None
     output_mult: float | None = None
@@ -38,6 +36,8 @@ class ModelInitConfig:
 
 @dataclass
 class TransformerModelArgs(BaseTransformerModelArgs):
+    """Extended transformer arguments adding MuP-specific sections."""
+
     # muP / CompleteP
     use_embedding_norm: bool = False
     use_peri_norm: bool = False
@@ -45,6 +45,7 @@ class TransformerModelArgs(BaseTransformerModelArgs):
     mup_config: dict[str, Any] = field(default_factory=dict)
     init_config: dict[str, Any] = field(default_factory=dict)
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
+        """Instantiate strongly typed helpers from the raw configuration maps."""
         self.mup_config_obj = MuPConfig(**self.mup_config)
         self.init_config_obj = ModelInitConfig(**self.init_config)

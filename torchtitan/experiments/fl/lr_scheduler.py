@@ -4,10 +4,13 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 
+"""Learning rate scheduling helpers tailored for FL MuP experiments."""
+
 from __future__ import annotations
 
 import functools
 import math
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from torchtitan.components.lr_scheduler import LRSchedulersContainer
@@ -21,42 +24,49 @@ if TYPE_CHECKING:
     from torchtitan.experiments.fl.configs.config import FLLRSchedulerConfig
 
 
+@dataclass(frozen=True)
+class WarmupStableDecayParams:
+    """Parameters controlling the warmup-stable-decay LR schedule."""
+
+    warmup_steps: int
+    stable_steps: int
+    decay_steps: int
+    lr_decay_type: str
+    min_lr_factor: float
+
+
 def _linear_warmup_stable_decay(
-    current_step: int,
-    *,
-    warmup_steps: int,
-    stable_steps: int,
-    decay_steps: int,
-    lr_decay_type: str,
-    min_lr_factor: float,
+    current_step: int, *, params: WarmupStableDecayParams
 ) -> float:
     """Matches the default TorchTitan warmup-stable-decay schedule."""
-    warmup_stable_steps = warmup_steps + stable_steps
-    if current_step < warmup_steps:
+    warmup_stable_steps = params.warmup_steps + params.stable_steps
+    if current_step < params.warmup_steps:
         current_step += 1
-        if warmup_steps == 0:
+        if params.warmup_steps == 0:
             return 1.0
-        return float(current_step / warmup_steps)
+        return float(current_step / params.warmup_steps)
 
     if current_step < warmup_stable_steps:
         return 1.0
 
     current_step += 1
-    if decay_steps == 0:
+    if params.decay_steps == 0:
         return 1.0
 
-    progress = float(current_step - warmup_stable_steps) / decay_steps
-    if lr_decay_type == "linear":
+    progress = float(current_step - warmup_stable_steps) / params.decay_steps
+    if params.lr_decay_type == "linear":
         decay_value = 1 - progress
-    elif lr_decay_type == "sqrt":
+    elif params.lr_decay_type == "sqrt":
         decay_value = 1 - math.sqrt(progress)
-    elif lr_decay_type == "cosine":
+    elif params.lr_decay_type == "cosine":
         decay_value = 0.5 * (1.0 + math.cos(math.pi * progress))
     else:
-        msg = f"Unknown decay type '{lr_decay_type}'. Expected linear, sqrt, or cosine."
+        msg = (
+            f"Unknown decay type '{params.lr_decay_type}'. Expected linear, sqrt, or cosine."
+        )
         raise ValueError(msg)
 
-    return min_lr_factor + (1 - min_lr_factor) * decay_value
+    return params.min_lr_factor + (1 - params.min_lr_factor) * decay_value
 
 
 def build_fl_lr_schedulers(
@@ -93,13 +103,15 @@ def build_fl_lr_schedulers(
         decay_steps = training_steps - warmup_steps
 
     stable_steps = training_steps + 1 - warmup_steps - decay_steps
-    base_lambda: Callable[[int], float] = functools.partial(
-        _linear_warmup_stable_decay,
+    schedule_params = WarmupStableDecayParams(
         warmup_steps=warmup_steps,
         stable_steps=stable_steps,
         decay_steps=decay_steps,
         lr_decay_type=lr_scheduler_config.decay_type,
         min_lr_factor=lr_scheduler_config.min_lr_factor,
+    )
+    base_lambda: Callable[[int], float] = functools.partial(
+        _linear_warmup_stable_decay, params=schedule_params
     )
 
     switch_step = lr_scheduler_config.switch_step
