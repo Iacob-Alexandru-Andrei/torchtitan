@@ -5,6 +5,7 @@
 # LICENSE file in the root directory of this source tree.
 
 import importlib
+import math
 import os
 import time
 from datetime import timedelta
@@ -551,12 +552,12 @@ class Trainer(torch.distributed.checkpoint.stateful.Stateful):
         if not self.metrics_processor.should_log(self.step):
             return
 
-        local_loss = loss.detach().item()
+        local_loss_value = loss.detach().item()
 
         if parallel_dims.dp_cp_enabled:
             loss = loss.detach()
             ft_pg = self.ft_manager.loss_sync_pg
-            global_avg_loss, global_max_loss, global_ntokens_seen = (
+            global_avg_loss_raw, global_max_loss_raw, global_ntokens_seen_raw = (
                 dist_utils.dist_mean(loss, parallel_dims.world_mesh["dp_cp"], ft_pg),
                 dist_utils.dist_max(loss, parallel_dims.world_mesh["dp_cp"], ft_pg),
                 dist_utils.dist_sum(
@@ -568,19 +569,53 @@ class Trainer(torch.distributed.checkpoint.stateful.Stateful):
                 ),
             )
         else:
-            global_avg_loss = global_max_loss = loss.detach().item()
-            global_ntokens_seen = self.ntokens_seen
+            global_avg_loss_raw = global_max_loss_raw = local_loss_value
+            global_ntokens_seen_raw = self.ntokens_seen
+
+        def _to_float(value: float | torch.Tensor) -> float:
+            if isinstance(value, torch.Tensor):
+                return value.detach().item()
+            return float(value)
+
+        def _to_int(value: int | torch.Tensor) -> int:
+            if isinstance(value, torch.Tensor):
+                return int(value.detach().item())
+            return int(value)
+
+        def _safe_perplexity(loss_scalar: float) -> float:
+            if not math.isfinite(loss_scalar):
+                return float("nan")
+            try:
+                return math.exp(loss_scalar)
+            except OverflowError:
+                return float("inf")
+
+        global_avg_loss_value = _to_float(global_avg_loss_raw)
+        global_max_loss_value = _to_float(global_max_loss_raw)
+        global_ntokens_seen_value = _to_int(global_ntokens_seen_raw)
+        grad_norm_value = (
+            grad_norm.item()
+            if isinstance(grad_norm, torch.Tensor)
+            else float(grad_norm)
+        )
 
         extra_metrics = {
-            "n_tokens_seen": global_ntokens_seen,
+            "n_tokens_seen": global_ntokens_seen_value,
             "lr": lr,
-            "local_loss": local_loss,
+            "local_loss": local_loss_value,
+            "loss_metrics/local_perplexity": _safe_perplexity(local_loss_value),
+            "loss_metrics/global_avg_perplexity": _safe_perplexity(
+                global_avg_loss_value
+            ),
+            "loss_metrics/global_max_perplexity": _safe_perplexity(
+                global_max_loss_value
+            ),
         }
         self.metrics_processor.log(
             self.step,
-            global_avg_loss,
-            global_max_loss,
-            grad_norm.item(),
+            global_avg_loss_value,
+            global_max_loss_value,
+            grad_norm_value,
             extra_metrics=extra_metrics,
         )
 

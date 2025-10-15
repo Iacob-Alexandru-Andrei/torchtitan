@@ -19,13 +19,13 @@ from torchtitan.models.llama3.model.args import (
 class MuPConfig:
     """Options controlling MuP/CompleteP behaviour."""
 
-    mup_enabled: bool = False
+    mup_enabled: bool = True
     mup_disable_attention_scaling: bool = True
     mup_disable_hidden_lr_scaling: bool = False
     mup_width_multiplier: float = 1.0
     mup_input_alpha: float = 1.0
     mup_output_alpha: float = 1.0
-    completep_depth_alpha_enabled: bool = False
+    completep_depth_alpha_enabled: bool = True
     completep_depth_multiplier: float = 1.0
     completep_depth_alpha_exp: float = 1.0
     completep_eps_scaling_enabled: bool = True
@@ -36,7 +36,7 @@ class ModelInitConfig:
     """Initialization overrides for MuP-tuned models."""
 
     init_std: float = 0.02
-    emb_init_std: float | None = None
+    emb_init_std: float | None = 0.02
     output_mult: float | None = None
 
 
@@ -45,9 +45,9 @@ class TransformerModelArgs(BaseTransformerModelArgs):
     """Extended transformer arguments adding MuP-specific sections."""
 
     # muP / CompleteP
-    use_embedding_norm: bool = False
-    use_peri_norm: bool = False
-    tie_word_embeddings: bool = False
+    use_embedding_norm: bool = True
+    use_peri_norm: bool = True
+    tie_word_embeddings: bool = True
     mup_config: dict[str, Any] = field(default_factory=dict)
     init_config: dict[str, Any] = field(default_factory=dict)
 

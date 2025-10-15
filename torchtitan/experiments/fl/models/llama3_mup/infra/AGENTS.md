@@ -48,7 +48,7 @@ You are analyzing a codebase dependency graph optimized for AI understanding. Th
 ---
 
 # CODE_GRAPH
-NODES:6 EDGES:0
+NODES:11 EDGES:1
 
 ## DIRECTORY_TREE
 ROOT: torchtitan/experiments/fl/models/llama3_mup/infra/
@@ -56,13 +56,14 @@ ROOT: torchtitan/experiments/fl/models/llama3_mup/infra/
 ## ARCHITECTURAL_CLUSTERS
 
 ### DATA_MODELS
-NODES:6 CALL_DEPTH:1
+NODES:11 CALL_DEPTH:2
 
-__init__.py→[] parallelize.py→[parallelize_llama_mup((model: nn.Module,parallel_dims: ParallelDims,job_config: JobConfig,))] 
+__init__.py→[] parallelize.py→[parallelize_llama_mup((model: Transformer,parallel_dims: ParallelDims,job_config: JobConfig,))→{_apply_mup_tp},_apply_mup_tp((model: Transformer,tp_mesh: DeviceMesh,loss_parallel: bool,enable_float8_tensorwise_tp: bool,))] 
 
 ## DEPENDENCY_PATTERNS
 
 ### EDGE_PATTERNS
+Call: 1 edges
 
 ### CROSS_CLUSTER_FLOW
 

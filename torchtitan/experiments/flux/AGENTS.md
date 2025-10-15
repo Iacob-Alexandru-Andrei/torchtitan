@@ -78,8 +78,8 @@ __init__.py→[get_train_spec(void)] args.py→[] autoencoder.py→[forward((sel
 ## DEPENDENCY_PATTERNS
 
 ### EDGE_PATTERNS
-Call: 47 edges
 Contains: 74 edges
+Call: 47 edges
 
 ### CROSS_CLUSTER_FLOW
 TESTS→UTILITY_LAYER: 6

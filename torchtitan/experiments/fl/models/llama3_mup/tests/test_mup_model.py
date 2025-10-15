@@ -172,6 +172,16 @@ class TestMuPLlamaModel(unittest.TestCase):
         with pytest.raises(ValueError, match="DES-LOC requires TorchFT"):
             build_mosaic_optimizers([self.model], config, dims)
 
+    def test_tie_word_embeddings_shares_parameter(self) -> None:
+        """When enabled, the LM head must reuse the token embedding weights."""
+        tied_args = dataclass_replace(self.model_args, tie_word_embeddings=True)
+        tied_args.__post_init__()
+        model = Transformer(tied_args)
+
+        assert model.output is not None
+        assert model.tok_embeddings is not None
+        assert model.output.weight is model.tok_embeddings.weight
+
 
 if __name__ == "__main__":
     unittest.main()

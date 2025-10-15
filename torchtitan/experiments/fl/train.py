@@ -29,6 +29,7 @@ import torch
 
 from torchtitan.experiments.fl.configs import MosaicConfigManager
 from torchtitan.experiments.fl.ft_override import configure_desloc
+from torchtitan.experiments.fl.ft_utils import ensure_torchft_init_sync
 from torchtitan.experiments.fl.s3_checkpoint import (
     get_s3_checkpoint_wrapper_factory,
     S3CheckpointWrapper,
@@ -76,6 +77,7 @@ def main() -> None:  # noqa: C901, PLR0912, PLR0915
     try:
         with configure_desloc(job_config):
             trainer = Trainer(job_config)
+            ensure_torchft_init_sync(trainer)
 
             checkpointer = trainer.checkpointer
             ft_manager = getattr(checkpointer, "ft_manager", None)

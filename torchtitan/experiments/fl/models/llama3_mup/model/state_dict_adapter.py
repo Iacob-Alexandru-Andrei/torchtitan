@@ -6,6 +6,9 @@
 
 """State dict adapter bridging MuP LLaMA3 checkpoints and TorchTitan."""
 
+import re
+from typing import Any
+
 from torchtitan.models.llama3.model.state_dict_adapter import Llama3StateDictAdapter
 from .mup_args import TransformerModelArgs
 
@@ -69,3 +72,21 @@ class Llama3MuPStateDictAdapter(Llama3StateDictAdapter):
                 "model.layers.{}.post_ffn_norm.weight": None,  # Not in HF format
             }
         )
+
+        self._mup_only_patterns = (
+            re.compile(r"layers\.\d+\.post_attn_norm\.weight"),
+            re.compile(r"layers\.\d+\.post_ffn_norm\.weight"),
+        )
+
+    def to_hf(self, state_dict: dict[str, Any]) -> dict[str, Any]:
+        """Drop MuP-only tensors before delegating to the base adapter."""
+
+        def _is_mup_only(key: str) -> bool:
+            if key == "embedding_norm.weight":
+                return True
+            return any(pattern.fullmatch(key) for pattern in self._mup_only_patterns)
+
+        filtered_state_dict = {
+            k: v for k, v in state_dict.items() if not _is_mup_only(k)
+        }
+        return super().to_hf(filtered_state_dict)
