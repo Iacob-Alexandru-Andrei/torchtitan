@@ -27,8 +27,10 @@ import torch
 from torchdata.stateful_dataloader import StatefulDataLoader
 
 from torchtitan.experiments.fl.metrics import (
-    add_unigram_metric,
     PureUnigramCrossEntropy,
+    UnigramMetricHandle,
+    UnigramMetricManager,
+    get_or_create_unigram_manager,
 )
 
 try:
@@ -118,6 +120,7 @@ class UnigramSetupResult:
 
     collate_fn: Callable
     group_key: str | None = None
+    handle: UnigramMetricHandle | None = None
 
 
 @dataclass(frozen=True)
@@ -129,6 +132,7 @@ class ParallelDataLoaderRequest:
     runtime: MosaicRuntimeConfig
     collate_fn: Callable | None = None
     group_key: str | None = None
+    unigram_handle: UnigramMetricHandle | None = None
 
 
 @dataclass(frozen=True)
@@ -892,11 +896,14 @@ def _setup_unigram_metric(
     job_config: MosaicJobConfig,
     split: str,
     tokenizer: BaseTokenizer,
+    manager: UnigramMetricManager | None = None,
 ) -> UnigramSetupResult:
     """Build and register unigram metrics for the current stream subset."""
     collate_fn: Callable = titan_collate_fn
     if not job_config.unigram_metric.enable:
         return UnigramSetupResult(collate_fn=collate_fn, group_key=None)
+
+    unigram_manager = manager or get_or_create_unigram_manager(job_config)
 
     group_label = (
         f"group_{assignment.group_index}"
@@ -928,10 +935,12 @@ def _setup_unigram_metric(
         raise RuntimeError(msg) from exc
 
     if unigram_metric is not None:
-        add_unigram_metric(unigram_metric)
-        return UnigramSetupResult(collate_fn=collate_fn, group_key=unigram_group_key)
+        handle = unigram_manager.register(unigram_metric, unigram_group_key)
+        return UnigramSetupResult(
+            collate_fn=collate_fn, group_key=unigram_group_key, handle=handle
+        )
 
-    return UnigramSetupResult(collate_fn=collate_fn, group_key=None)
+    return UnigramSetupResult(collate_fn=collate_fn, group_key=None, handle=None)
 
 
 def _build_unigram_metric_for_group(
@@ -1077,6 +1086,8 @@ class MosaicParallelAwareDataloader(StatefulDataLoader, BaseDataLoader):
             drop_last=runtime.drop_last,
         )
         self._rank_id = f"dp_rank_{request.dp_rank}"
+        self.unigram_metric_handle = request.unigram_handle
+        self.unigram_metric_group = request.group_key
 
     def state_dict(self) -> dict[str, Any]:
         """Save dataloader state for checkpointing."""
@@ -1199,11 +1210,14 @@ def _build_mosaic_dataloader(
         dataset_split_remote=assignment.dataset_split_remote,
     )
 
+    unigram_manager = get_or_create_unigram_manager(request.job_config)
+
     unigram_setup = _setup_unigram_metric(
         assignment,
         job_config=request.job_config,
         split=request.split,
         tokenizer=request.tokenizer,
+        manager=unigram_manager,
     )
 
     text_dataset = _create_streaming_dataset(
@@ -1219,6 +1233,8 @@ def _build_mosaic_dataloader(
         dp_world_size=request.dp_world_size,
         runtime=normalized.runtime,
         collate_fn=unigram_setup.collate_fn,
+        group_key=unigram_setup.group_key,
+        unigram_handle=unigram_setup.handle,
     )
     return MosaicParallelAwareDataloader(text_dataset, loader_request)
 
