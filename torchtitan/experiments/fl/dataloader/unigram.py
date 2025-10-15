@@ -348,7 +348,7 @@ def _load_stream_unigram_counts(
     for key, value in payload.items():
         try:
             token_id = int(key)
-        except (ValueError, TypeError):
+        except (ValueError, TypeError) as parse_err:
             try:
                 parsed_key = json.loads(key)
             except (json.JSONDecodeError, TypeError) as exc:
@@ -358,13 +358,13 @@ def _load_stream_unigram_counts(
             if isinstance(parsed_key, float):
                 if not parsed_key.is_integer():
                     msg = f"Unigram file contains non-integral token identifier: {parsed_key!r}"
-                    raise ValueError(msg) from None
+                    raise ValueError(msg) from parse_err
                 token_id = int(parsed_key)
             elif isinstance(parsed_key, int):
                 token_id = parsed_key
             else:
                 msg = f"Unigram file contains unsupported token identifier type: {type(parsed_key)!r}"
-                raise TypeError(msg) from None
+                raise TypeError(msg) from parse_err
 
         freq = int(value[0]) if isinstance(value, (list, tuple)) else int(value)
         counts[token_id] += freq

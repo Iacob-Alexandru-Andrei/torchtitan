@@ -1139,7 +1139,7 @@ class HyperparameterSwitchCallback(Callback):
 class FLMetricsProcessor(MetricsProcessor):
     """Extension of MetricsProcessor that wires the FL callback stack."""
 
-    def __init__(  # noqa: PLR0913
+    def __init__(  # noqa: PLR0913 - initializer wires multiple optional dependencies
         self,
         job_config: Any,
         parallel_dims: Any,
