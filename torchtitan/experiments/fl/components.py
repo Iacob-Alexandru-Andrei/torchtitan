@@ -10,7 +10,6 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from torchtitan.experiments.fl.configs.config import FLMetricsConfigEnvelope
 from torchtitan.experiments.fl.metrics import (
     FLMetricsProcessor,
     get_or_create_unigram_manager,
@@ -30,13 +29,10 @@ def build_metrics_processor(
 ) -> FLMetricsProcessor:
     """Create a metrics processor for the FL experiment.
 
-    Note: This function mutates ``job_config`` in-place by replacing
-    ``job_config.fl_metrics`` with an :class:`FLMetricsConfigEnvelope` and
-    attaching a :class:`UnigramMetricManager` instance for reuse.
+    This helper reuses the shared unigram metric manager stored on the
+    ``job_config`` to avoid repeatedly allocating metric state.
     """
-    envelope = FLMetricsConfigEnvelope.coerce(job_config.fl_metrics)
-    job_config.fl_metrics = envelope
-    metrics_config = envelope.unwrap()
+    metrics_config = job_config.fl_metrics
     manager = get_or_create_unigram_manager(job_config)
     return FLMetricsProcessor(
         job_config,

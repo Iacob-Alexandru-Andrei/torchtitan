@@ -249,6 +249,8 @@ class UnigramMetricManager:
 
         return bool(self._metrics)
 
+    def has_metrics(self) -> bool:
+        """Return ``True`` if any metrics are currently registered."""
 
 _UNIGRAM_MANAGER_ATTR = "_fl_unigram_manager"
 
@@ -1147,11 +1149,7 @@ class FLMetricsProcessor(MetricsProcessor):
         tag: str | None = None,
     ) -> None:
         if metrics_config is None:
-            from torchtitan.experiments.fl.configs.config import FLMetricsConfigEnvelope
-
-            envelope = FLMetricsConfigEnvelope.coerce(job_config.fl_metrics)
-            job_config.fl_metrics = envelope
-            metrics_config = envelope.unwrap()
+            metrics_config = job_config.fl_metrics
 
         super().__init__(job_config, parallel_dims, tag)
 
