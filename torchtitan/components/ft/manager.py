@@ -190,7 +190,7 @@ def maybe_semi_sync_training(
                 )
                 return nullcontext()
 
-            return desloc_semi_sync_context(ft_manager=ft_manager, optimizer=optimizer)
+            return desloc_semi_sync_context(_ft_manager=ft_manager, optimizer=optimizer)
         else:
             raise ValueError(
                 f"Unknown training method: {semi_sync_method}, only 'diloco', 'local_sgd', and 'desloc' are supported."
