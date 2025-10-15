@@ -32,10 +32,14 @@ from torchtitan.experiments.fl.configs import MosaicConfigManager
 from torchtitan.experiments.fl.dataloader.dataloader import build_mosaic_dataloader
 from torchtitan.experiments.fl.dataloader.tokenizer import build_mosaic_tokenizer
 from torchtitan.experiments.fl.ft_override import configure_desloc
-from torchtitan.experiments.fl.models.utils import ensure_mosaic_spec
+from torchtitan.experiments.fl.models.utils import (
+    MosaicSpecOverrides,
+    ensure_mosaic_spec,
+)
 from torchtitan.experiments.fl.s3_checkpoint import (
     get_s3_checkpoint_wrapper_factory,
     S3CheckpointWrapper,
+    setup_s3_checkpointing,
 )
 from torchtitan.tools.logging import init_logger, logger
 from torchtitan.train import Trainer
@@ -78,17 +82,16 @@ def main() -> None:  # noqa: C901, PLR0912, PLR0915
     if not job_config.model.name.startswith("mosaic_"):
         mosaic_spec_name = ensure_mosaic_spec(
             job_config.model.name,
-            dataloader_fn=build_mosaic_dataloader,
-            tokenizer_fn=build_mosaic_tokenizer,
-            metrics_processor_fn=build_metrics_processor,
+            overrides=MosaicSpecOverrides(
+                dataloader=build_mosaic_dataloader,
+                tokenizer=build_mosaic_tokenizer,
+                metrics_processor=build_metrics_processor,
+            ),
         )
         job_config.model.name = mosaic_spec_name
 
     # Launch the trainer
     trainer: Trainer | None = None
-    s3_manager: S3CheckpointManager | None = None
-    download_manager: S3CheckpointManager | None = None
-
     s3_manager: S3CheckpointWrapper | None = None
     download_manager: S3CheckpointWrapper | None = None
 

@@ -4,6 +4,7 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 
+"""State dict adapter bridging MuP LLaMA3 checkpoints and TorchTitan."""
 
 from torchtitan.models.llama3.model.state_dict_adapter import Llama3StateDictAdapter
 from .mup_args import TransformerModelArgs

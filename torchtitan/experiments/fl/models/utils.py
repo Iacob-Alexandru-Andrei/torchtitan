@@ -9,7 +9,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from typing import cast
 
 from torchtitan.experiments.fl.components import build_metrics_processor
@@ -33,20 +33,31 @@ PostTransform = Callable[[TrainSpec, TrainSpec], TrainSpec]
 """Callable applied after constructing the Mosaic spec."""
 
 
+@dataclass(frozen=True)
+class MosaicSpecOverrides:
+    """Optional overrides for Mosaic-enabled train specs."""
+
+    dataloader: DataLoaderBuilder | None = None
+    tokenizer: TokenizerBuilder | None = None
+    metrics_processor: MetricsProcessorBuilder | None = None
+    optimizers: OptimizersBuilder | None = None
+    validator: ValidatorBuilder | None = None
+    post_transform: PostTransform | None = None
+
+
 def _build_mosaic_spec(
     base_spec: TrainSpec,
     *,
     spec_name: str,
-    dataloader_fn: DataLoaderBuilder | None = None,
-    tokenizer_fn: TokenizerBuilder | None = None,
-    metrics_processor_fn: MetricsProcessorBuilder | None = None,
-    optimizers_fn: OptimizersBuilder | None = None,
-    validator_fn: ValidatorBuilder | None = None,
-    post_transform: PostTransform | None = None,
+    overrides: MosaicSpecOverrides | None = None,
 ) -> TrainSpec:
-    dataloader_builder = dataloader_fn or build_mosaic_dataloader
-    tokenizer_builder = tokenizer_fn or cast("TokenizerBuilder", build_mosaic_tokenizer)
-    metrics_builder = metrics_processor_fn or build_metrics_processor
+    overrides = overrides or MosaicSpecOverrides()
+
+    dataloader_builder = overrides.dataloader or build_mosaic_dataloader
+    tokenizer_builder = overrides.tokenizer or cast(
+        "TokenizerBuilder", build_mosaic_tokenizer
+    )
+    metrics_builder = overrides.metrics_processor or build_metrics_processor
 
     replace_kwargs: dict[str, object] = {
         "name": spec_name,
@@ -55,15 +66,15 @@ def _build_mosaic_spec(
         "build_metrics_processor_fn": metrics_builder,
     }
 
-    if optimizers_fn is not None:
-        replace_kwargs["build_optimizers_fn"] = optimizers_fn
-    if validator_fn is not None:
-        replace_kwargs["build_validator_fn"] = validator_fn
+    if overrides.optimizers is not None:
+        replace_kwargs["build_optimizers_fn"] = overrides.optimizers
+    if overrides.validator is not None:
+        replace_kwargs["build_validator_fn"] = overrides.validator
 
     mosaic_spec = replace(base_spec, **replace_kwargs)
 
-    if post_transform is not None:
-        mosaic_spec = post_transform(base_spec, mosaic_spec)
+    if overrides.post_transform is not None:
+        mosaic_spec = overrides.post_transform(base_spec, mosaic_spec)
         if mosaic_spec.name != spec_name:
             mosaic_spec = replace(mosaic_spec, name=spec_name)
 
@@ -74,28 +85,15 @@ def ensure_mosaic_spec(
     base_spec_name: str,
     *,
     spec_name: str | None = None,
-    dataloader_fn: DataLoaderBuilder | None = None,
-    tokenizer_fn: TokenizerBuilder | None = None,
-    metrics_processor_fn: MetricsProcessorBuilder | None = None,
-    optimizers_fn: OptimizersBuilder | None = None,
-    validator_fn: ValidatorBuilder | None = None,
-    post_transform: PostTransform | None = None,
+    overrides: MosaicSpecOverrides | None = None,
 ) -> str:
     """Ensure that a Mosaic-wrapped train spec is registered.
 
     Args:
         base_spec_name: Name of the base train spec to wrap.
         spec_name: Optional name for the Mosaic spec (defaults to ``mosaic_<base>``).
-        dataloader_fn: Optional dataloader builder override. Defaults to
-            :func:`build_mosaic_dataloader`.
-        tokenizer_fn: Optional tokenizer builder override. Defaults to
-            :func:`build_mosaic_tokenizer`.
-        metrics_processor_fn: Optional metrics processor builder override.
-            Defaults to :func:`build_metrics_processor`.
-        optimizers_fn: Optional optimizers builder override.
-        validator_fn: Optional validator builder override.
-        post_transform: Optional callable that receives the original base spec and the
-            Mosaic spec produced by the helper and returns the final spec to register.
+        overrides: Collection of optional overrides (builders or transforms) to
+            customize the Mosaic spec.
 
     Returns:
         The name of the Mosaic-enabled train spec.
@@ -106,12 +104,7 @@ def ensure_mosaic_spec(
     mosaic_spec = _build_mosaic_spec(
         base_spec,
         spec_name=mosaic_spec_name,
-        dataloader_fn=dataloader_fn,
-        tokenizer_fn=tokenizer_fn,
-        metrics_processor_fn=metrics_processor_fn,
-        optimizers_fn=optimizers_fn,
-        validator_fn=validator_fn,
-        post_transform=post_transform,
+        overrides=overrides,
     )
 
     try:

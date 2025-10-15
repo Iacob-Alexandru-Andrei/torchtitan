@@ -145,11 +145,13 @@ def test_configure_desloc_installs_desloc_support(monkeypatch):
     with configure_desloc(job_config):
         assert job_config.fault_tolerance.semi_sync_method == "desloc"
         container = desloc_module.DesLocFTOptimizersContainer(
-            [model],
-            optim.SGD,
-            {"lr": 0.1},
-            _DummyManager(),
-            job_config.optimizer.desloc,
+            desloc_module.DesLocFTOptimizersConfig(
+                model_parts=[model],
+                optimizer_cls=optim.SGD,
+                optimizer_kwargs={"lr": 0.1},
+                ft_manager=_DummyManager(),
+                desloc_config=job_config.optimizer.desloc,
+            )
         )
         assert getattr(container, "_desloc_controllers")
 
