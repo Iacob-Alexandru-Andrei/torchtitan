@@ -48,25 +48,22 @@ You are analyzing a codebase dependency graph optimized for AI understanding. Th
 ---
 
 # CODE_GRAPH
-NODES:73 EDGES:22
+NODES:24 EDGES:7
 
 ## DIRECTORY_TREE
-ROOT: torchtitan/models/deepseek_v3/
-├─ infra/ → U[1]
-└─ model/ → U[4]
+ROOT: torchtitan/experiments/fl/tests/
 
 ## ARCHITECTURAL_CLUSTERS
 
-### DATA_MODELS
-NODES:73 CALL_DEPTH:3
+### TESTS
+NODES:24 CALL_DEPTH:1
 
-__init__.py→[get_train_spec(void)] args.py→[] model.py→[forward((self,x: torch.Tensor,freqs_cis: torch.Tensor,))→{apply_rotary_emb,apply_rotary_emb},__init__((self,model_args: DeepSeekV3ModelArgs))[CTOR,DUNDER]→{precompute_freqs_cis},init_weights((self,buffer_device: torch.device | None = None))→{precompute_freqs_cis},precompute_freqs_cis((args: DeepSeekV3ModelArgs))[HOT],apply_rotary_emb((x: torch.Tensor,freqs_cis: torch.Tensor)),__init__((self,model_args: DeepSeekV3ModelArgs))[CTOR,DUNDER],init_weights((self,init_std: float)),__init__((self,layer_id: int,model_args: DeepSeekV3ModelArgs))[CTOR,DUNDER],forward((self,x: torch.Tensor,freqs_cis: torch.Tensor)),init_weights((self,buffer_device: torch.device)),forward((self,tokens: torch.Tensor,input_batch: torch.Tensor | None = None,))] parallelize.py→[parallelize_deepseekv3((model: nn.Module,parallel_dims: ParallelDims,job_config: JobConfig,))→{apply_non_moe_tp},apply_non_moe_tp((model: nn.Module,tp_mesh: DeviceMesh,loss_parallel: bool,enable_float8_tensorwise_tp: bool,))] quantization.py→[dequantize_from_fp8((weight: torch.Tensor,scale_inv: torch.Tensor,dtype=torch.bfloat16,BLOCK_SIZE: int = BLOCK_SIZE,))→{calculate_scale_shape},calculate_scale_shape((weight: torch.Tensor,BLOCK_SIZE: int = BLOCK_SIZE))] state_dict_adapter.py→[_dequantize((self,state_dict: dict[str,Any]))→{quantization::dequantize_from_fp8},_add_quantization_scale_inv_tensors((self,state_dict: dict[str,Any]))→{quantization::calculate_scale_shape},__init__((self,model_args: DeepSeekV3ModelArgs,hf_assets_path: str | None,))[CTOR,DUNDER],to_hf((self,state_dict: dict[str,Any])),from_hf((self,hf_state_dict: dict[str,Any]))] 
+test_unigram_metrics.py→[__init__((self,*args: object,**kwargs: object))[CTOR,DUNDER],add_state((self,name: str,default: torch.Tensor,dist_reduce_fx: str | None = None)),register_buffer((self,name: str,tensor: torch.Tensor)),__init__((self,*args: object,**kwargs: object))[CTOR,DUNDER],__init__((self,*args: object,**kwargs: object))[CTOR,DUNDER],get_peak_stats((self)),reset_peak_stats((self)),test_unigram_manager_aggregation_and_reset(void)[TEST],test_unigram_manager_teardown_removes_metric(void)[TEST],test_fl_metrics_processor_registers_expected_callbacks(void)[TEST]] 
 
 ## DEPENDENCY_PATTERNS
 
 ### EDGE_PATTERNS
-Call: 8 edges
-Contains: 14 edges
+Contains: 7 edges
 
 ### CROSS_CLUSTER_FLOW
 

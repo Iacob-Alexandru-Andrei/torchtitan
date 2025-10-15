@@ -10,8 +10,6 @@ from dataclasses import replace
 from torchtitan.protocols.train_spec import register_train_spec, TrainSpec
 
 from .llama3_mup.train_configs import get_train_spec as get_llama3_mup_train_spec
-from .mosaic_llama3 import get_train_spec as get_mosaic_llama3_train_spec
-from .mosaic_llama3_mup import get_train_spec as get_mosaic_llama3_mup_train_spec
 
 
 # Register the base Llama3 MuP spec (without Mosaic streaming)
@@ -25,6 +23,11 @@ def _get_llama3_mup_spec() -> TrainSpec:
 
 
 register_train_spec(_get_llama3_mup_spec())
+
+
+# Import Mosaic adapters after the base spec is registered to avoid circular dependency issues.
+from .mosaic_llama3 import get_train_spec as get_mosaic_llama3_train_spec  # noqa: E402
+from .mosaic_llama3_mup import get_train_spec as get_mosaic_llama3_mup_train_spec  # noqa: E402
 
 
 # Register the Mosaic Llama3 spec
