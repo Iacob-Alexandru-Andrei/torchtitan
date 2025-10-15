@@ -7,7 +7,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Any
 
 import torch
@@ -33,6 +33,13 @@ from torchtitan.experiments.fl.optimizers import (
     QHAdamW,
     QHADOPT,
 )
+
+try:  # pragma: no cover - optional dependency for non-MuP models
+    from torchtitan.experiments.fl.models.llama3_mup.model.mup_model import (
+        SupportsMuPOptimizerOverrides,
+    )
+except ImportError:  # pragma: no cover - MuP model not available in some builds
+    SupportsMuPOptimizerOverrides = None  # type: ignore[assignment]
 
 if TYPE_CHECKING:
     from torch.optim import Optimizer
@@ -132,6 +139,39 @@ def _build_optimizer_kwargs(
     }
     optimizer_kwargs.update(extra_kwargs)
     return optimizer_kwargs
+
+
+def _apply_mup_overrides(
+    model_parts: list[torch.nn.Module],
+    config: MosaicOptimizerConfig,
+    param_groups: list[dict[str, Any]] | None,
+) -> tuple[MosaicOptimizerConfig, list[dict[str, Any]] | None]:
+    """Inject MuP-aware overrides when the first model part exposes them."""
+
+    if param_groups is not None:
+        return config, param_groups
+
+    protocol = SupportsMuPOptimizerOverrides
+    if protocol is None:
+        return config, None
+
+    for part in model_parts:
+        if isinstance(part, protocol):
+            overrides = part.build_mup_optimizer_overrides(
+                lr=config.lr,
+                eps=config.eps,
+                weight_decay=config.weight_decay,
+            )
+            if overrides is None:
+                continue
+            updated_config = (
+                replace(config, **overrides.config_updates)
+                if overrides.config_updates
+                else config
+            )
+            return updated_config, overrides.param_groups
+
+    return config, None
 
 
 def _build_desloc_container(request: DeslocContainerRequest) -> OptimizersContainer:
@@ -242,6 +282,11 @@ def build_mosaic_optimizers(
     """Build optimizers for Mosaic jobs without modifying core TorchTitan components."""
     normalized_config, extra_kwargs = _normalize_mosaic_optimizer_config(
         optimizer_config
+    )
+    normalized_config, param_groups = _apply_mup_overrides(
+        model_parts,
+        normalized_config,
+        param_groups,
     )
     optimizer_cls = _resolve_optimizer_class(normalized_config.name)
     optimizer_kwargs = _build_optimizer_kwargs(normalized_config, extra_kwargs)

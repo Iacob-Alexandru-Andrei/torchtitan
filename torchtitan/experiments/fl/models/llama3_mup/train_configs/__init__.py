@@ -5,6 +5,7 @@
 # LICENSE file in the root directory of this source tree.
 """Training configuration for Llama-3 MuP models."""
 
+from dataclasses import replace
 from typing import Any, cast
 
 from torch import nn
@@ -64,26 +65,23 @@ def build_mup_optimizers(
         "weight_decay": optimizer_config.weight_decay,
     }
 
-    # MuP requires custom parameter groups for different learning rates.
-    # The model returns the parameter groups and potentially updated optimizer kwargs.
-    param_groups_or_iter, final_optimizer_kwargs = model.get_optimizer_param_groups(
-        initial_optimizer_kwargs
+    overrides = model.build_mup_optimizer_overrides(
+        lr=initial_optimizer_kwargs["lr"],
+        eps=initial_optimizer_kwargs["eps"],
+        weight_decay=initial_optimizer_kwargs["weight_decay"],
     )
 
-    # Convert Iterator to None for build_optimizers (it will use model.parameters())
-    # Only pass param_groups if we got a list (MuP enabled case)
-    param_groups_list = (
-        param_groups_or_iter if isinstance(param_groups_or_iter, list) else None
+    param_groups_list = overrides.param_groups if overrides else None
+
+    updated_config = (
+        replace(optimizer_config, **overrides.config_updates)
+        if overrides and overrides.config_updates
+        else optimizer_config
     )
 
-    # The model might have updated some optimizer kwargs (e.g., eps for MuP scaling).
-    # We update the original config object so that the core builder uses the correct values.
-    optimizer_config.eps = final_optimizer_kwargs.get("eps", optimizer_config.eps)
-
-    # Use the core optimizer builder with the custom param groups.
     return build_optimizers(
         model_parts,
-        optimizer_config,
+        updated_config,
         parallel_dims,
         ft_manager,
         param_groups=param_groups_list,

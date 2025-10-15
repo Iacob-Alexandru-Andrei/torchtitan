@@ -6,13 +6,31 @@
 
 """Unit tests covering the MuP-enabled LLaMA3 model variant."""
 
+from dataclasses import replace as dataclass_replace
+import importlib
 import unittest
 
-import torch
-from torchtitan.experiments.fl.models.llama3_mup.model.mup_args import (
-    TransformerModelArgs,
+import pytest
+
+_schedule_module = pytest.importorskip(
+    "torch.distributed.pipelining.schedules",
+    reason="MuP tests require torch.distributed.pipelining",
 )
-from torchtitan.experiments.fl.models.llama3_mup.model.mup_model import Transformer
+if not hasattr(_schedule_module, "ScheduleDualPipeV"):
+    pytest.skip("MuP tests require ScheduleDualPipeV support")
+
+import torch
+from torchtitan.distributed import ParallelDims
+from torchtitan.experiments.fl.configs.optimizers import DesLocConfig, MosaicOptimizerConfig
+from torchtitan.experiments.fl.optimizer_builder import build_mosaic_optimizers
+
+try:  # pragma: no cover - optional dependencies may be unavailable in CI
+    from torchtitan.experiments.fl.models.llama3_mup.model.mup_args import (
+        TransformerModelArgs,
+    )
+    from torchtitan.experiments.fl.models.llama3_mup.model.mup_model import Transformer
+except ImportError as exc:  # pragma: no cover - skip when PyTorch lacks pipeline support
+    pytest.skip(f"MuP tests require pipeline schedules: {exc}")
 
 
 class TestMuPLlamaModel(unittest.TestCase):
@@ -63,6 +81,88 @@ class TestMuPLlamaModel(unittest.TestCase):
         """Ensure weight initialization completes without raising errors."""
         # A simple check to ensure no errors during init
         self.model.init_weights()
+
+    def test_optimizer_overrides_build_param_groups(self) -> None:
+        """MuP override hook should return parameter groups and epsilon scaling."""
+
+        base_eps = 1e-8
+        overrides = self.model.build_mup_optimizer_overrides(
+            lr=0.01,
+            eps=base_eps,
+            weight_decay=0.1,
+        )
+
+        assert overrides is not None
+        assert overrides.param_groups is not None
+        assert len(overrides.param_groups) > 1
+        self.assertIn("eps", overrides.config_updates)
+
+        expected_eps = base_eps * (1 / self.mup_config["mup_width_multiplier"])
+        expected_eps *= self.mup_config["completep_depth_multiplier"] ** (
+            -1.0 * self.mup_config["completep_depth_alpha_exp"]
+        )
+        self.assertAlmostEqual(overrides.config_updates["eps"], expected_eps, places=12)
+
+    def test_optimizer_overrides_disabled_when_hidden_scaling_off(self) -> None:
+        """The override protocol should opt-out when hidden scaling is disabled."""
+
+        disabled_args = dataclass_replace(
+            self.model_args,
+            mup_config={**self.mup_config, "mup_disable_hidden_lr_scaling": True},
+        )
+        disabled_args.__post_init__()
+        model = Transformer(disabled_args)
+        overrides = model.build_mup_optimizer_overrides(
+            lr=0.01,
+            eps=1e-8,
+            weight_decay=0.1,
+        )
+        assert overrides is None
+
+    def test_mosaic_builder_integrates_mup_overrides(self) -> None:
+        """build_mosaic_optimizers should consume the MuP override protocol."""
+
+        config = MosaicOptimizerConfig(
+            name="AdamW",
+            lr=0.01,
+            beta1=0.9,
+            beta2=0.95,
+            eps=1e-8,
+            weight_decay=0.1,
+            implementation="for-loop",
+        )
+        dims = ParallelDims(1, -1, 1, 1, 1, 1, 1, world_size=1)
+
+        container = build_mosaic_optimizers([self.model], config, dims)
+        optimizer = next(iter(container))
+
+        # Original config remains untouched and the optimizer picks up MuP epsilon scaling.
+        assert config.eps == 1e-8
+        assert len(optimizer.param_groups) > 1
+
+        expected_eps = 1e-8 * (1 / self.mup_config["mup_width_multiplier"])
+        expected_eps *= self.mup_config["completep_depth_multiplier"] ** (
+            -1.0 * self.mup_config["completep_depth_alpha_exp"]
+        )
+        self.assertAlmostEqual(optimizer.defaults["eps"], expected_eps, places=12)
+
+    def test_mosaic_builder_desloc_requires_ft(self) -> None:
+        """DES-LOC validation should still trigger when overrides are present."""
+
+        config = MosaicOptimizerConfig(
+            name="AdamW",
+            lr=0.01,
+            beta1=0.9,
+            beta2=0.95,
+            eps=1e-8,
+            weight_decay=0.1,
+            implementation="for-loop",
+            desloc=DesLocConfig(enabled=True),
+        )
+        dims = ParallelDims(1, -1, 1, 1, 1, 1, 1, world_size=1)
+
+        with self.assertRaisesRegex(ValueError, "DES-LOC requires TorchFT"):
+            build_mosaic_optimizers([self.model], config, dims)
 
 
 if __name__ == "__main__":
