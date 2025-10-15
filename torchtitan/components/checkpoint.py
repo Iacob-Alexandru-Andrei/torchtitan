@@ -610,6 +610,8 @@ class CheckpointManager:
         logger.info(f"Loading the checkpoint from {checkpoint_id}.")
         begin = time.monotonic()
         states = self._states_to_load(model_only)
+        logger.info(f"[RESUME DEBUG] States to load keys: {list(states.keys())}")
+        logger.info(f"[RESUME DEBUG] Model only: {model_only}")
         self.dcp_load(
             states,
             checkpoint_id=checkpoint_id,
@@ -755,8 +757,7 @@ class CheckpointManager:
             if self.export_dtype != torch.float32:
                 states = {k: v.to(self.export_dtype) for k, v in states.items()}
             logger.info(
-                f"Saving a model only checkpoint in {self.export_dtype} "
-                f"at last step, step {curr_step}."
+                f"Saving a model only checkpoint in {self.export_dtype} at last step, step {curr_step}."
             )
         else:
             logger.info(f"Saving a full checkpoint at last step, step {curr_step}.")
@@ -800,8 +801,7 @@ class CheckpointManager:
                 self.save_future = None
         elif self.save_future is not None:
             raise RuntimeError(
-                "self.save_future is not None, but self.async_mode is not enabled "
-                "and fault tolerance is not active."
+                "self.save_future is not None, but self.async_mode is not enabled and fault tolerance is not active."
             )
 
     def _purge_stale_checkpoints(self):

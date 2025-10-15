@@ -182,7 +182,7 @@ def test_multiple_deepseek_configs():
     results = []
 
     for config_idx, (G, M, K, N) in enumerate(configs):
-        logging.info(f"\n\n===== Testing DeepSeek Config {config_idx+1} =====")
+        logging.info(f"\n\n===== Testing DeepSeek Config {config_idx + 1} =====")
         logging.info(f"G={G}, M={M}, K={K}, N={N}")
 
         try:
@@ -242,14 +242,14 @@ def test_multiple_deepseek_configs():
 
             # Log overall config result
             if config_success:
-                logging.info(f"✓ SUCCESS: Config {config_idx+1} passed all tests!")
+                logging.info(f"✓ SUCCESS: Config {config_idx + 1} passed all tests!")
             else:
                 logging.error(
-                    f"✗ FAILURE: Config {config_idx+1} failed one or more tests"
+                    f"✗ FAILURE: Config {config_idx + 1} failed one or more tests"
                 )
 
         except Exception as e:
-            logging.error(f"Config {config_idx+1} test failed with error: {e}")
+            logging.error(f"Config {config_idx + 1} test failed with error: {e}")
             import traceback
 
             logging.error(traceback.format_exc())

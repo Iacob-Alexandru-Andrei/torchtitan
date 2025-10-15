@@ -1,0 +1,12 @@
+# Dependencies for the MosaicML Streaming Integration
+
+# Core MosaicML libraries
+llm-foundry
+mosaicml-streaming
+composer
+
+# Transformers for tokenizer support
+transformers
+
+# TorchData for the StatefulDataLoader
+torchdata

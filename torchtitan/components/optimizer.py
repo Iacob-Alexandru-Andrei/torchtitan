@@ -5,6 +5,7 @@
 # LICENSE file in the root directory of this source tree.
 
 import functools
+from collections.abc import MutableMapping
 from typing import Any, Generic, Iterator, TypeVar
 
 import torch
@@ -34,6 +35,82 @@ if has_torchft:
 
 
 T = TypeVar("T", bound=Optimizer)
+
+
+class _OptimizerStateProxy(MutableMapping):
+    """Expose underlying optimizer states through a unified mapping."""
+
+    def __init__(self, optimizers: list[Optimizer]) -> None:
+        self._optimizers = optimizers
+        self._param_owner: dict[nn.Parameter, Optimizer] = {}
+        self.refresh()
+
+    def refresh(self) -> None:
+        self._param_owner.clear()
+        for optimizer in self._optimizers:
+            for group in optimizer.param_groups:
+                for param in group["params"]:
+                    if isinstance(param, nn.Parameter):
+                        self._param_owner[param] = optimizer
+
+    def _get_owner(self, param: nn.Parameter) -> Optimizer:
+        owner = self._param_owner.get(param)
+        if owner is None:
+            self.refresh()
+            owner = self._param_owner.get(param)
+        if owner is None:
+            raise KeyError(param)
+        return owner
+
+    def __getitem__(self, key: nn.Parameter) -> dict[str, Any]:
+        owner = self._get_owner(key)
+        return owner.state[key]
+
+    def __setitem__(self, key: nn.Parameter, value: dict[str, Any]) -> None:
+        owner = self._get_owner(key)
+        owner.state[key] = value
+
+    def setdefault(
+        self,
+        key: nn.Parameter,
+        default: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        owner = self._get_owner(key)
+        if default is None:
+            default = {}
+        return owner.state.setdefault(key, default)
+
+    def __delitem__(self, key: nn.Parameter) -> None:
+        owner = self._get_owner(key)
+        del owner.state[key]
+
+    def __contains__(self, key: object) -> bool:
+        if not isinstance(key, nn.Parameter):
+            return False
+        try:
+            owner = self._get_owner(key)
+        except KeyError:
+            return False
+        return key in owner.state
+
+    def __iter__(self) -> Iterator[nn.Parameter]:
+        seen: set[nn.Parameter] = set()
+        for optimizer in self._optimizers:
+            for param in optimizer.state:
+                if param not in seen:
+                    seen.add(param)
+                    yield param
+
+    def __len__(self) -> int:
+        return sum(1 for _ in self.__iter__())
+
+    def clear(self) -> None:
+        for optimizer in self._optimizers:
+            optimizer.state.clear()
+
+    @property
+    def default_factory(self):
+        return dict
 
 
 class OptimizersContainer(Optimizer, Stateful, Generic[T]):
@@ -70,16 +147,31 @@ class OptimizersContainer(Optimizer, Stateful, Generic[T]):
         model_parts: list[nn.Module],
         optimizer_cls: type[T],
         optimizer_kwargs: dict[str, Any],
+        param_groups: list[dict[str, Any]] | None = None,
     ) -> None:
         all_params = []
         self.optimizers = []
         self.model_parts = model_parts
-        for model in self.model_parts:
-            params = [p for p in model.parameters() if p.requires_grad]
-            self.optimizers.append(optimizer_cls(params, **optimizer_kwargs))
-            all_params.extend(params)
+        if param_groups:
+            assert (
+                len(model_parts) == 1
+            ), "Custom param groups are only supported for a single model part."
+            self.optimizers.append(optimizer_cls(param_groups, **optimizer_kwargs))
+            for group in param_groups:
+                all_params.extend(group["params"])
+        else:
+            for model in self.model_parts:
+                params = [p for p in model.parameters() if p.requires_grad]
+                self.optimizers.append(optimizer_cls(params, **optimizer_kwargs))
+                all_params.extend(params)
+
+        container_param_groups = [
+            group for optimizer in self.optimizers for group in optimizer.param_groups
+        ]
+
         self._validate_length(len(self.model_parts))
-        self._post_init(all_params, optimizer_kwargs)
+        self._post_init(all_params, optimizer_kwargs, container_param_groups)
+        self._refresh_views()
 
     def __iter__(self) -> Iterator[T]:
         return iter(self.optimizers)
@@ -87,6 +179,7 @@ class OptimizersContainer(Optimizer, Stateful, Generic[T]):
     def __len__(self) -> int:
         return len(self.optimizers)
 
+    @Optimizer.profile_hook_step  # ensure optimizer step hooks (e.g. torchft LocalSGD) fire
     def step(self, *args, **kwargs) -> None:
         for optimizer in self.optimizers:
             optimizer.step(*args, **kwargs)
@@ -121,11 +214,30 @@ class OptimizersContainer(Optimizer, Stateful, Generic[T]):
         )
 
     def _post_init(
-        self, all_params: list[nn.Parameter], optimizer_kwargs: dict[str, Any]
+        self,
+        all_params: list[nn.Parameter],
+        optimizer_kwargs: dict[str, Any],
+        param_groups: list[dict[str, Any]] | None = None,
     ) -> None:
         # We need to call Optimizer.__init__() to initialize some necessary optimizer
-        # functionality such as hooks.
-        Optimizer.__init__(self, all_params, optimizer_kwargs)
+        # functionality such as hooks. When custom param groups are provided, keep the
+        # grouping by forwarding them to the base Optimizer so that features like
+        # TorchFT perceive the correct optimizer layout.
+        if param_groups:
+            Optimizer.__init__(self, param_groups, optimizer_kwargs)
+        else:
+            Optimizer.__init__(self, all_params, optimizer_kwargs)
+
+    def _refresh_views(self) -> None:
+        """Keep Optimizer-level views aligned with wrapped optimizers."""
+        self.param_groups = [
+            group for optimizer in self.optimizers for group in optimizer.param_groups
+        ]
+        if not hasattr(self, "_state_proxy"):
+            self._state_proxy = _OptimizerStateProxy(self.optimizers)
+        else:
+            self._state_proxy.refresh()
+        self.state = self._state_proxy
 
 
 class OptimizersInBackwardContainer(OptimizersContainer):
@@ -168,6 +280,7 @@ class OptimizersInBackwardContainer(OptimizersContainer):
             sum(len(list(model.parameters())) for model in self.model_parts)
         )
         self._post_init(all_params, optimizer_kwargs)
+        self._refresh_views()
 
     def step(self) -> None:
         pass
@@ -184,8 +297,11 @@ class FTOptimizersContainer(OptimizersContainer):
         optimizer_kwargs: dict[str, Any],
         ft_manager: "ft.Manager",
         use_ft_optimizer: bool = True,
+        param_groups: list[dict[str, Any]] | None = None,
     ) -> None:
-        super().__init__(model_parts, optimizer_cls, optimizer_kwargs)
+        super().__init__(
+            model_parts, optimizer_cls, optimizer_kwargs, param_groups=param_groups
+        )
 
         # Force to initialize the optimizer state so that `optim.step()`
         # won't be called by state_dict() and load_state_dict().
@@ -214,6 +330,7 @@ class FTOptimizersContainer(OptimizersContainer):
         super().load_state_dict(state_dict)
         self.init_cache_state_dict()
 
+    @Optimizer.profile_hook_step  # reuse step hooks under TorchFT wrappers
     def step(self, *args, **kwargs) -> None:
         """Calling the correct step() depending on the caller.
 
@@ -246,6 +363,7 @@ def build_optimizers(
     optimizer_config: OptimizerConfig,
     parallel_dims: ParallelDims,
     ft_manager: FTManager | None = None,
+    param_groups: list[dict[str, Any]] | None = None,
 ) -> OptimizersContainer:
     """Create a OptimizersContainer for the given model parts and job config.
 
@@ -322,9 +440,12 @@ def build_optimizers(
             optimizer_kwargs,
             ft_manager.manager,
             use_ft_optimizer=ft_manager.use_async_quorum,
+            param_groups=param_groups,
         )
 
-    return OptimizersContainer(model_parts, optimizer_cls, optimizer_kwargs)
+    return OptimizersContainer(
+        model_parts, optimizer_cls, optimizer_kwargs, param_groups=param_groups
+    )
 
 
 def build_optimizers_with_moe_load_balancing(
