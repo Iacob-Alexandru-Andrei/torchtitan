@@ -9,15 +9,11 @@ from __future__ import annotations
 
 import sys
 
+from typing import cast
+
 from torchtitan.config import ConfigManager
 
-from .config import (
-    ensure_mosaic_job_config_types,
-    FLMetricsConfigEnvelope,
-    MosaicDataLoaderConfig,
-    MosaicJobConfig,
-    MosaicTokenizerConfig,
-)
+from .config import MosaicDataLoaderConfig, MosaicJobConfig, MosaicTokenizerConfig
 
 
 class MosaicConfigManager(ConfigManager):
@@ -27,19 +23,9 @@ class MosaicConfigManager(ConfigManager):
         super().__init__(MosaicJobConfig)
 
     def parse_args(self, args: list[str] = sys.argv[1:]) -> MosaicJobConfig:
-        """Return a type-stable Mosaic job config parsed from CLI arguments.
+        """Return a type-stable Mosaic job config parsed from CLI arguments."""
 
-        Args:
-            args: Command line arguments to interpret. Defaults to ``sys.argv``
-                without the executable name.
-
-        Returns:
-            mosaicjobconfig: Configuration object with the dataloader and
-            tokenizer sections coerced into the strongly typed dataclasses used
-            by the FL stack.
-        """
-        config = super().parse_args(args)
-        return ensure_mosaic_job_config_types(config)
+        return cast(MosaicJobConfig, super().parse_args(args))
 
 
 def load_mosaic_job_config(args: list[str] | None = None) -> MosaicJobConfig:
@@ -49,11 +35,9 @@ def load_mosaic_job_config(args: list[str] | None = None) -> MosaicJobConfig:
 
 
 __all__ = [
-    "FLMetricsConfigEnvelope",
     "MosaicConfigManager",
     "MosaicDataLoaderConfig",
     "MosaicJobConfig",
     "MosaicTokenizerConfig",
-    "ensure_mosaic_job_config_types",
     "load_mosaic_job_config",
 ]

@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass, field
-from typing import Any, Literal
+from typing import Any, Callable, Literal, TypeVar
 
 from torchtitan.components.ft.config import FaultTolerance as FTFaultTolerance
 
@@ -22,12 +22,50 @@ DEFAULT_DATASET_SPLIT_KEYS = frozenset(
     {"train", "val", "validation", "test", "eval", "train_eval"}
 )
 
+T = TypeVar("T")
+
 
 def _as_dict(value: Mapping[str, Any] | None) -> dict[str, Any]:
     """Create a plain ``dict`` from an arbitrary mapping value."""
     if value is None:
         return {}
     return dict(value)
+
+
+def _coerce_nested_dataclass(
+    value: Any,
+    cls: type[T],
+    *,
+    factory: Callable[[Mapping[str, Any]], T] | None = None,
+) -> T:
+    """Convert arbitrary payloads into instances of ``cls``.
+
+    Args:
+        value: Existing ``cls`` instance, mapping payload, or ``None``.
+        cls: Dataclass type to instantiate.
+        factory: Optional callable used to construct ``cls`` from mappings.
+
+    Returns:
+        Instance of ``cls`` populated with ``value``.
+
+    Raises:
+        TypeError: If ``value`` cannot be converted into ``cls``.
+    """
+
+    if isinstance(value, cls):
+        return value
+    if value is None:
+        return cls()
+    if isinstance(value, Mapping):
+        constructor: Callable[[Mapping[str, Any]], T] | None = factory
+        if constructor is None:
+            from_dict = getattr(cls, "from_dict", None)
+            constructor = from_dict if callable(from_dict) else None
+        if constructor is not None:
+            return constructor(value)
+        return cls(**value)  # type: ignore[arg-type]
+    msg = f"Cannot convert {type(value)} to {cls.__name__}"
+    raise TypeError(msg)
 
 
 @dataclass
@@ -509,28 +547,10 @@ class MetricsConfig:
         },
     )
 
-
-@dataclass
-class FLMetricsConfigEnvelope:
-    """Wrapper that guarantees the FL metrics configuration is strongly typed."""
-
-    metrics: MetricsConfig = field(
-        default_factory=MetricsConfig,
-        metadata={"help": "Typed configuration for FL-specific metrics callbacks."},
-    )
-
     @classmethod
-    def from_dict(cls, data: Mapping[str, Any]) -> FLMetricsConfigEnvelope:
-        """Create a typed metrics configuration from a mapping payload.
+    def from_dict(cls, data: Mapping[str, Any]) -> MetricsConfig:
+        """Instantiate the metrics configuration from a mapping payload."""
 
-        Args:
-            data: Mapping containing nested dictionaries for each metrics
-                section.
-
-        Returns:
-            FLMetricsConfigEnvelope: Envelope wrapping a fully-typed
-            :class:`MetricsConfig` instance.
-        """
         optimizer_monitor_dict = _as_dict(data.get("optimizer_monitor"))
         activation_monitor_dict = _as_dict(data.get("activation_monitor"))
         lr_monitor_dict = _as_dict(data.get("lr_monitor"))
@@ -538,7 +558,7 @@ class FLMetricsConfigEnvelope:
         vs_monitor_dict = _as_dict(data.get("vs_monitor"))
         hyper_switch_dict = _as_dict(data.get("hyperparameter_switch"))
 
-        metrics = MetricsConfig(
+        return cls(
             optimizer_monitor=OptimizerMonitorConfig(**optimizer_monitor_dict),
             activation_monitor=ActivationMonitorConfig(**activation_monitor_dict),
             lr_monitor=LRMonitorConfig(**lr_monitor_dict),
@@ -546,65 +566,6 @@ class FLMetricsConfigEnvelope:
             vs_monitor=VSMonitorConfig(**vs_monitor_dict),
             hyperparameter_switch=HyperparameterSwitchConfig(**hyper_switch_dict),
         )
-        return cls(metrics=metrics)
-
-    @classmethod
-    def coerce(cls, value: Any) -> FLMetricsConfigEnvelope:
-        """Ensure the provided value is a typed metrics configuration.
-
-        Args:
-            value: Existing :class:`FLMetricsConfigEnvelope`, raw
-                :class:`MetricsConfig`, or mapping parsed from configuration
-                files.
-
-        Returns:
-            FLMetricsConfigEnvelope: Normalized wrapper for downstream code.
-
-        Raises:
-            TypeError: If ``value`` cannot be converted into a metrics config.
-        """
-        if isinstance(value, cls):
-            return value
-        if isinstance(value, MetricsConfig):
-            return cls(metrics=value)
-        if isinstance(value, Mapping):
-            return cls.from_dict(value)
-        msg = f"Cannot convert {type(value)} to FLMetricsConfigEnvelope"
-        raise TypeError(msg)
-
-    def unwrap(self) -> MetricsConfig:
-        """Expose the underlying :class:`MetricsConfig` instance."""
-        return self.metrics
-
-    @property
-    def optimizer_monitor(self) -> OptimizerMonitorConfig:
-        """Typed accessor for the optimizer monitor section."""
-        return self.metrics.optimizer_monitor
-
-    @property
-    def activation_monitor(self) -> ActivationMonitorConfig:
-        """Typed accessor for the activation monitor section."""
-        return self.metrics.activation_monitor
-
-    @property
-    def lr_monitor(self) -> LRMonitorConfig:
-        """Typed accessor for the learning-rate monitor section."""
-        return self.metrics.lr_monitor
-
-    @property
-    def betas_monitor(self) -> BetasMonitorConfig:
-        """Typed accessor for the optimizer betas monitor section."""
-        return self.metrics.betas_monitor
-
-    @property
-    def vs_monitor(self) -> VSMonitorConfig:
-        """Typed accessor for the quasi-hyperbolic ``v`` monitor section."""
-        return self.metrics.vs_monitor
-
-    @property
-    def hyperparameter_switch(self) -> HyperparameterSwitchConfig:
-        """Typed accessor for the hyperparameter switch configuration."""
-        return self.metrics.hyperparameter_switch
 
 
 @dataclass
@@ -830,7 +791,7 @@ class MosaicJobConfig(JobConfig):
         },
     )
 
-    fl_metrics: MetricsConfig | FLMetricsConfigEnvelope = field(
+    fl_metrics: MetricsConfig = field(
         default_factory=MetricsConfig,
         metadata={
             "help": "Configuration for FL-specific metrics and monitoring callbacks (optimizer, activation, learning rate)."
@@ -857,16 +818,22 @@ class MosaicJobConfig(JobConfig):
         },
     )
 
+    def __post_init__(self) -> None:  # noqa: D401
+        """Ensure nested Mosaic sections are always typed dataclasses."""
 
-def ensure_mosaic_job_config_types(job_config: MosaicJobConfig) -> MosaicJobConfig:
-    """Convert legacy dict-based sections into their typed equivalents."""
-    job_config.mosaic_dataloader = MosaicDataLoaderConfig.coerce(
-        job_config.mosaic_dataloader
-    )
-    job_config.mosaic_tokenizer = MosaicTokenizerConfig.coerce(
-        job_config.mosaic_tokenizer
-    )
-    job_config.fl_metrics = FLMetricsConfigEnvelope.coerce(job_config.fl_metrics)
-    job_config.s3_checkpoint = S3CheckpointingConfig.coerce(job_config.s3_checkpoint)
+        super_obj = super(MosaicJobConfig, self)
+        if hasattr(super_obj, "__post_init__"):
+            super_obj.__post_init__()  # type: ignore[misc]
 
-    return job_config
+        self.mosaic_dataloader = _coerce_nested_dataclass(
+            self.mosaic_dataloader, MosaicDataLoaderConfig
+        )
+        self.mosaic_tokenizer = _coerce_nested_dataclass(
+            self.mosaic_tokenizer, MosaicTokenizerConfig
+        )
+        self.fl_metrics = _coerce_nested_dataclass(self.fl_metrics, MetricsConfig)
+        self.s3_checkpoint = _coerce_nested_dataclass(
+            self.s3_checkpoint, S3CheckpointingConfig
+        )
+
+

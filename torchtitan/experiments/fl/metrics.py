@@ -1074,7 +1074,7 @@ class FLMetricsProcessor(MetricsProcessor):
         super().__init__(*args, **kwargs)
 
         # Get metrics config from fl_metrics field
-        fl_metrics_config = self.job_config.fl_metrics.unwrap()  # type: ignore[attr-defined]
+        fl_metrics_config = self.job_config.fl_metrics
 
         optimizer_config = fl_metrics_config.optimizer_monitor
         activation_config = fl_metrics_config.activation_monitor
