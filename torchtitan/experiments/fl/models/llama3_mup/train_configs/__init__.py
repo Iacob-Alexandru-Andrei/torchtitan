@@ -103,8 +103,8 @@ llama3_mup_configs = {
         use_peri_norm=True,
         tie_word_embeddings=True,
         # Flex attention
-        use_flex_attn=False,
-        attn_mask_type="causal",
+        use_flex_attn=True,
+        attn_mask_type="block_causal",
         # No μP/CompleteP for baseline 16M model
         mup_config={
             "mup_enabled": True,

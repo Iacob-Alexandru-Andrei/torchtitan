@@ -206,9 +206,7 @@ class Transformer(BaseTransformer):
             if model_args.use_embedding_norm
             else None
         )
-        if self.embedding_norm is not None and self.tok_embeddings is not None:
-            # Expose embedding norm via the embedding for compatibility with tests/utilities.
-            self.tok_embeddings.norm = self.embedding_norm  # type: ignore[attr-defined]
+
         self.layers = nn.ModuleDict(
             {
                 str(layer_id): TransformerBlock(layer_id, model_args)

@@ -11,7 +11,7 @@ from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
-from urllib.parse import urljoin
+from urllib.parse import urlparse, urlunparse
 
 from torchtitan.tools.logging import logger
 
@@ -41,7 +41,9 @@ class StreamAssignment:
     """Stream subset assigned to the current rank after sampling-group selection."""
 
     streams: list[Stream] | None
+    stream_indices: list[int] | None
     group_index: int | None
+    group_count: int | None
     dataset_root_remote: str | None
     dataset_split_remote: str | None
 
@@ -56,9 +58,11 @@ def _join_remote_path(root: str | None, path: str | None) -> str | None:
     if root is None:
         return path
     if _is_uri(root):
-        normalized_root = root.rstrip("/") + "/"
-        normalized_path = path.lstrip("/")
-        return urljoin(normalized_root, normalized_path)
+        parsed = urlparse(root)
+        root_path = parsed.path.strip("/")
+        combined = "/".join(part.strip("/") for part in (root_path, path) if part)
+        normalized_path = f"/{combined}" if combined else "/"
+        return urlunparse((parsed.scheme, parsed.netloc, normalized_path, "", "", ""))
     return "/".join(part.strip("/") for part in (root, path) if part)
 
 
@@ -419,18 +423,22 @@ def _select_stream_subset(
     if streams is None:
         return StreamAssignment(
             streams=None,
+            stream_indices=None,
             group_index=None,
+            group_count=None,
             dataset_root_remote=extraction.dataset_root_remote,
             dataset_split_remote=extraction.dataset_split_remote,
         )
 
     group_index: int | None = None
     stream_subset: list[Stream]
+    selected_indices: list[int] | None = None
+    group_count_value: int | None = None
 
     if sampling_group_indices:
-        group_count = len(sampling_group_indices)
-        if group_count:
-            group_index = dp_rank % group_count
+        group_count_value = len(sampling_group_indices)
+        if group_count_value:
+            group_index = dp_rank % group_count_value
             selected_indices = sampling_group_indices[group_index]
             stream_subset = [streams[idx] for idx in selected_indices]
             if len(stream_subset) == len(streams):
@@ -439,11 +447,13 @@ def _select_stream_subset(
                     group_index,
                     dp_rank,
                 )
-                group_count = dp_world_size if dp_world_size > 0 else len(streams)
-                group_index = dp_rank % group_count
+                group_count_value = dp_world_size if dp_world_size > 0 else len(streams)
+                group_index = dp_rank % group_count_value
                 stream_subset = [streams[group_index % len(streams)]]
+                selected_indices = [group_index % len(streams)]
         else:
             stream_subset = streams
+            selected_indices = list(range(len(streams)))
 
         if not stream_subset:
             msg = f"No streams resolved for Mosaic sampling group {group_index} (dp_rank={dp_rank})."
@@ -457,10 +467,13 @@ def _select_stream_subset(
         )
     else:
         stream_subset = streams
+        selected_indices = list(range(len(streams)))
 
     return StreamAssignment(
         streams=stream_subset,
+        stream_indices=selected_indices,
         group_index=group_index,
+        group_count=group_count_value,
         dataset_root_remote=extraction.dataset_root_remote,
         dataset_split_remote=extraction.dataset_split_remote,
     )

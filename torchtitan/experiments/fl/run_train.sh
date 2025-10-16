@@ -23,9 +23,9 @@ export S3_ENDPOINT_URL='http://taranaki.cl.cam.ac.uk:9000'
 NPROC_PER_NODE=${NPROC_PER_NODE:-2}
 
 
-NGPU=${NGPU:-"2"}
-export LOG_RANK=${LOG_RANK:-0,1}
-CONFIG_FILE=${CONFIG_FILE:-"./torchtitan/experiments/fl/configs/mosaic_mup_16M.toml"}
+NGPU=${NGPU:-"4"}
+export LOG_RANK=${LOG_RANK:-0,1,2,3}
+CONFIG_FILE=${CONFIG_FILE:-"./torchtitan/experiments/fl/configs/mosaic_mup_16M_test_long.toml"}
 TRAIN_FILE=${TRAIN_FILE:-"torchtitan.experiments.fl.train"}
 
 export WANDB_PROJECT="torchtitan"

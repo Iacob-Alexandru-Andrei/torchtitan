@@ -143,9 +143,15 @@ class MosaicDataLoaderConfig:
         default=8,
         metadata={"help": "Number of worker processes used by the DataLoader."},
     )
-    prefetch_factor: int = field(
-        default=2,
+    prefetch_factor: int | None = field(
+        default=None,
         metadata={"help": "Prefetch factor for each DataLoader worker."},
+    )
+    isolate_grouped_streams: bool = field(
+        default=False,
+        metadata={
+            "help": "When True and sampling_groups_mode indicates grouped sampling, construct StreamingTextDatasets in isolated helper processes to fully decouple them from torch.distributed."
+        },
     )
     pin_memory: bool = field(
         default=True,
@@ -194,6 +200,7 @@ class MosaicDataLoaderConfig:
             "dataset",
             "num_workers",
             "prefetch_factor",
+            "isolate_grouped_streams",
             "pin_memory",
             "persistent_workers",
             "drop_last",
@@ -240,6 +247,7 @@ class MosaicDataLoaderConfig:
             dataset=_as_dict(dataset_cfg),
             num_workers=int(data.get("num_workers", 8)),
             prefetch_factor=int(data.get("prefetch_factor", 2)),
+            isolate_grouped_streams=bool(data.get("isolate_grouped_streams", False)),
             pin_memory=bool(data.get("pin_memory", True)),
             persistent_workers=bool(data.get("persistent_workers", True)),
             drop_last=drop_last_bool,
@@ -443,8 +451,7 @@ class FLLRSchedulerConfig:
         default=None,
         metadata={
             "help": (
-                "1-based training step at which to apply `switch_scale`. "
-                "If unset, no additional scaling is applied."
+                "1-based training step at which to apply `switch_scale`. If unset, no additional scaling is applied."
             )
         },
     )
@@ -453,8 +460,7 @@ class FLLRSchedulerConfig:
         default=1.0,
         metadata={
             "help": (
-                "Multiplicative factor applied to the learning rate once `switch_step` is reached. "
-                "Use 1.0 to disable."
+                "Multiplicative factor applied to the learning rate once `switch_step` is reached. Use 1.0 to disable."
             )
         },
     )

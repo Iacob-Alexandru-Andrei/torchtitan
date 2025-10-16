@@ -12,9 +12,11 @@ rm -rf /dev/shm/*
 
 set -ex
 
+export S3_ENDPOINT_URL='http://taranaki.cl.cam.ac.uk:9000'
+
 # Configuration
-NGPU=${1:-"2"}  # Number of GPUs / replicas (default: 2)
-CONFIG_FILE=${2:-"./torchtitan/experiments/fl/configs/mosaic_mup_16M_torchft.toml"}
+NGPU=${1:-"4"}  # Number of GPUs / replicas (default: 2)
+CONFIG_FILE=${2:-"./torchtitan/experiments/fl/configs/mosaic_mup_16M_torchft_test_long.toml"}
 TRAIN_FILE=${TRAIN_FILE:-"torchtitan.experiments.fl.train"}
 
 # TorchFT lighthouse configuration
@@ -23,7 +25,7 @@ LIGHTHOUSE_PORT="29510"
 LIGHTHOUSE_URL="http://${LIGHTHOUSE_HOST}:${LIGHTHOUSE_PORT}"
 
 # Lighthouse settings
-MIN_REPLICAS=${MIN_REPLICAS:-2}  # Minimum replicas required to start training
+MIN_REPLICAS=${MIN_REPLICAS:-4}  # Minimum replicas required to start training
 QUORUM_TICK_MS=${QUORUM_TICK_MS:-100}  # Quorum tick interval in milliseconds
 
 # Log directory
@@ -108,7 +110,7 @@ for ((replica_id=0; replica_id<${NGPU}; replica_id++)); do
     echo "Replica ${replica_id} started with PID: ${!}"
 
     # Small delay between launching replicas
-    sleep 10
+    sleep 5
 done
 
 echo "All replicas launched. PIDs: ${REPLICA_PIDS[@]}"

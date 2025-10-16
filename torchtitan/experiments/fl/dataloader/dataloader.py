@@ -93,7 +93,9 @@ def _apply_split_overrides(
         batch_size=runtime.batch_size,
     )
     return NormalizedMosaicConfig(
-        dataset_config=normalized.dataset_config, runtime=updated_runtime
+        dataset_config=normalized.dataset_config,
+        runtime=updated_runtime,
+        isolate_grouped_streams=normalized.isolate_grouped_streams,
     )
 
 

@@ -182,6 +182,16 @@ def parallelize_llama_mup(
             cpu_offload=job_config.training.enable_cpu_offload,
             reshard_after_forward_policy=job_config.parallelism.fsdp_reshard_after_forward,
         )
+        if parallel_dims.dp_replicate_enabled:
+            logger.info("Applied HSDP to the model")
+        else:
+            logger.info("Applied FSDP to the model")
+
+        if parallel_dims.cp_enabled:
+            logger.info("Applied Context Parallel to the model")
+
+        if job_config.training.enable_cpu_offload:
+            logger.info("Applied CPU Offloading to the model")
     elif parallel_dims.dp_replicate_enabled:
         if world_mesh.ndim > 1:
             msg = "DDP has not supported > 1D parallelism"
@@ -192,6 +202,7 @@ def parallelize_llama_mup(
             enable_compile=model_compile_enabled,
             enable_compiled_autograd=job_config.parallelism.enable_compiled_autograd,
         )
+        logger.info("Applied DDP to the model")
 
     if (
         model.model_args.tie_word_embeddings

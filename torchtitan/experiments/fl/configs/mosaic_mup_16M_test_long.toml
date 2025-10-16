@@ -1,0 +1,1093 @@
+[job]
+dump_folder = "./outputs"
+description = "Llama 3 debug training with Mosaic streaming"
+print_args = false
+
+[profiling]
+enable_profiling = false
+save_traces_folder = "profile_trace"
+profile_freq = 10
+enable_memory_snapshot = false
+save_memory_snapshot_folder = "memory_snapshot"
+
+[metrics]
+log_freq = 1
+disable_color_printing = false
+enable_tensorboard = false
+save_tb_folder = "tb"
+enable_wandb = true
+save_for_all_ranks = true
+
+[model]
+name = "mosaic_llama3_mup"
+flavor = "16M"
+# test folder with tokenizer.json, for debug purpose only
+hf_assets_path = "./tests/assets/tokenizer"
+# converters = ["float8"]
+
+
+[optimizer]
+name = "ADOPT"
+lr = 0.001953125
+eps = 1e-6
+weight_decay = 0.0
+betas = [0.95,0.9999]
+implementation = "foreach"
+
+# [optimizer.desloc]
+# enabled = false
+# param_sync_every = 32
+# optimizer_sync_every = [32,32]
+# backup_device = "cpu"
+# pin_memory = true
+
+[fl_metrics.optimizer_monitor]
+interval = 8
+only_global = true
+log_metrics = true
+
+[fl_metrics.activation_monitor]
+interval = 8
+ignore_module_types = ["dropout", "ln"]
+
+[fl_metrics.lr_monitor]
+enabled = true
+interval = 8
+
+[fl_metrics.betas_monitor]
+enabled = true
+interval = 8
+
+[fl_metrics.vs_monitor]
+enabled = true
+interval = 8
+
+[lr_scheduler]
+warmup_steps = 512  # lr scheduler warm up, normally 20% of the train steps
+decay_ratio = 0.1  # lr scheduler decay ratio, 80% of the train steps
+decay_type = "sqrt"
+min_lr_factor = 0.0
+switch_step = 10000
+switch_scale = 1000
+
+[training]
+local_batch_size = 4
+global_batch_size = 64
+seq_len = 2048
+max_norm = 1.0  # grad norm clipping
+steps = 5120
+dataset = "c4_test"  # supported datasets: c4_test (2K), c4 (177M)
+
+
+[parallelism]
+data_parallel_replicate_degree = 1
+data_parallel_shard_degree = -1
+fsdp_reshard_after_forward = "default" # default / never / always
+tensor_parallel_degree = 1
+enable_async_tensor_parallel = false
+pipeline_parallel_degree = 1
+context_parallel_degree = 1
+
+[checkpoint]
+enable = false
+folder = "checkpoints"
+interval = 10
+last_save_model_only = false
+export_dtype = "float32"
+async_mode = "async_with_pinned_mem"  # ["disabled", "async", "async_with_pinned_mem"]
+
+[s3_checkpoint]
+enable = false
+bucket = "checkpoints"
+prefix = ""  # Root of bucket
+download_on_start = true
+# run_uuid and remote_checkpoint_folder will be set via RUN_UUID environment variable
+
+[activation_checkpoint]
+mode = "selective"  # ["none", "selective", "full"]
+selective_ac_option = '2'  # 'int' = ac every positive int layer or 'op', ac based on ops policy
+
+[compile]
+enable=false
+components = ["model", "loss"]
+
+[quantize.linear.float8]
+enable_fsdp_float8_all_gather = false
+precompute_float8_dynamic_scale_for_fsdp = false
+filter_fqns = ["output"]
+
+[fault_tolerance]
+enable = false
+process_group = "gloo"
+process_group_timeout_ms = 10000
+replica_id = 0
+group_size = 2
+min_replica_size = 2
+sync_steps = 32
+semi_sync_method = "desloc"  # Options: "diloco", "local_sgd", or comment out for async quorum
+
+[validation]
+enable = false
+dataset = "c4_validation"
+freq = 512
+steps = 32
+
+[unigram_metric]
+enable = true
+download_missing = true
+allow_failures = false
+ignore_index = -100
+num_attempts = 1
+
+
+[mosaic_tokenizer]
+name = "HuggingFaceTB/SmolLM-1.7B"
+
+[mosaic_tokenizer.kwargs]
+model_max_length = 2048
+
+# Mosaic-specific configurations are now at the root level
+[mosaic_dataloader]
+name = "text"
+num_workers = 0
+# prefetch_factor = 2
+pin_memory = true
+persistent_workers = false
+isolate_grouped_streams = true
+
+[mosaic_dataloader.dataset.common]
+max_seq_len = 2048
+download_retry = 2
+download_timeout = 60
+keep_zip = false
+partition_algo = "relaxed"
+shuffle = true
+shuffle_algo = "py1e"
+shuffle_seed = 9176
+sampling_method = "balanced"
+sampling_granularity = 1
+batching_method = "random"
+
+[mosaic_dataloader.dataset.train]
+split = "train"
+root_remote = "s3://smollm-corpus/shared"
+root_local = "/nfs-share/datasets/photon/dataset_cache/smollm-corpus-shared"
+sampling_groups_mode = "grouped"  # set to "concatenate" to merge all sampling groups
+
+[mosaic_dataloader.dataset.train.streams.client_streams.stream_0]
+local = "fineweb_edu_dedup/client_0"
+remote = "fineweb_edu_dedup/client_0"
+proportion = 70
+
+[mosaic_dataloader.dataset.train.streams.client_streams.stream_1]
+local = "fineweb_edu_dedup/client_1"
+remote = "fineweb_edu_dedup/client_1"
+proportion = 70
+
+[mosaic_dataloader.dataset.train.streams.client_streams.stream_2]
+local = "fineweb_edu_dedup/client_2"
+remote = "fineweb_edu_dedup/client_2"
+proportion = 70
+
+[mosaic_dataloader.dataset.train.streams.client_streams.stream_3]
+local = "fineweb_edu_dedup/client_3"
+remote = "fineweb_edu_dedup/client_3"
+proportion = 70
+
+[mosaic_dataloader.dataset.train.streams.client_streams.stream_4]
+local = "cosmo/client_0"
+remote = "cosmo/client_0"
+proportion = 10
+
+
+[mosaic_dataloader.dataset.train.streams.client_streams.stream_5]
+local = "cosmo/client_1"
+remote = "cosmo/client_1"
+proportion = 10
+
+[mosaic_dataloader.dataset.train.streams.client_streams.stream_6]
+local = "cosmo/client_2"
+remote = "cosmo/client_2"
+proportion = 10
+
+[mosaic_dataloader.dataset.train.streams.client_streams.stream_7]
+local = "cosmo/client_3"
+remote = "cosmo/client_3"
+proportion = 10
+
+[mosaic_dataloader.dataset.train.streams.client_streams.stream_8]
+local = "python_edu/client_0"
+remote = "python_edu/client_0"
+proportion = 10
+
+[mosaic_dataloader.dataset.train.streams.client_streams.stream_9]
+local = "python_edu/client_1"
+remote = "python_edu/client_1"
+proportion = 10
+
+[mosaic_dataloader.dataset.train.streams.client_streams.stream_10]
+local = "python_edu/client_2"
+remote = "python_edu/client_2"
+proportion = 10
+
+[mosaic_dataloader.dataset.train.streams.client_streams.stream_11]
+local = "python_edu/client_3"
+remote = "python_edu/client_3"
+proportion = 10
+
+[mosaic_dataloader.dataset.train.streams.client_streams.stream_12]
+local = "fine_math_4plus/client_0"
+remote = "fine_math_4plus/client_0"
+proportion = 5
+
+[mosaic_dataloader.dataset.train.streams.client_streams.stream_13]
+local = "fine_math_4plus/client_1"
+remote = "fine_math_4plus/client_1"
+proportion = 5
+
+[mosaic_dataloader.dataset.train.streams.client_streams.stream_14]
+local = "fine_math_4plus/client_2"
+remote = "fine_math_4plus/client_2"
+proportion = 5
+
+[mosaic_dataloader.dataset.train.streams.client_streams.stream_15]
+local = "fine_math_4plus/client_3"
+remote = "fine_math_4plus/client_3"
+proportion = 5
+
+
+[mosaic_dataloader.dataset.train.streams.client_streams.stream_16]
+local = "infiwebmath_4plus/client_0"
+remote = "infiwebmath_4plus/client_0"
+proportion = 5
+
+[mosaic_dataloader.dataset.train.streams.client_streams.stream_17]
+local = "infiwebmath_4plus/client_1"
+remote = "infiwebmath_4plus/client_1"
+proportion = 5
+
+[mosaic_dataloader.dataset.train.streams.client_streams.stream_18]
+local = "infiwebmath_4plus/client_2"
+remote = "infiwebmath_4plus/client_2"
+proportion = 5
+
+[mosaic_dataloader.dataset.train.streams.client_streams.stream_19]
+local = "infiwebmath_4plus/client_3"
+remote = "infiwebmath_4plus/client_3"
+proportion = 5
+
+[mosaic_dataloader.dataset.train.streams.client_streams.stream_20]
+local = "fineweb_edu_dedup/client_4"
+remote = "fineweb_edu_dedup/client_4"
+proportion = 70
+
+[mosaic_dataloader.dataset.train.streams.client_streams.stream_21]
+local = "fineweb_edu_dedup/client_5"
+remote = "fineweb_edu_dedup/client_5"
+proportion = 70
+
+[mosaic_dataloader.dataset.train.streams.client_streams.stream_22]
+local = "fineweb_edu_dedup/client_6"
+remote = "fineweb_edu_dedup/client_6"
+proportion = 70
+
+[mosaic_dataloader.dataset.train.streams.client_streams.stream_23]
+local = "fineweb_edu_dedup/client_7"
+remote = "fineweb_edu_dedup/client_7"
+proportion = 70
+
+[mosaic_dataloader.dataset.train.streams.client_streams.stream_24]
+local = "cosmo/client_4"
+remote = "cosmo/client_4"
+proportion = 10
+
+[mosaic_dataloader.dataset.train.streams.client_streams.stream_25]
+local = "cosmo/client_5"
+remote = "cosmo/client_5"
+proportion = 10
+
+[mosaic_dataloader.dataset.train.streams.client_streams.stream_26]
+local = "cosmo/client_6"
+remote = "cosmo/client_6"
+proportion = 10
+
+[mosaic_dataloader.dataset.train.streams.client_streams.stream_27]
+local = "cosmo/client_7"
+remote = "cosmo/client_7"
+proportion = 10
+
+[mosaic_dataloader.dataset.train.streams.client_streams.stream_28]
+local = "python_edu/client_4"
+remote = "python_edu/client_4"
+proportion = 10
+
+[mosaic_dataloader.dataset.train.streams.client_streams.stream_29]
+local = "python_edu/client_5"
+remote = "python_edu/client_5"
+proportion = 10
+
+[mosaic_dataloader.dataset.train.streams.client_streams.stream_30]
+local = "python_edu/client_6"
+remote = "python_edu/client_6"
+proportion = 10
+
+[mosaic_dataloader.dataset.train.streams.client_streams.stream_31]
+local = "python_edu/client_7"
+remote = "python_edu/client_7"
+proportion = 10
+
+[mosaic_dataloader.dataset.train.streams.client_streams.stream_32]
+local = "fine_math_4plus/client_4"
+remote = "fine_math_4plus/client_4"
+proportion = 5
+
+[mosaic_dataloader.dataset.train.streams.client_streams.stream_33]
+local = "fine_math_4plus/client_5"
+remote = "fine_math_4plus/client_5"
+proportion = 5
+
+[mosaic_dataloader.dataset.train.streams.client_streams.stream_34]
+local = "fine_math_4plus/client_6"
+remote = "fine_math_4plus/client_6"
+proportion = 5
+
+[mosaic_dataloader.dataset.train.streams.client_streams.stream_35]
+local = "fine_math_4plus/client_7"
+remote = "fine_math_4plus/client_7"
+proportion = 5
+
+[mosaic_dataloader.dataset.train.streams.client_streams.stream_36]
+local = "infiwebmath_4plus/client_4"
+remote = "infiwebmath_4plus/client_4"
+proportion = 5
+
+[mosaic_dataloader.dataset.train.streams.client_streams.stream_37]
+local = "infiwebmath_4plus/client_5"
+remote = "infiwebmath_4plus/client_5"
+proportion = 5
+
+[mosaic_dataloader.dataset.train.streams.client_streams.stream_38]
+local = "infiwebmath_4plus/client_6"
+remote = "infiwebmath_4plus/client_6"
+proportion = 5
+
+[mosaic_dataloader.dataset.train.streams.client_streams.stream_39]
+local = "infiwebmath_4plus/client_7"
+remote = "infiwebmath_4plus/client_7"
+proportion = 5
+
+[mosaic_dataloader.dataset.train.streams.client_streams.stream_40]
+local = "fineweb_edu_dedup/client_8"
+remote = "fineweb_edu_dedup/client_8"
+proportion = 70
+
+[mosaic_dataloader.dataset.train.streams.client_streams.stream_41]
+local = "fineweb_edu_dedup/client_9"
+remote = "fineweb_edu_dedup/client_9"
+proportion = 70
+
+[mosaic_dataloader.dataset.train.streams.client_streams.stream_42]
+local = "fineweb_edu_dedup/client_10"
+remote = "fineweb_edu_dedup/client_10"
+proportion = 70
+
+[mosaic_dataloader.dataset.train.streams.client_streams.stream_43]
+local = "fineweb_edu_dedup/client_11"
+remote = "fineweb_edu_dedup/client_11"
+proportion = 70
+
+[mosaic_dataloader.dataset.train.streams.client_streams.stream_44]
+local = "cosmo/client_8"
+remote = "cosmo/client_8"
+proportion = 10
+
+[mosaic_dataloader.dataset.train.streams.client_streams.stream_45]
+local = "cosmo/client_9"
+remote = "cosmo/client_9"
+proportion = 10
+
+[mosaic_dataloader.dataset.train.streams.client_streams.stream_46]
+local = "cosmo/client_10"
+remote = "cosmo/client_10"
+proportion = 10
+
+[mosaic_dataloader.dataset.train.streams.client_streams.stream_47]
+local = "cosmo/client_11"
+remote = "cosmo/client_11"
+proportion = 10
+
+[mosaic_dataloader.dataset.train.streams.client_streams.stream_48]
+local = "python_edu/client_8"
+remote = "python_edu/client_8"
+proportion = 10
+
+[mosaic_dataloader.dataset.train.streams.client_streams.stream_49]
+local = "python_edu/client_9"
+remote = "python_edu/client_9"
+proportion = 10
+
+[mosaic_dataloader.dataset.train.streams.client_streams.stream_50]
+local = "python_edu/client_10"
+remote = "python_edu/client_10"
+proportion = 10
+
+[mosaic_dataloader.dataset.train.streams.client_streams.stream_51]
+local = "python_edu/client_11"
+remote = "python_edu/client_11"
+proportion = 10
+
+[mosaic_dataloader.dataset.train.streams.client_streams.stream_52]
+local = "fine_math_4plus/client_8"
+remote = "fine_math_4plus/client_8"
+proportion = 5
+
+[mosaic_dataloader.dataset.train.streams.client_streams.stream_53]
+local = "fine_math_4plus/client_9"
+remote = "fine_math_4plus/client_9"
+proportion = 5
+
+[mosaic_dataloader.dataset.train.streams.client_streams.stream_54]
+local = "fine_math_4plus/client_10"
+remote = "fine_math_4plus/client_10"
+proportion = 5
+
+[mosaic_dataloader.dataset.train.streams.client_streams.stream_55]
+local = "fine_math_4plus/client_11"
+remote = "fine_math_4plus/client_11"
+proportion = 5
+
+[mosaic_dataloader.dataset.train.streams.client_streams.stream_56]
+local = "infiwebmath_4plus/client_8"
+remote = "infiwebmath_4plus/client_8"
+proportion = 5
+
+[mosaic_dataloader.dataset.train.streams.client_streams.stream_57]
+local = "infiwebmath_4plus/client_9"
+remote = "infiwebmath_4plus/client_9"
+proportion = 5
+
+[mosaic_dataloader.dataset.train.streams.client_streams.stream_58]
+local = "infiwebmath_4plus/client_10"
+remote = "infiwebmath_4plus/client_10"
+proportion = 5
+
+[mosaic_dataloader.dataset.train.streams.client_streams.stream_59]
+local = "infiwebmath_4plus/client_11"
+remote = "infiwebmath_4plus/client_11"
+proportion = 5
+
+[mosaic_dataloader.dataset.train.streams.client_streams.stream_60]
+local = "fineweb_edu_dedup/client_12"
+remote = "fineweb_edu_dedup/client_12"
+proportion = 70
+
+[mosaic_dataloader.dataset.train.streams.client_streams.stream_61]
+local = "fineweb_edu_dedup/client_13"
+remote = "fineweb_edu_dedup/client_13"
+proportion = 70
+
+[mosaic_dataloader.dataset.train.streams.client_streams.stream_62]
+local = "fineweb_edu_dedup/client_14"
+remote = "fineweb_edu_dedup/client_14"
+proportion = 70
+
+[mosaic_dataloader.dataset.train.streams.client_streams.stream_63]
+local = "fineweb_edu_dedup/client_15"
+remote = "fineweb_edu_dedup/client_15"
+proportion = 70
+
+[mosaic_dataloader.dataset.train.streams.client_streams.stream_64]
+local = "cosmo/client_12"
+remote = "cosmo/client_12"
+proportion = 10
+
+[mosaic_dataloader.dataset.train.streams.client_streams.stream_65]
+local = "cosmo/client_13"
+remote = "cosmo/client_13"
+proportion = 10
+
+[mosaic_dataloader.dataset.train.streams.client_streams.stream_66]
+local = "cosmo/client_14"
+remote = "cosmo/client_14"
+proportion = 10
+
+[mosaic_dataloader.dataset.train.streams.client_streams.stream_67]
+local = "cosmo/client_15"
+remote = "cosmo/client_15"
+proportion = 10
+
+[mosaic_dataloader.dataset.train.streams.client_streams.stream_68]
+local = "python_edu/client_12"
+remote = "python_edu/client_12"
+proportion = 10
+
+[mosaic_dataloader.dataset.train.streams.client_streams.stream_69]
+local = "python_edu/client_13"
+remote = "python_edu/client_13"
+proportion = 10
+
+[mosaic_dataloader.dataset.train.streams.client_streams.stream_70]
+local = "python_edu/client_14"
+remote = "python_edu/client_14"
+proportion = 10
+
+[mosaic_dataloader.dataset.train.streams.client_streams.stream_71]
+local = "python_edu/client_15"
+remote = "python_edu/client_15"
+proportion = 10
+
+[mosaic_dataloader.dataset.train.streams.client_streams.stream_72]
+local = "fine_math_4plus/client_12"
+remote = "fine_math_4plus/client_12"
+proportion = 5
+
+[mosaic_dataloader.dataset.train.streams.client_streams.stream_73]
+local = "fine_math_4plus/client_13"
+remote = "fine_math_4plus/client_13"
+proportion = 5
+
+[mosaic_dataloader.dataset.train.streams.client_streams.stream_74]
+local = "fine_math_4plus/client_14"
+remote = "fine_math_4plus/client_14"
+proportion = 5
+
+[mosaic_dataloader.dataset.train.streams.client_streams.stream_75]
+local = "fine_math_4plus/client_15"
+remote = "fine_math_4plus/client_15"
+proportion = 5
+
+[mosaic_dataloader.dataset.train.streams.client_streams.stream_76]
+local = "infiwebmath_4plus/client_12"
+remote = "infiwebmath_4plus/client_12"
+proportion = 5
+
+[mosaic_dataloader.dataset.train.streams.client_streams.stream_77]
+local = "infiwebmath_4plus/client_13"
+remote = "infiwebmath_4plus/client_13"
+proportion = 5
+
+[mosaic_dataloader.dataset.train.streams.client_streams.stream_78]
+local = "infiwebmath_4plus/client_14"
+remote = "infiwebmath_4plus/client_14"
+proportion = 5
+
+[mosaic_dataloader.dataset.train.streams.client_streams.stream_79]
+local = "infiwebmath_4plus/client_15"
+remote = "infiwebmath_4plus/client_15"
+proportion = 5
+
+[mosaic_dataloader.dataset.train.sampling_groups.group_0]
+streams = [
+    "stream_0",
+    "stream_1",
+    "stream_2",
+    "stream_3",
+    "stream_4",
+    "stream_5",
+    "stream_6",
+    "stream_7",
+    "stream_8",
+    "stream_9",
+    "stream_10",
+    "stream_11",
+    "stream_12",
+    "stream_13",
+    "stream_14",
+    "stream_15",
+    "stream_16",
+    "stream_17",
+    "stream_18",
+    "stream_19",
+]
+
+[mosaic_dataloader.dataset.train.sampling_groups.group_1]
+streams = [
+    "stream_20",
+    "stream_21",
+    "stream_22",
+    "stream_23",
+    "stream_24",
+    "stream_25",
+    "stream_26",
+    "stream_27",
+    "stream_28",
+    "stream_29",
+    "stream_30",
+    "stream_31",
+    "stream_32",
+    "stream_33",
+    "stream_34",
+    "stream_35",
+    "stream_36",
+    "stream_37",
+    "stream_38",
+    "stream_39",
+]
+
+[mosaic_dataloader.dataset.train.sampling_groups.group_2]
+streams = [
+    "stream_40",
+    "stream_41",
+    "stream_42",
+    "stream_43",
+    "stream_44",
+    "stream_45",
+    "stream_46",
+    "stream_47",
+    "stream_48",
+    "stream_49",
+    "stream_50",
+    "stream_51",
+    "stream_52",
+    "stream_53",
+    "stream_54",
+    "stream_55",
+    "stream_56",
+    "stream_57",
+    "stream_58",
+    "stream_59",
+]
+
+[mosaic_dataloader.dataset.train.sampling_groups.group_3]
+streams = [
+    "stream_60",
+    "stream_61",
+    "stream_62",
+    "stream_63",
+    "stream_64",
+    "stream_65",
+    "stream_66",
+    "stream_67",
+    "stream_68",
+    "stream_69",
+    "stream_70",
+    "stream_71",
+    "stream_72",
+    "stream_73",
+    "stream_74",
+    "stream_75",
+    "stream_76",
+    "stream_77",
+    "stream_78",
+    "stream_79",
+]
+
+[mosaic_dataloader.dataset.val]
+# The validation samples are stored under the "train" split on disk.
+split = "train"
+root_remote = "s3://smollm-corpus/shared"
+root_local = "/nfs-share/datasets/photon/dataset_cache/smollm-corpus-shared-val"
+subset_num_samples = 512
+sampling_groups_mode = "grouped"
+
+[mosaic_dataloader.dataset.val.streams.client_streams.stream_0]
+local = "fineweb_edu_dedup/client_0"
+remote = "fineweb_edu_dedup/client_0"
+proportion = 70
+
+[mosaic_dataloader.dataset.val.streams.client_streams.stream_1]
+local = "fineweb_edu_dedup/client_1"
+remote = "fineweb_edu_dedup/client_1"
+proportion = 70
+
+[mosaic_dataloader.dataset.val.streams.client_streams.stream_2]
+local = "fineweb_edu_dedup/client_2"
+remote = "fineweb_edu_dedup/client_2"
+proportion = 70
+
+[mosaic_dataloader.dataset.val.streams.client_streams.stream_3]
+local = "fineweb_edu_dedup/client_3"
+remote = "fineweb_edu_dedup/client_3"
+proportion = 70
+
+[mosaic_dataloader.dataset.val.streams.client_streams.stream_4]
+local = "cosmo/client_0"
+remote = "cosmo/client_0"
+proportion = 10
+
+[mosaic_dataloader.dataset.val.streams.client_streams.stream_5]
+local = "cosmo/client_1"
+remote = "cosmo/client_1"
+proportion = 10
+
+[mosaic_dataloader.dataset.val.streams.client_streams.stream_6]
+local = "cosmo/client_2"
+remote = "cosmo/client_2"
+proportion = 10
+
+[mosaic_dataloader.dataset.val.streams.client_streams.stream_7]
+local = "cosmo/client_3"
+remote = "cosmo/client_3"
+proportion = 10
+
+[mosaic_dataloader.dataset.val.streams.client_streams.stream_8]
+local = "python_edu/client_0"
+remote = "python_edu/client_0"
+proportion = 10
+
+[mosaic_dataloader.dataset.val.streams.client_streams.stream_9]
+local = "python_edu/client_1"
+remote = "python_edu/client_1"
+proportion = 10
+
+[mosaic_dataloader.dataset.val.streams.client_streams.stream_10]
+local = "python_edu/client_2"
+remote = "python_edu/client_2"
+proportion = 10
+
+[mosaic_dataloader.dataset.val.streams.client_streams.stream_11]
+local = "python_edu/client_3"
+remote = "python_edu/client_3"
+proportion = 10
+
+[mosaic_dataloader.dataset.val.streams.client_streams.stream_12]
+local = "fine_math_4plus/client_0"
+remote = "fine_math_4plus/client_0"
+proportion = 5
+
+[mosaic_dataloader.dataset.val.streams.client_streams.stream_13]
+local = "fine_math_4plus/client_1"
+remote = "fine_math_4plus/client_1"
+proportion = 5
+
+[mosaic_dataloader.dataset.val.streams.client_streams.stream_14]
+local = "fine_math_4plus/client_2"
+remote = "fine_math_4plus/client_2"
+proportion = 5
+
+[mosaic_dataloader.dataset.val.streams.client_streams.stream_15]
+local = "fine_math_4plus/client_3"
+remote = "fine_math_4plus/client_3"
+proportion = 5
+
+[mosaic_dataloader.dataset.val.streams.client_streams.stream_16]
+local = "infiwebmath_4plus/client_0"
+remote = "infiwebmath_4plus/client_0"
+proportion = 5
+
+[mosaic_dataloader.dataset.val.streams.client_streams.stream_17]
+local = "infiwebmath_4plus/client_1"
+remote = "infiwebmath_4plus/client_1"
+proportion = 5
+
+[mosaic_dataloader.dataset.val.streams.client_streams.stream_18]
+local = "infiwebmath_4plus/client_2"
+remote = "infiwebmath_4plus/client_2"
+proportion = 5
+
+[mosaic_dataloader.dataset.val.streams.client_streams.stream_19]
+local = "infiwebmath_4plus/client_3"
+remote = "infiwebmath_4plus/client_3"
+proportion = 5
+
+[mosaic_dataloader.dataset.val.streams.client_streams.stream_20]
+local = "fineweb_edu_dedup/client_4"
+remote = "fineweb_edu_dedup/client_4"
+proportion = 70
+
+[mosaic_dataloader.dataset.val.streams.client_streams.stream_21]
+local = "fineweb_edu_dedup/client_5"
+remote = "fineweb_edu_dedup/client_5"
+proportion = 70
+
+[mosaic_dataloader.dataset.val.streams.client_streams.stream_22]
+local = "fineweb_edu_dedup/client_6"
+remote = "fineweb_edu_dedup/client_6"
+proportion = 70
+
+[mosaic_dataloader.dataset.val.streams.client_streams.stream_23]
+local = "fineweb_edu_dedup/client_7"
+remote = "fineweb_edu_dedup/client_7"
+proportion = 70
+
+[mosaic_dataloader.dataset.val.streams.client_streams.stream_24]
+local = "cosmo/client_4"
+remote = "cosmo/client_4"
+proportion = 10
+
+[mosaic_dataloader.dataset.val.streams.client_streams.stream_25]
+local = "cosmo/client_5"
+remote = "cosmo/client_5"
+proportion = 10
+
+[mosaic_dataloader.dataset.val.streams.client_streams.stream_26]
+local = "cosmo/client_6"
+remote = "cosmo/client_6"
+proportion = 10
+
+[mosaic_dataloader.dataset.val.streams.client_streams.stream_27]
+local = "cosmo/client_7"
+remote = "cosmo/client_7"
+proportion = 10
+
+[mosaic_dataloader.dataset.val.streams.client_streams.stream_28]
+local = "python_edu/client_4"
+remote = "python_edu/client_4"
+proportion = 10
+
+[mosaic_dataloader.dataset.val.streams.client_streams.stream_29]
+local = "python_edu/client_5"
+remote = "python_edu/client_5"
+proportion = 10
+
+[mosaic_dataloader.dataset.val.streams.client_streams.stream_30]
+local = "python_edu/client_6"
+remote = "python_edu/client_6"
+proportion = 10
+
+[mosaic_dataloader.dataset.val.streams.client_streams.stream_31]
+local = "python_edu/client_7"
+remote = "python_edu/client_7"
+proportion = 10
+
+[mosaic_dataloader.dataset.val.streams.client_streams.stream_32]
+local = "fine_math_4plus/client_4"
+remote = "fine_math_4plus/client_4"
+proportion = 5
+
+[mosaic_dataloader.dataset.val.streams.client_streams.stream_33]
+local = "fine_math_4plus/client_5"
+remote = "fine_math_4plus/client_5"
+proportion = 5
+
+[mosaic_dataloader.dataset.val.streams.client_streams.stream_34]
+local = "fine_math_4plus/client_6"
+remote = "fine_math_4plus/client_6"
+proportion = 5
+
+[mosaic_dataloader.dataset.val.streams.client_streams.stream_35]
+local = "fine_math_4plus/client_7"
+remote = "fine_math_4plus/client_7"
+proportion = 5
+
+[mosaic_dataloader.dataset.val.streams.client_streams.stream_36]
+local = "infiwebmath_4plus/client_4"
+remote = "infiwebmath_4plus/client_4"
+proportion = 5
+
+[mosaic_dataloader.dataset.val.streams.client_streams.stream_37]
+local = "infiwebmath_4plus/client_5"
+remote = "infiwebmath_4plus/client_5"
+proportion = 5
+
+[mosaic_dataloader.dataset.val.streams.client_streams.stream_38]
+local = "infiwebmath_4plus/client_6"
+remote = "infiwebmath_4plus/client_6"
+proportion = 5
+
+[mosaic_dataloader.dataset.val.streams.client_streams.stream_39]
+local = "infiwebmath_4plus/client_7"
+remote = "infiwebmath_4plus/client_7"
+proportion = 5
+
+[mosaic_dataloader.dataset.val.streams.client_streams.stream_40]
+local = "fineweb_edu_dedup/client_8"
+remote = "fineweb_edu_dedup/client_8"
+proportion = 70
+
+[mosaic_dataloader.dataset.val.streams.client_streams.stream_41]
+local = "fineweb_edu_dedup/client_9"
+remote = "fineweb_edu_dedup/client_9"
+proportion = 70
+
+[mosaic_dataloader.dataset.val.streams.client_streams.stream_42]
+local = "fineweb_edu_dedup/client_10"
+remote = "fineweb_edu_dedup/client_10"
+proportion = 70
+
+[mosaic_dataloader.dataset.val.streams.client_streams.stream_43]
+local = "fineweb_edu_dedup/client_11"
+remote = "fineweb_edu_dedup/client_11"
+proportion = 70
+
+[mosaic_dataloader.dataset.val.streams.client_streams.stream_44]
+local = "cosmo/client_8"
+remote = "cosmo/client_8"
+proportion = 10
+
+[mosaic_dataloader.dataset.val.streams.client_streams.stream_45]
+local = "cosmo/client_9"
+remote = "cosmo/client_9"
+proportion = 10
+
+[mosaic_dataloader.dataset.val.streams.client_streams.stream_46]
+local = "cosmo/client_10"
+remote = "cosmo/client_10"
+proportion = 10
+
+[mosaic_dataloader.dataset.val.streams.client_streams.stream_47]
+local = "cosmo/client_11"
+remote = "cosmo/client_11"
+proportion = 10
+
+[mosaic_dataloader.dataset.val.streams.client_streams.stream_48]
+local = "python_edu/client_8"
+remote = "python_edu/client_8"
+proportion = 10
+
+[mosaic_dataloader.dataset.val.streams.client_streams.stream_49]
+local = "python_edu/client_9"
+remote = "python_edu/client_9"
+proportion = 10
+
+[mosaic_dataloader.dataset.val.streams.client_streams.stream_50]
+local = "python_edu/client_10"
+remote = "python_edu/client_10"
+proportion = 10
+
+[mosaic_dataloader.dataset.val.streams.client_streams.stream_51]
+local = "python_edu/client_11"
+remote = "python_edu/client_11"
+proportion = 10
+
+[mosaic_dataloader.dataset.val.streams.client_streams.stream_52]
+local = "fine_math_4plus/client_8"
+remote = "fine_math_4plus/client_8"
+proportion = 5
+
+[mosaic_dataloader.dataset.val.streams.client_streams.stream_53]
+local = "fine_math_4plus/client_9"
+remote = "fine_math_4plus/client_9"
+proportion = 5
+
+[mosaic_dataloader.dataset.val.streams.client_streams.stream_54]
+local = "fine_math_4plus/client_10"
+remote = "fine_math_4plus/client_10"
+proportion = 5
+
+[mosaic_dataloader.dataset.val.streams.client_streams.stream_55]
+local = "fine_math_4plus/client_11"
+remote = "fine_math_4plus/client_11"
+proportion = 5
+
+[mosaic_dataloader.dataset.val.streams.client_streams.stream_56]
+local = "infiwebmath_4plus/client_8"
+remote = "infiwebmath_4plus/client_8"
+proportion = 5
+
+[mosaic_dataloader.dataset.val.streams.client_streams.stream_57]
+local = "infiwebmath_4plus/client_9"
+remote = "infiwebmath_4plus/client_9"
+proportion = 5
+
+[mosaic_dataloader.dataset.val.streams.client_streams.stream_58]
+local = "infiwebmath_4plus/client_10"
+remote = "infiwebmath_4plus/client_10"
+proportion = 5
+
+[mosaic_dataloader.dataset.val.streams.client_streams.stream_59]
+local = "infiwebmath_4plus/client_11"
+remote = "infiwebmath_4plus/client_11"
+proportion = 5
+
+[mosaic_dataloader.dataset.val.streams.client_streams.stream_60]
+local = "fineweb_edu_dedup/client_12"
+remote = "fineweb_edu_dedup/client_12"
+proportion = 70
+
+[mosaic_dataloader.dataset.val.streams.client_streams.stream_61]
+local = "fineweb_edu_dedup/client_13"
+remote = "fineweb_edu_dedup/client_13"
+proportion = 70
+
+[mosaic_dataloader.dataset.val.streams.client_streams.stream_62]
+local = "fineweb_edu_dedup/client_14"
+remote = "fineweb_edu_dedup/client_14"
+proportion = 70
+
+[mosaic_dataloader.dataset.val.streams.client_streams.stream_63]
+local = "fineweb_edu_dedup/client_15"
+remote = "fineweb_edu_dedup/client_15"
+proportion = 70
+
+[mosaic_dataloader.dataset.val.streams.client_streams.stream_64]
+local = "cosmo/client_12"
+remote = "cosmo/client_12"
+proportion = 10
+
+[mosaic_dataloader.dataset.val.streams.client_streams.stream_65]
+local = "cosmo/client_13"
+remote = "cosmo/client_13"
+proportion = 10
+
+[mosaic_dataloader.dataset.val.streams.client_streams.stream_66]
+local = "cosmo/client_14"
+remote = "cosmo/client_14"
+proportion = 10
+
+[mosaic_dataloader.dataset.val.streams.client_streams.stream_67]
+local = "cosmo/client_15"
+remote = "cosmo/client_15"
+proportion = 10
+
+[mosaic_dataloader.dataset.val.streams.client_streams.stream_68]
+local = "python_edu/client_12"
+remote = "python_edu/client_12"
+proportion = 10
+
+[mosaic_dataloader.dataset.val.streams.client_streams.stream_69]
+local = "python_edu/client_13"
+remote = "python_edu/client_13"
+proportion = 10
+
+[mosaic_dataloader.dataset.val.streams.client_streams.stream_70]
+local = "python_edu/client_14"
+remote = "python_edu/client_14"
+proportion = 10
+
+[mosaic_dataloader.dataset.val.streams.client_streams.stream_71]
+local = "python_edu/client_15"
+remote = "python_edu/client_15"
+proportion = 10
+
+[mosaic_dataloader.dataset.val.streams.client_streams.stream_72]
+local = "fine_math_4plus/client_12"
+remote = "fine_math_4plus/client_12"
+proportion = 5
+
+[mosaic_dataloader.dataset.val.streams.client_streams.stream_73]
+local = "fine_math_4plus/client_13"
+remote = "fine_math_4plus/client_13"
+proportion = 5
+
+[mosaic_dataloader.dataset.val.streams.client_streams.stream_74]
+local = "fine_math_4plus/client_14"
+remote = "fine_math_4plus/client_14"
+proportion = 5
+
+[mosaic_dataloader.dataset.val.streams.client_streams.stream_75]
+local = "fine_math_4plus/client_15"
+remote = "fine_math_4plus/client_15"
+proportion = 5
+
+[mosaic_dataloader.dataset.val.streams.client_streams.stream_76]
+local = "infiwebmath_4plus/client_12"
+remote = "infiwebmath_4plus/client_12"
+proportion = 5
+
+[mosaic_dataloader.dataset.val.streams.client_streams.stream_77]
+local = "infiwebmath_4plus/client_13"
+remote = "infiwebmath_4plus/client_13"
+proportion = 5
+
+[mosaic_dataloader.dataset.val.streams.client_streams.stream_78]
+local = "infiwebmath_4plus/client_14"
+remote = "infiwebmath_4plus/client_14"
+proportion = 5
+
+[mosaic_dataloader.dataset.val.streams.client_streams.stream_79]
+local = "infiwebmath_4plus/client_15"
+remote = "infiwebmath_4plus/client_15"
+proportion = 5
+
+[mosaic_dataloader.dataset.val.sampling_groups.group_0]
+streams = ["stream_0", "stream_1", "stream_2", "stream_3", "stream_4", "stream_5", "stream_6", "stream_7", "stream_8", "stream_9", "stream_10", "stream_11", "stream_12", "stream_13", "stream_14", "stream_15", "stream_16", "stream_17", "stream_18", "stream_19"]
+
+[mosaic_dataloader.dataset.val.sampling_groups.group_1]
+streams = ["stream_20", "stream_21", "stream_22", "stream_23", "stream_24", "stream_25", "stream_26", "stream_27", "stream_28", "stream_29", "stream_30", "stream_31", "stream_32", "stream_33", "stream_34", "stream_35", "stream_36", "stream_37", "stream_38", "stream_39"]
+
+[mosaic_dataloader.dataset.val.sampling_groups.group_2]
+streams = ["stream_40", "stream_41", "stream_42", "stream_43", "stream_44", "stream_45", "stream_46", "stream_47", "stream_48", "stream_49", "stream_50", "stream_51", "stream_52", "stream_53", "stream_54", "stream_55", "stream_56", "stream_57", "stream_58", "stream_59"]
+
+[mosaic_dataloader.dataset.val.sampling_groups.group_3]
+streams = ["stream_60", "stream_61", "stream_62", "stream_63", "stream_64", "stream_65", "stream_66", "stream_67", "stream_68", "stream_69", "stream_70", "stream_71", "stream_72", "stream_73", "stream_74", "stream_75", "stream_76", "stream_77", "stream_78", "stream_79"]

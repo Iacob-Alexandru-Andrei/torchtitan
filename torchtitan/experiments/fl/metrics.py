@@ -1321,11 +1321,10 @@ class FLMetricsProcessor(MetricsProcessor):
             return True
         return base_decision
 
-    def _build_unigram_payload(self, mesh: DeviceMesh | None) -> dict[str, float]:
+    def _build_unigram_payload(
+        self, mesh: DeviceMesh | None
+    ) -> tuple[dict[str, float], dict[str, float]]:
         local_loss, local_items = self.unigram_metrics.collect(reset=False)
-        if local_items == 0:
-            self.unigram_metrics.reset()
-            return {"pure_unigram_cross_entropy": 0.0}
 
         device = torch.device("cpu")
         if self.model_parts:
@@ -1340,20 +1339,30 @@ class FLMetricsProcessor(MetricsProcessor):
         )
 
         if mesh is not None:
-            loss_tensor = dist_utils.dist_sum(loss_tensor, mesh)
-            items_tensor = dist_utils.dist_sum(items_tensor, mesh)
+            reduced_loss = dist_utils.dist_sum(loss_tensor, mesh)
+            reduced_items = dist_utils.dist_sum(items_tensor, mesh)
+        else:
+            reduced_loss = float(loss_tensor)
+            reduced_items = float(items_tensor)
 
-        global_loss = float(loss_tensor)
-        global_items = float(items_tensor)
-        self.unigram_metrics.reset()
-
-        if global_items <= 0:
-            return {"pure_unigram_cross_entropy": 0.0}
-
-        return {
-            "pure_unigram_cross_entropy": global_loss / global_items,
-            "pure_unigram_cross_entropy/token_count": global_items,
+        local_avg = float(local_loss) / float(local_items) if local_items > 0 else 0.0
+        local_payload = {
+            "pure_unigram_cross_entropy/local": local_avg,
+            "pure_unigram_cross_entropy/token_count/local": float(local_items),
         }
+
+        global_items = float(reduced_items)
+        global_payload: dict[str, float]
+        if global_items > 0:
+            global_payload = {
+                "pure_unigram_cross_entropy": float(reduced_loss) / global_items,
+                "pure_unigram_cross_entropy/token_count": global_items,
+            }
+        else:
+            global_payload = {"pure_unigram_cross_entropy": 0.0}
+
+        self.unigram_metrics.reset()
+        return local_payload, global_payload
 
     def update_unigram_metrics(self, labels: Tensor) -> None:
         """Update tracked unigram metrics with the latest batch labels."""
@@ -1431,10 +1440,14 @@ class FLMetricsProcessor(MetricsProcessor):
             if self.parallel_dims.dp_cp_enabled
             else None
         )
-        unigram_payload = self._build_unigram_payload(mesh)
+        local_unigram_payload, global_unigram_payload = self._build_unigram_payload(
+            mesh
+        )
+        if local_unigram_payload:
+            self.logger.log(local_unigram_payload, step)
         combined_metrics = dict(extra_metrics) if extra_metrics else {}
-        if unigram_payload:
-            combined_metrics.update(unigram_payload)
+        if global_unigram_payload:
+            combined_metrics.update(global_unigram_payload)
 
         super().log(
             step,
@@ -1455,9 +1468,13 @@ class FLMetricsProcessor(MetricsProcessor):
             if self.parallel_dims.dp_cp_enabled
             else None
         )
-        unigram_payload = self._build_unigram_payload(mesh)
-        if unigram_payload:
-            self.logger.log(unigram_payload, step)
+        local_unigram_payload, global_unigram_payload = self._build_unigram_payload(
+            mesh
+        )
+        if local_unigram_payload:
+            self.logger.log(local_unigram_payload, step)
+        if global_unigram_payload:
+            self.logger.log(global_unigram_payload, step)
         self._ensure_callbacks_setup()
         self._run_validation_callbacks(loss, step)
 

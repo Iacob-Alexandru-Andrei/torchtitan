@@ -48,7 +48,7 @@ You are analyzing a codebase dependency graph optimized for AI understanding. Th
 ---
 
 # CODE_GRAPH
-NODES:24 EDGES:7
+NODES:26 EDGES:7
 
 ## DIRECTORY_TREE
 ROOT: torchtitan/experiments/fl/tests/
@@ -56,9 +56,9 @@ ROOT: torchtitan/experiments/fl/tests/
 ## ARCHITECTURAL_CLUSTERS
 
 ### TESTS
-NODES:24 CALL_DEPTH:1
+NODES:26 CALL_DEPTH:1
 
-test_unigram_metrics.py→[__init__((self,*_args: object,**_kwargs: object))[CTOR,DUNDER],add_state((self,name: str,default: torch.Tensor,dist_reduce_fx: str | None = None,)),register_buffer((self,name: str,tensor: torch.Tensor)),__init__((self,*_args: object,**_kwargs: object))[CTOR,DUNDER],__init__((self,*_args: object,**_kwargs: object))[CTOR,DUNDER],get_peak_stats((self)),reset_peak_stats((self)),test_unigram_manager_aggregation_and_reset(void)[TEST],test_unigram_manager_teardown_removes_metric(void)[TEST],test_fl_metrics_processor_registers_expected_callbacks(void)[TEST]] 
+test_unigram_metrics.py→[__init__((self,*_args: object,**_kwargs: object))[CTOR,DUNDER],add_state((self,name: str,default: torch.Tensor,dist_reduce_fx: str | None = None,)),register_buffer((self,name: str,tensor: torch.Tensor)),__init__((self,*_args: object,**_kwargs: object))[CTOR,DUNDER],__init__((self,*_args: object,**_kwargs: object))[CTOR,DUNDER],get_peak_stats((self)),reset_peak_stats((self)),test_unigram_manager_aggregation_and_reset(void)[TEST],test_unigram_manager_teardown_removes_metric(void)[TEST],test_fl_metrics_processor_registers_expected_callbacks(void)[TEST],test_unigram_payload_reports_local_and_global_metrics(void)[TEST],test_unigram_local_metric_logged_before_global(void)[TEST]] 
 
 ## DEPENDENCY_PATTERNS
 

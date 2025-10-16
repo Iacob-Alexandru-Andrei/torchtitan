@@ -217,6 +217,7 @@ def _make_job_config():
             persistent_workers=True,
             drop_last=True,
             dataset={},
+            isolate_grouped_streams=False,
         ),
         training=types.SimpleNamespace(local_batch_size=8),
         validation=types.SimpleNamespace(local_batch_size=8),
@@ -294,7 +295,9 @@ def test_setup_unigram_metric_allows_failures_when_missing_counts() -> None:
 
     assignment = StreamAssignment(
         streams=[_DummyStream(name="broken")],
+        stream_indices=[0],
         group_index=0,
+        group_count=1,
         dataset_root_remote=None,
         dataset_split_remote=None,
     )
@@ -342,7 +345,9 @@ def test_create_streaming_dataset_uses_resolved_kwargs() -> None:
     streams = [_DummyStream(name="s0")]
     assignment = StreamAssignment(
         streams=streams,
+        stream_indices=[0],
         group_index=None,
+        group_count=None,
         dataset_root_remote=None,
         dataset_split_remote=None,
     )
@@ -359,6 +364,7 @@ def test_create_streaming_dataset_uses_resolved_kwargs() -> None:
         dataset_config=dataset_config,
         batch_size=4,
         split="train",
+        isolate=False,
     )
 
     assert isinstance(dataset, _DummyStreamingTextDataset)

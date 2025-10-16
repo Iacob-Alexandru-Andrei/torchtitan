@@ -246,3 +246,96 @@ def test_fl_metrics_processor_registers_expected_callbacks() -> None:
     assert OptimizerMonitor in callback_types
     assert LRMonitor in callback_types
     assert processor.activation_monitor is None
+
+
+def test_unigram_payload_reports_local_and_global_metrics() -> None:
+    """FL metrics processor should return both local and global unigram payloads."""
+    job_config = JobConfig()
+    parallel_dims = ParallelDims(1, -1, 1, 1, 1, 1, 1, 1)
+    manager = UnigramMetricManager()
+    processor = FLMetricsProcessor(
+        job_config,
+        parallel_dims,
+        MetricsConfig(),
+        unigram_manager=manager,
+    )
+
+    metric = PureUnigramCrossEntropy(torch.tensor([0.5, 0.5]))
+    with manager.register(metric, "train"):
+        processor.update_unigram_metrics(torch.tensor([[0, 1, 1]]))
+        local_payload, global_payload = processor._build_unigram_payload(mesh=None)
+
+    expected_avg = math.log(2)
+    assert math.isclose(
+        local_payload["pure_unigram_cross_entropy/local"],
+        expected_avg,
+        rel_tol=LOG_REL_TOL,
+    )
+    assert local_payload["pure_unigram_cross_entropy/token_count/local"] == float(
+        EXPECTED_TOKEN_COUNT
+    )
+    assert math.isclose(
+        global_payload["pure_unigram_cross_entropy"],
+        expected_avg,
+        rel_tol=LOG_REL_TOL,
+    )
+    assert global_payload["pure_unigram_cross_entropy/token_count"] == float(
+        EXPECTED_TOKEN_COUNT
+    )
+
+
+def test_unigram_local_metric_logged_before_global() -> None:
+    """Local unigram metrics should be logged before the aggregated value."""
+
+    class _RecordingLogger:
+        def __init__(self) -> None:
+            self.calls: list[tuple[int, dict[str, float]]] = []
+
+        def log(self, metrics: dict[str, float], step: int) -> None:
+            self.calls.append((step, metrics))
+
+        def close(self) -> None:  # pragma: no cover - interface compliance
+            return None
+
+    job_config = JobConfig()
+    parallel_dims = ParallelDims(1, -1, 1, 1, 1, 1, 1, 1)
+    manager = UnigramMetricManager()
+    processor = FLMetricsProcessor(
+        job_config,
+        parallel_dims,
+        MetricsConfig(),
+        unigram_manager=manager,
+    )
+    processor.num_flops_per_token = 1
+    processor.gpu_peak_flops = 1
+    processor.ntokens_since_last_log = 1
+    processor.data_loading_times = [0.0]
+    processor.time_last_log -= 1.0
+
+    metric = PureUnigramCrossEntropy(torch.tensor([0.5, 0.5]))
+    with manager.register(metric, "train"):
+        processor.update_unigram_metrics(torch.tensor([[0, 1]]))
+        processor.update_unigram_metrics(torch.tensor([[1]]))
+        processor.logger = _RecordingLogger()
+        processor.log(
+            step=1,
+            global_avg_loss=0.0,
+            global_max_loss=0.0,
+            grad_norm=0.0,
+        )
+        calls = processor.logger.calls  # type: ignore[attr-defined]
+
+    assert len(calls) == 2
+    first_metrics = calls[0][1]
+    second_metrics = calls[1][1]
+
+    assert "pure_unigram_cross_entropy/local" in first_metrics
+    assert "pure_unigram_cross_entropy" not in first_metrics
+
+    assert "pure_unigram_cross_entropy" in second_metrics
+    expected_avg = math.log(2)
+    assert math.isclose(
+        second_metrics["pure_unigram_cross_entropy"],
+        expected_avg,
+        rel_tol=LOG_REL_TOL,
+    )

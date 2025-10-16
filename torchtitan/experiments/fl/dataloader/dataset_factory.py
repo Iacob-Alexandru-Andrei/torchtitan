@@ -12,6 +12,7 @@ import inspect
 from dataclasses import dataclass
 from typing import Any, TYPE_CHECKING
 
+
 try:
     from llmfoundry.data.text_data import StreamingTextDataset
     from streaming import StreamingDataset
@@ -25,10 +26,16 @@ except ImportError as exc:  # pragma: no cover - optional dependency
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
+    from torch.utils.data import IterableDataset
+
     from torchtitan.components.tokenizer import BaseTokenizer
     from torchtitan.experiments.fl.configs.config import MosaicJobConfig
 
-from .parallel import StatefulStreamingTextDataset
+from .parallel import (
+    IsolatedStreamingTextDataset,
+    serialize_streams,
+    StatefulStreamingTextDataset,
+)
 from .streams import _select_stream_subset, StreamAssignment, StreamExtractionResult
 
 
@@ -37,11 +44,11 @@ class MosaicRuntimeConfig:
     """Runtime settings for the Mosaic dataloader workers."""
 
     num_workers: int
-    prefetch_factor: int | None
     pin_memory: bool
     persistent_workers: bool
     drop_last: bool
     batch_size: int
+    prefetch_factor: int | None = None
 
 
 @dataclass(frozen=True)
@@ -50,6 +57,7 @@ class NormalizedMosaicConfig:
 
     dataset_config: dict[str, Any]
     runtime: MosaicRuntimeConfig
+    isolate_grouped_streams: bool
 
 
 @dataclass(frozen=True)
@@ -130,7 +138,11 @@ def _normalize_mosaic_dataloader_config(
         batch_size=batch_size,
     )
 
-    return NormalizedMosaicConfig(dataset_config=dataset_cfg, runtime=runtime)
+    return NormalizedMosaicConfig(
+        dataset_config=dataset_cfg,
+        runtime=runtime,
+        isolate_grouped_streams=cfg.isolate_grouped_streams,
+    )
 
 
 def _prepare_dataset_kwargs(
@@ -172,7 +184,8 @@ def create_streaming_dataset(
     dataset_config: DatasetFactoryConfig,
     batch_size: int,
     split: str,
-) -> StatefulStreamingTextDataset:
+    isolate: bool,
+) -> IterableDataset:
     """Instantiate the streaming dataset for the resolved stream subset.
 
     Args:
@@ -182,12 +195,25 @@ def create_streaming_dataset(
             arguments accepted by the streaming dataset.
         batch_size: Local batch size for the current rank.
         split: Dataset split name. Present for API consistency with future hooks.
+        isolate: When ``True``, instantiate the dataset within the consuming
+            process after temporarily clearing torch.distributed environment
+            variables. This keeps StreamingDataset unaware of the global
+            process group so grouped sampling behaves like independent runs.
 
     Returns:
         A :class:`StatefulStreamingTextDataset` configured for the rank's subset.
     """
     del split  # split is reserved for future streaming dataset hooks
     hf_tokenizer = getattr(tokenizer, "tokenizer", tokenizer)
+    if isolate:
+        serialized_streams = serialize_streams(assignment.streams or [])
+        return IsolatedStreamingTextDataset(
+            dataset_kwargs=dict(dataset_config.kwargs),
+            serialized_streams=serialized_streams,
+            tokenizer=hf_tokenizer,
+            batch_size=batch_size,
+        )
+
     return StatefulStreamingTextDataset(
         tokenizer=hf_tokenizer,
         streams=assignment.streams,
@@ -204,7 +230,7 @@ def build_dataset_for_rank(  # noqa: PLR0913
     dp_world_size: int,
     tokenizer: BaseTokenizer,
     split: str,
-) -> tuple[StatefulStreamingTextDataset, StreamAssignment]:
+) -> tuple[IterableDataset, StreamAssignment]:
     """Create a dataset for the current rank from normalized configuration.
 
     Args:
@@ -228,12 +254,18 @@ def build_dataset_for_rank(  # noqa: PLR0913
         extraction.dataset_config,
         dataset_split_remote=assignment.dataset_split_remote,
     )
+    should_isolate = (
+        normalized.isolate_grouped_streams
+        and assignment.group_count not in (None, 0)
+        and assignment.streams is not None
+    )
     dataset = create_streaming_dataset(
         assignment=assignment,
         tokenizer=tokenizer,
         dataset_config=dataset_factory_config,
         batch_size=normalized.runtime.batch_size,
         split=split,
+        isolate=should_isolate,
     )
     return dataset, assignment
 
