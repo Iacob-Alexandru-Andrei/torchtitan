@@ -13,6 +13,8 @@ from importlib import util as importlib_util
 from pathlib import Path
 
 import pytest
+import torch
+from torch import nn
 
 pytest.importorskip("torchmetrics")
 
@@ -141,3 +143,15 @@ def test_lr_monitor_can_be_disabled() -> None:
     )
     processor = _build_processor(metrics_cfg)
     assert LRMonitor not in _callback_types(processor)
+
+
+def test_betas_monitor_collects_eps() -> None:
+    monitor = BetasMonitor(enabled=True, interval=1)
+    param = nn.Parameter(torch.zeros(1))
+    optimizer = torch.optim.Adam([param], betas=(0.1, 0.2), eps=1e-6)
+
+    metrics = dict(monitor._collect_metrics([optimizer]))
+
+    assert metrics["beta1-Adam/group0"] == pytest.approx(0.1)
+    assert metrics["beta2-Adam/group0"] == pytest.approx(0.2)
+    assert metrics["eps-Adam/group0"] == pytest.approx(1e-6)

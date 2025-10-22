@@ -12,6 +12,9 @@ dist/*
 data
 out
 wandb
+*.out
+*filelock
+torchinductor_aai30
 
 torchtitan/datasets/**/*.model
 

@@ -924,7 +924,7 @@ class LRMonitor(Callback):
 
 
 class BetasMonitor(Callback):
-    """Logs optimizer beta hyperparameters."""
+    """Logs optimizer beta hyperparameters and epsilon values."""
 
     def __init__(self, *, interval: int = 0, enabled: bool = False) -> None:
         self.interval = interval
@@ -952,13 +952,18 @@ class BetasMonitor(Callback):
     ) -> Iterator[tuple[str, float]]:
         for name, group_idx, group in self._iter_param_groups(optimizers):
             betas = group.get("betas")
-            if betas is None:
-                continue
-            for beta_idx, beta_value in enumerate(self._iter_values(betas), start=1):
-                yield (
-                    f"beta{beta_idx}-{name}/group{group_idx}",
-                    self._as_float(beta_value),
-                )
+            if betas is not None:
+                for beta_idx, beta_value in enumerate(
+                    self._iter_values(betas), start=1
+                ):
+                    yield (
+                        f"beta{beta_idx}-{name}/group{group_idx}",
+                        self._as_float(beta_value),
+                    )
+
+            epsilon = self._get_epsilon(group)
+            if epsilon is not None:
+                yield (f"eps-{name}/group{group_idx}", epsilon)
 
     def _iter_param_groups(
         self, optimizers: Sequence[torch.optim.Optimizer]
@@ -973,6 +978,14 @@ class BetasMonitor(Callback):
             yield from betas
         else:
             yield betas
+
+    def _get_epsilon(self, group: Mapping[str, Any]) -> float | None:
+        eps_value = group.get("eps")
+        if eps_value is None:
+            eps_value = group.get("epsilon")
+        if eps_value is None:
+            return None
+        return self._as_float(eps_value)
 
     def _as_float(self, value: Any) -> float:
         if isinstance(value, torch.Tensor):

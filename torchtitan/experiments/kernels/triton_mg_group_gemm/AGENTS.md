@@ -68,8 +68,8 @@ __init__.py→[] benchmark.py→[benchmark_model_configs(void)→{compute_refere
 ## DEPENDENCY_PATTERNS
 
 ### EDGE_PATTERNS
-Call: 50 edges
 Contains: 25 edges
+Call: 50 edges
 
 ### CROSS_CLUSTER_FLOW
 TESTS→UTILITY_LAYER: 23

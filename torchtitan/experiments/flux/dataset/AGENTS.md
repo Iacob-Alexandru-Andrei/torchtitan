@@ -63,8 +63,8 @@ flux_dataset.py→[_cc12m_wds_data_processor((sample: dict[str,Any],t5_tokenizer
 ## DEPENDENCY_PATTERNS
 
 ### EDGE_PATTERNS
-Contains: 16 edges
 Call: 5 edges
+Contains: 16 edges
 
 ### CROSS_CLUSTER_FLOW
 

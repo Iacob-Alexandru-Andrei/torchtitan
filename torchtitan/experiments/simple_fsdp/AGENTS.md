@@ -70,8 +70,8 @@ __init__.py→[get_train_spec(void),get_train_spec(void)] model.py→[__init__((
 ## DEPENDENCY_PATTERNS
 
 ### EDGE_PATTERNS
-Call: 5 edges
 Contains: 14 edges
+Call: 5 edges
 
 ### CROSS_CLUSTER_FLOW
 TESTS→UTILITY_LAYER: 1

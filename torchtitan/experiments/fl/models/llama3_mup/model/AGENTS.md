@@ -48,7 +48,7 @@ You are analyzing a codebase dependency graph optimized for AI understanding. Th
 ---
 
 # CODE_GRAPH
-NODES:45 EDGES:22
+NODES:56 EDGES:31
 
 ## DIRECTORY_TREE
 ROOT: torchtitan/experiments/fl/models/llama3_mup/model/
@@ -56,14 +56,15 @@ ROOT: torchtitan/experiments/fl/models/llama3_mup/model/
 ## ARCHITECTURAL_CLUSTERS
 
 ### DATA_MODELS
-NODES:45 CALL_DEPTH:1
+NODES:56 CALL_DEPTH:2
 
-__init__.py→[] mup_args.py→[] mup_model.py→[__init__((self,inner: nn.Module,scale: float))[CTOR,DUNDER],forward((self,q: torch.Tensor,k: torch.Tensor,v: torch.Tensor,)),__init__((self,model_args: TransformerModelArgsMuP))[CTOR,DUNDER],init_weights((self,init_std: float)),init_weights((self,init_std: float)),__init__((self,layer_id: int,model_args: TransformerModelArgsMuP))[CTOR,DUNDER],forward((self,x: torch.Tensor,freqs_cis: torch.Tensor,)),init_weights((self)),__init__((self,model_args: TransformerModelArgsMuP))[CTOR,DUNDER],init_weights((self,buffer_device: torch.device | None = None)),_iter_trainable_params((self)),_bucketize_parameters((self,param_entries: list[tuple[str,Parameter]])),_resolve_bucket_name((self,name: str,embed_suffixes: list[str],hidden_ln_suffixes: list[str],no_decay_suffixes: list[str],decay_weight_suffixes: list[str],))[HOT],_validate_bucket_counts((self,total_params: int,buckets: dict[str,list[Parameter]])),_compute_lr_scaling((self))[HOT],_resolve_optimizer_eps((self,eps: float,*,width_lr_scaling: float,))[HOT],_build_param_groups((self,buckets: dict[str,list[Parameter]],*,base_lr: float,weight_decay: float,width_lr_scaling: float,depth_lr_scaling: float,))[HOT],build_mup_optimizer_overrides((self,*,lr: float,eps: float,weight_decay: float,))[HOT],get_optimizer_param_groups((self,optimizer_config: dict[str,Any])),forward((self,tokens: torch.Tensor,input_batch: torch.Tensor | None = None,# noqa: ARG002))] state_dict_adapter.py→[__init__((self,model_args: TransformerModelArgs,hf_assets_path: str | None,))[CTOR,DUNDER],to_hf((self,state_dict: dict[str,Any]))] 
+__init__.py→[] mup_args.py→[] mup_model.py→[forward((self,x: torch.Tensor))→{_cast_if_autocast_enabled,_cast_if_autocast_enabled,_cast_if_autocast_enabled},_cast_if_autocast_enabled((tensor: torch.Tensor | None)),__init__((self,normalized_shape: int | tuple[int,...],eps: float = 1e-05,elementwise_affine: bool = True,device: torch.device | None = None,dtype: torch.dtype | None = None,bias: bool = False,))[CTOR,DUNDER],__init__((self,inner: nn.Module,scale: float))[CTOR,DUNDER],forward((self,q: torch.Tensor,k: torch.Tensor,v: torch.Tensor,*,scale: float | None = None,**kwargs: Any,)),__init__((self,model_args: TransformerModelArgsMuP))[CTOR,DUNDER],init_weights((self,init_std: float)),_build_head_norm((self,model_args: TransformerModelArgsMuP))[HOT],__init__((self,model_args: TransformerModelArgsMuP))[CTOR,DUNDER],forward((self,x: torch.Tensor)),init_weights((self,init_std: float)),__init__((self,layer_id: int,model_args: TransformerModelArgsMuP))[CTOR,DUNDER],forward((self,x: torch.Tensor,freqs_cis: torch.Tensor,)),init_weights((self)),__init__((self,model_args: TransformerModelArgsMuP))[CTOR,DUNDER],init_weights((self,buffer_device: torch.device | None = None)),_precompute_freqs_cis((self))[HOT],_iter_trainable_params((self)),_bucketize_parameters((self,param_entries: list[tuple[str,Parameter]])),_resolve_bucket_name((self,name: str,embed_suffixes: list[str],hidden_ln_suffixes: list[str],no_decay_suffixes: list[str],decay_weight_suffixes: list[str],))[HOT],_validate_bucket_counts((self,total_params: int,buckets: dict[str,list[Parameter]])),_compute_lr_scaling((self))[HOT],_resolve_optimizer_eps((self,eps: float,*,width_lr_scaling: float,))[HOT],_build_param_groups((self,buckets: dict[str,list[Parameter]],*,base_lr: float,weight_decay: float,width_lr_scaling: float,depth_lr_scaling: float,))[HOT],build_mup_optimizer_overrides((self,*,lr: float,eps: float,weight_decay: float,))[HOT],get_optimizer_param_groups((self,optimizer_config: dict[str,Any])),forward((self,tokens: torch.Tensor,input_batch: torch.Tensor | None = None,# noqa: ARG002))] state_dict_adapter.py→[__init__((self,model_args: TransformerModelArgs,hf_assets_path: str | None,))[CTOR,DUNDER],to_hf((self,state_dict: dict[str,Any]))] 
 
 ## DEPENDENCY_PATTERNS
 
 ### EDGE_PATTERNS
-Contains: 22 edges
+Call: 3 edges
+Contains: 28 edges
 
 ### CROSS_CLUSTER_FLOW
 

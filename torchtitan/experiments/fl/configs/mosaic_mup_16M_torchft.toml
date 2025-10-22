@@ -25,6 +25,12 @@ flavor = "16M"
 hf_assets_path = "./tests/assets/tokenizer"
 # converters = ["float8"]
 
+# --- MuP overrides: force no width/depth scaling so spec label = actual size
+[model.mup_overrides]
+width_multiplier = 1.0
+depth_multiplier = 1.0
+# optionally adjust epsilon scaling if your builder computes eps scaling
+# eps = 1e-8
 
 [optimizer]
 name = "DecoupledAdamW"

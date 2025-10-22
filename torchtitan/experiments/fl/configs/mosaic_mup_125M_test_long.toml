@@ -20,7 +20,7 @@ save_for_all_ranks = true
 
 [model]
 name = "mosaic_llama3_mup"
-flavor = "16M"
+flavor = "125M"
 # test folder with tokenizer.json, for debug purpose only
 hf_assets_path = "./tests/assets/tokenizer"
 # converters = ["float8"]
@@ -63,7 +63,7 @@ interval = 8
 
 [lr_scheduler]
 warmup_steps = 512  # lr scheduler warm up, normally 20% of the train steps
-decay_ratio = 0.1  # lr scheduler decay ratio, 80% of the train steps
+decay_ratio = 0.0  # lr scheduler decay ratio, 80% of the train steps
 decay_type = "sqrt"
 min_lr_factor = 0.0
 switch_step = 10000
@@ -71,10 +71,10 @@ switch_scale = 1000
 
 [training]
 local_batch_size = 32
-global_batch_size = 64
+global_batch_size = 256
 seq_len = 2048
 max_norm = 1.0  # grad norm clipping
-steps = 5120
+steps = 6144
 dataset = "c4_test"  # supported datasets: c4_test (2K), c4 (177M)
 
 

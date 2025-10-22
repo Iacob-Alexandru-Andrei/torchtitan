@@ -48,6 +48,14 @@ class TransformerModelArgs(BaseTransformerModelArgs):
     use_embedding_norm: bool = True
     use_peri_norm: bool = True
     tie_word_embeddings: bool = True
+    use_torch_layernorm: bool = True
+    use_simple_silu_ffn: bool = False
+    head_dim: int | None = None
+    qk_norm: bool = True
+    torch_layernorm_elementwise_affine: bool = True
+    qk_norm_elementwise_affine: bool = True
+    torch_layernorm_bias: bool = False
+    qk_norm_bias: bool = False
     mup_config: dict[str, Any] = field(default_factory=dict)
     init_config: dict[str, Any] = field(default_factory=dict)
 
@@ -55,3 +63,5 @@ class TransformerModelArgs(BaseTransformerModelArgs):
         """Instantiate strongly typed helpers from the raw configuration maps."""
         self.mup_config_obj = MuPConfig(**self.mup_config)
         self.init_config_obj = ModelInitConfig(**self.init_config)
+        if self.head_dim is None:
+            self.head_dim = self.dim // self.n_heads

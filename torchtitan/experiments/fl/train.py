@@ -24,8 +24,10 @@ To run this script, you can use a command like:
 from __future__ import annotations
 
 import os
+from typing import Any
 
 import torch
+from torch import nn
 
 from torchtitan.experiments.fl.configs import MosaicConfigManager
 from torchtitan.experiments.fl.ft_override import configure_desloc
@@ -37,6 +39,209 @@ from torchtitan.experiments.fl.s3_checkpoint import (
 )
 from torchtitan.tools.logging import init_logger, logger
 from torchtitan.train import Trainer
+
+
+def _format_param_count(count: int) -> str:
+    """Return a human-friendly string for parameter counts."""
+    if count >= 1_000_000:
+        return f"{count:,} ({count / 1_000_000:.3f}M)"
+    if count >= 1_000:
+        return f"{count:,} ({count / 1_000:.3f}K)"
+    return f"{count:,}"
+
+
+def _log_model_summary(trainer: Trainer) -> None:
+    """Emit a concise summary of the trainer's model parameters."""
+    if torch.distributed.is_initialized() and torch.distributed.get_rank() != 0:
+        return
+
+    model_parts = getattr(trainer, "model_parts", None)
+    if not model_parts:
+        logger.info("Model summary skipped: trainer has no model parts.")
+        return
+
+    seen_params: set[int] = set()
+    dtype_counts: dict[str, int] = {}
+    device_counts: dict[str, int] = {}
+    part_module_counts: dict[str, dict[str, int]] = {}
+    bias_samples: list[str] = []
+
+    total_params = 0
+    trainable_params = 0
+    bias_tensors = 0
+    trainable_bias_tensors = 0
+
+    for part_idx, part in enumerate(model_parts):
+        part_label = f"part{part_idx}"
+        part_module_counts.setdefault(part_label, {"__total__": 0})
+        for name, param in part.named_parameters():
+            param_id = id(param)
+            if param_id in seen_params:
+                continue
+            seen_params.add(param_id)
+
+            param_count = param.numel()
+            total_params += param_count
+            if param.requires_grad:
+                trainable_params += param_count
+
+            dtype_key = str(param.dtype)
+            dtype_counts[dtype_key] = dtype_counts.get(dtype_key, 0) + param_count
+
+            device_key = str(param.device)
+            device_counts[device_key] = device_counts.get(device_key, 0) + param_count
+
+            part_module_counts[part_label]["__total__"] += param_count
+            top_level = name.split(".", 1)[0] if "." in name else name
+            if top_level:
+                part_module_counts[part_label][top_level] = (
+                    part_module_counts[part_label].get(top_level, 0) + param_count
+                )
+
+            if name.endswith("bias"):
+                bias_tensors += 1
+                if param.requires_grad:
+                    trainable_bias_tensors += 1
+                qualified_name = f"{part_label}.{name}"
+                if len(bias_samples) < 5:
+                    bias_samples.append(qualified_name)
+
+    if not total_params:
+        logger.info("Model summary: no parameters found.")
+        return
+
+    frozen_params = total_params - trainable_params
+    active_fraction = trainable_params / total_params * 100.0
+
+    logger.info(
+        "Model summary: %d unique parameter tensors | total=%s | trainable=%s | frozen=%s | active=%.2f%%",
+        len(seen_params),
+        _format_param_count(total_params),
+        _format_param_count(trainable_params),
+        _format_param_count(frozen_params),
+        active_fraction,
+    )
+
+    if bias_tensors:
+        logger.info(
+            "Bias tensors present: %d total (%d trainable). Samples: %s",
+            bias_tensors,
+            trainable_bias_tensors,
+            ", ".join(bias_samples),
+        )
+    else:
+        logger.info("Bias tensors present: none detected.")
+
+    dtype_summary = ", ".join(
+        f"{dtype}: {_format_param_count(count)}"
+        for dtype, count in sorted(dtype_counts.items(), key=lambda item: item[0])
+    )
+    logger.info("Parameter dtype distribution: %s", dtype_summary or "n/a")
+
+    device_summary = ", ".join(
+        f"{device}: {_format_param_count(count)}"
+        for device, count in sorted(device_counts.items(), key=lambda item: item[0])
+    )
+    logger.info("Parameter device placement: %s", device_summary or "n/a")
+
+    breakdown_lines: list[str] = []
+    for part_label in sorted(part_module_counts):
+        module_counts = part_module_counts[part_label]
+        total = module_counts.get("__total__", 0)
+        breakdown_lines.append(f"{part_label}: total={_format_param_count(total)}")
+        top_entries = sorted(
+            (
+                (name, count)
+                for name, count in module_counts.items()
+                if name != "__total__"
+            ),
+            key=lambda item: item[1],
+            reverse=True,
+        )[:8]
+        for module_name, count in top_entries:
+            breakdown_lines.append(f"  - {module_name}: {_format_param_count(count)}")
+
+    if breakdown_lines:
+        logger.info("Model parameter breakdown:\n%s", "\n".join(breakdown_lines))
+
+    def _render_module(
+        module: nn.Module, indent: int = 0, name: str | None = None
+    ) -> list[str]:
+        indent_str = "  " * indent
+        module_name = module.__class__.__name__
+        header = (
+            f"{indent_str}{module_name}("
+            if name is None
+            else f"{indent_str}({name}): {module_name}("
+        )
+        lines = [header]
+
+        for param_name, param in module.named_parameters(recurse=False):
+            lines.append(
+                f"{'  ' * (indent + 1)}({param_name}): Parameters({param.shape})"
+            )
+
+        if isinstance(module, (nn.Sequential, nn.ModuleList)):
+            lines.extend(_render_container(module, indent))
+        else:
+            for child_name, child in module.named_children():
+                lines.extend(_render_module(child, indent + 1, child_name))
+
+        lines.append(f"{indent_str})")
+        return lines
+
+    def _render_container(container: nn.Module, indent: int) -> list[str]:
+        lines: list[str] = []
+        groups: list[dict[str, Any]] = []
+        current: dict[str, Any] | None = None
+
+        for idx, child in enumerate(container):
+            child_lines = _render_module(child, indent + 2, None)
+            key = tuple(child_lines)
+            if current is not None and current["key"] == key:
+                current["end"] = idx
+                current["count"] += 1
+            else:
+                if current is not None:
+                    groups.append(current)
+                current = {
+                    "start": idx,
+                    "end": idx,
+                    "count": 1,
+                    "lines": child_lines,
+                    "key": key,
+                }
+        if current is not None:
+            groups.append(current)
+
+        for group in groups:
+            start = group["start"]
+            end = group["end"]
+            count = group["count"]
+            child_lines = group["lines"]
+
+            if count == 1:
+                index_label = str(start)
+                count_prefix = ""
+            else:
+                index_label = f"{start}-{end}"
+                count_prefix = f"{count} x "
+
+            first_line_body = child_lines[0].lstrip()
+            lines.append(
+                f"{'  ' * (indent + 1)}({index_label}): {count_prefix}{first_line_body}"
+            )
+            lines.extend(child_lines[1:])
+
+        return lines
+
+    for idx, part in enumerate(model_parts):
+        structure_lines = _render_module(part)
+        structure_text = "\n".join(structure_lines)
+        if len(model_parts) == 1:
+            logger.info("%s", structure_text)
+        else:
+            logger.info("Model part %d structure:\n%s", idx, structure_text)
 
 
 def main() -> None:  # noqa: C901, PLR0912, PLR0915
@@ -78,6 +283,7 @@ def main() -> None:  # noqa: C901, PLR0912, PLR0915
         with configure_desloc(job_config):
             trainer = Trainer(job_config)
             ensure_torchft_init_sync(trainer)
+            _log_model_summary(trainer)
 
             checkpointer = trainer.checkpointer
             ft_manager = getattr(checkpointer, "ft_manager", None)

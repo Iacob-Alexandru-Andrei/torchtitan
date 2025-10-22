@@ -1,4 +1,11 @@
-#!/usr/bin/bash
+#!/bin/bash
+#SBATCH -c 8
+#SBATCH -w ngongotaha
+#SBATCH --gres=gpu:4
+#SBATCH --job-name=tune_lr_torchft
+#SBATCH --tasks-per-node=1
+#SBATCH --output=%x-%j.out
+#SBATCH --time=11:59:00
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 # This source code is licensed under the BSD-style license found in the
@@ -8,11 +15,29 @@
 # Usage: ./run_train_torchft.sh [num_gpus] [config_file]
 # Example: ./run_train_torchft.sh 4 ./torchtitan/experiments/fl/configs/mosaic_mup_16M.toml
 
-rm -rf /dev/shm/*
+# Resolve repository root so sbatch jobs run from the project directory.
+if [[ -n "${SLURM_SUBMIT_DIR:-}" ]]; then
+    REPO_ROOT="$(cd "${SLURM_SUBMIT_DIR}" && pwd -P)"
+else
+    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+    REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd -P)"
+fi
+cd "${REPO_ROOT}"
+export REPO_ROOT
+
+# Drop leftover shared memory artifacts owned by the current user, ignoring permission errors.
+find /dev/shm -maxdepth 1 -user "${USER}" -exec rm -rf {} + 2>/dev/null || true
 
 set -ex
 
 export S3_ENDPOINT_URL='http://taranaki.cl.cam.ac.uk:9000'
+
+# Ensure Python can import the torchtitan package when started via sbatch.
+if [[ -z "${PYTHONPATH:-}" ]]; then
+    export PYTHONPATH="${REPO_ROOT}"
+else
+    export PYTHONPATH="${REPO_ROOT}:${PYTHONPATH}"
+fi
 
 # Configuration
 NGPU=${1:-"4"}  # Number of GPUs / replicas (default: 2)
@@ -28,9 +53,14 @@ LIGHTHOUSE_URL="http://${LIGHTHOUSE_HOST}:${LIGHTHOUSE_PORT}"
 MIN_REPLICAS=${MIN_REPLICAS:-4}  # Minimum replicas required to start training
 QUORUM_TICK_MS=${QUORUM_TICK_MS:-100}  # Quorum tick interval in milliseconds
 
+# Print current working directory
+
+echo "Current working directory: $(pwd)"
+
 # Log directory
-LOG_DIR="./outputs/torchft_logs"
-mkdir -p ${LOG_DIR}
+LOG_DIR="${REPO_ROOT}/outputs/torchft_logs"
+mkdir -p "${LOG_DIR}"
+LIGHTHOUSE_LOG_FILE="${LOG_DIR}/lighthouse.log"
 
 TIMESTAMP=$(date +"%Y%m%d-%H%M%S")
 export RUN_UUID="${RUN_UUID:-16M-baseline-${TIMESTAMP}}"
@@ -61,11 +91,12 @@ trap cleanup EXIT INT TERM
 
 # Step 1: Start the TorchFT lighthouse server
 echo "Starting TorchFT lighthouse server..."
+echo "[Lighthouse] logging to ${LIGHTHOUSE_LOG_FILE}"
 uv run --no-sync torchft_lighthouse \
     --min_replicas ${MIN_REPLICAS} \
     --quorum_tick_ms ${QUORUM_TICK_MS} \
     --bind ${LIGHTHOUSE_HOST}:${LIGHTHOUSE_PORT} \
-    > ${LOG_DIR}/lighthouse.log 2>&1 &
+    > "${LIGHTHOUSE_LOG_FILE}" 2>&1 &
 
 LIGHTHOUSE_PID=$!
 echo "Lighthouse started with PID: ${LIGHTHOUSE_PID}"
@@ -82,62 +113,81 @@ fi
 echo "Lighthouse is running successfully"
 
 # Step 2: Launch N replicas, one per GPU
-echo "Launching ${NGPU} training replicas..."
+echo "Launching ${NGPU} training replicas as background processes..."
+export TORCHFT_LIGHTHOUSE=${LIGHTHOUSE_URL}
 
-REPLICA_PIDS=()
+AVAILABLE_GPUS=()
+if [[ -n "${CUDA_VISIBLE_DEVICES:-}" ]]; then
+    IFS=',' read -r -a AVAILABLE_GPUS <<< "${CUDA_VISIBLE_DEVICES}"
+else
+    for ((i=0; i<NGPU; i++)); do
+        AVAILABLE_GPUS+=("$i")
+    done
+fi
 
-for ((replica_id=0; replica_id<${NGPU}; replica_id++)); do
-    echo "Starting replica ${replica_id} on GPU ${replica_id}..."
+if (( ${#AVAILABLE_GPUS[@]} < NGPU )); then
+    echo "ERROR: Requested ${NGPU} replicas but only ${#AVAILABLE_GPUS[@]} GPU(s) are available via CUDA_VISIBLE_DEVICES."
+    exit 1
+fi
 
-    # Each replica runs on a single GPU with its own replica_id
-    CUDA_VISIBLE_DEVICES=${replica_id} \
-    PYTORCH_ALLOC_CONF="expandable_segments:True" \
-    TORCHFT_LIGHTHOUSE=${LIGHTHOUSE_URL} \
-    uv run --no-sync torchrun \
-        --nproc_per_node=1 \
-        --rdzv_backend c10d \
-        --rdzv_endpoint="localhost:$((29600 + replica_id))" \
-        --role rank \
-        --tee 3 \
-        -m ${TRAIN_FILE} \
-        --job.config_file ${CONFIG_FILE} \
-        --fault_tolerance.replica_id ${replica_id} \
-        --fault_tolerance.group_size ${NGPU} \
-        --fault_tolerance.min_replica_size ${MIN_REPLICAS} \
-        > ${LOG_DIR}/replica_${replica_id}.log 2>&1 &
+REPLICA_GPUS=("${AVAILABLE_GPUS[@]:0:NGPU}")
 
-    REPLICA_PIDS+=($!)
-    echo "Replica ${replica_id} started with PID: ${!}"
-
-    # Small delay between launching replicas
-    sleep 5
+echo "GPU assignments for replicas:"
+for ((i=0; i<NGPU; i++)); do
+    echo "  Replica ${i} -> GPU ${REPLICA_GPUS[$i]}"
 done
 
-echo "All replicas launched. PIDs: ${REPLICA_PIDS[@]}"
+declare -a REPLICA_PIDS=()
+
+for ((replica_id=0; replica_id<NGPU; replica_id++)); do
+    gpu_id="${REPLICA_GPUS[$replica_id]}"
+    log_file="${LOG_DIR}/replica_${replica_id}.log"
+    echo "[Replica ${replica_id}] logging to ${log_file}"
+
+    (
+        set -euo pipefail
+        cd "${REPO_ROOT}"
+        export CUDA_VISIBLE_DEVICES="${gpu_id}"
+        export PYTORCH_ALLOC_CONF="expandable_segments:True"
+        rdzv_port=$((29600 + replica_id))
+        uv run --no-sync torchrun \
+            --nproc_per_node=1 \
+            --rdzv_backend c10d \
+            --rdzv_endpoint="localhost:${rdzv_port}" \
+            --role rank \
+            --tee 3 \
+            -m "${TRAIN_FILE}" \
+            --job.config_file "${CONFIG_FILE}" \
+            --fault_tolerance.replica_id "${replica_id}" \
+            --fault_tolerance.group_size "${NGPU}" \
+            --fault_tolerance.min_replica_size "${MIN_REPLICAS}"
+    ) > "${log_file}" 2>&1 &
+    REPLICA_PIDS[$replica_id]=$!
+done
+
 echo "Lighthouse PID: ${LIGHTHOUSE_PID}"
 echo ""
 echo "Monitoring logs:"
-echo "  Lighthouse: tail -f ${LOG_DIR}/lighthouse.log"
-for ((i=0; i<${NGPU}; i++)); do
+echo "  Lighthouse: tail -f ${LIGHTHOUSE_LOG_FILE}"
+for ((i=0; i<NGPU; i++)); do
     echo "  Replica ${i}: tail -f ${LOG_DIR}/replica_${i}.log"
 done
 echo ""
 
-# Wait for all replicas to complete
-echo "Waiting for training to complete..."
-echo "Press Ctrl+C to stop all processes"
-
-# Monitor replica processes
-failed=0
-for pid in ${REPLICA_PIDS[@]}; do
-    if wait ${pid}; then
-        echo "Process ${pid} completed successfully"
+echo "Waiting for replicas to finish..."
+set +e
+REPLICA_EXIT=0
+for ((replica_id=0; replica_id<NGPU; replica_id++)); do
+    pid=${REPLICA_PIDS[$replica_id]}
+    if wait "${pid}"; then
+        echo "Replica ${replica_id} completed successfully."
     else
-        exit_code=$?
-        echo "Process ${pid} failed with exit code ${exit_code}"
-        failed=1
+        status=$?
+        echo "Replica ${replica_id} exited with status ${status}."
+        REPLICA_EXIT=${status}
     fi
 done
+set -e
 
 # Check lighthouse
 if kill -0 ${LIGHTHOUSE_PID} 2>/dev/null; then
@@ -146,10 +196,10 @@ if kill -0 ${LIGHTHOUSE_PID} 2>/dev/null; then
     wait ${LIGHTHOUSE_PID} 2>/dev/null || true
 fi
 
-if [ ${failed} -eq 0 ]; then
+if [ ${REPLICA_EXIT} -eq 0 ]; then
     echo "All replicas completed successfully!"
     exit 0
 else
     echo "Some replicas failed. Check logs in ${LOG_DIR}/"
-    exit 1
+    exit ${REPLICA_EXIT}
 fi
