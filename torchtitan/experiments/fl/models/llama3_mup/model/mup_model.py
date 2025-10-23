@@ -463,11 +463,7 @@ class Transformer(BaseTransformer):
             )
         else:
             self.norm = norm_cls(model_args.dim, eps=model_args.norm_eps)
-        if (
-            model_args.tie_word_embeddings
-            and self.output is not None
-            and self.tok_embeddings is not None
-        ):
+        if model_args.tie_word_embeddings:
             # Share embedding weights with the output projection when requested.
             self.output.weight = self.tok_embeddings.weight
         self.model_args = cast("TransformerModelArgsMuP", model_args)
@@ -497,8 +493,12 @@ class Transformer(BaseTransformer):
         if self.embedding_norm is not None:
             self.embedding_norm.reset_parameters()
 
+        self.norm.reset_parameters()
+
         if not self.model_args.tie_word_embeddings:
             nn.init.normal_(self.output.weight, mean=0.0, std=emb_init_std)
+        else:
+            self.output.weight = self.tok_embeddings.weight
 
     def _precompute_freqs_cis(self) -> torch.Tensor:
         """Precompute rotary embeddings using the Qwen-style cache layout."""
@@ -845,12 +845,11 @@ class Transformer(BaseTransformer):
 
         h = self.norm(h) if self.norm else h
 
-        # Always use self.output (nn.Linear) for DTensor compatibility
-        # When weight tying is enabled, output.weight is the same object as tok_embeddings.weight
-        output = self.output(h) if self.output else h
-
         if self.mup_config.mup_enabled:
-            output = output * (
+            h = h * (
                 self.mup_config.mup_output_alpha / self.mup_config.mup_width_multiplier
             )
-        return output
+
+        # Always use self.output (nn.Linear) for DTensor compatibility
+        # When weight tying is enabled, output.weight is the same object as tok_embeddings.weight
+        return self.output(h)

@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import cast, Literal
 
 import torch
 
@@ -90,8 +91,21 @@ class MosaicOptimizerConfig(BaseOptimizer):
     Example: For vs=(0.7, 0.2), betas=(0.9, 0.99, 0.95) means beta1_1=0.9, beta1_2=0.99, beta2=0.95.
     """
 
+    builder: Literal["mosaic", "default"] = "mosaic"
+    """Selector for the optimizer builder.
+
+    * ``"mosaic"`` uses the FL-specific builder with Mosaic optimizers and DES-LOC support.
+    * ``"default"`` delegates to the core TorchTitan optimizer builder.
+    """
+
     def __post_init__(self) -> None:
         """Auto-initialize beta1 and beta2 from betas if betas is provided."""
+        builder = self.builder.lower()
+        if builder not in {"mosaic", "default"}:
+            msg = "optimizer.builder must be either 'mosaic' or 'default'"
+            raise ValueError(msg)
+        self.builder = cast("Literal['mosaic', 'default']", builder)
+
         if isinstance(self.desloc, dict):
             self.desloc = DesLocConfig(**self.desloc)
         if self.desloc.quorum_timeout_seconds <= 0:

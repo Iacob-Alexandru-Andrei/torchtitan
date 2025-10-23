@@ -42,7 +42,7 @@ betas = [0.9,0.999]
 
 [fl_metrics.optimizer_monitor]
 interval = 8
-only_global = true
+only_global = false
 log_metrics = true
 
 [fl_metrics.activation_monitor]

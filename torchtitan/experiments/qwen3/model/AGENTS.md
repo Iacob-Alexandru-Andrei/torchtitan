@@ -63,8 +63,8 @@ args.py→[] model.py→[apply_rotary_emb((xq: torch.Tensor,xk: torch.Tensor,rop
 ## DEPENDENCY_PATTERNS
 
 ### EDGE_PATTERNS
-Contains: 16 edges
 Call: 7 edges
+Contains: 16 edges
 
 ### CROSS_CLUSTER_FLOW
 

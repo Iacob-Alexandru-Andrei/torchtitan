@@ -1,3 +1,3 @@
-[submodule "nanoGPT-mup"]
-	path = nanoGPT-mup
-	url = git@github.com:EleutherAI/nanoGPT-mup.git
+[submodule "nanoGPT-photon"]
+	path = nanoGPT-photon
+	url = git@github.com:Iacob-Alexandru-Andrei/nanoGPT-photon.git

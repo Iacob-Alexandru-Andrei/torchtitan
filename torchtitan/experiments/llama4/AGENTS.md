@@ -67,8 +67,8 @@ __init__.py→[get_train_spec(void)] args.py→[] convert_hf_to_dcp_with_gpus.py
 ## DEPENDENCY_PATTERNS
 
 ### EDGE_PATTERNS
-Call: 14 edges
 Contains: 35 edges
+Call: 14 edges
 
 ### CROSS_CLUSTER_FLOW
 

@@ -93,6 +93,11 @@ class QHADOPT(Optimizer):
                 optim_state["exp_avg_sq"],
             )
         ),
+        "zero_count/moment2": (
+            lambda _param, optim_state, _step_tensor: optim_state["exp_avg_sq"]
+            .eq(0)
+            .sum(dtype=torch.float32)
+        ),
         "min/moment2": lambda _param, optim_state, _step_tensor: torch.min(
             optim_state["exp_avg_sq"],
         ),
@@ -416,6 +421,9 @@ class QHADOPT(Optimizer):
                 elif metric.startswith("max"):
                     c10d.all_reduce(reduced, op=c10d.ReduceOp.MAX)
                     optimizer_metrics[metric] = reduced
+                elif metric.startswith("zero_count"):
+                    c10d.all_reduce(reduced, op=c10d.ReduceOp.SUM)
+                    optimizer_metrics[metric] = reduced
                 else:
                     c10d.all_reduce(reduced, op=c10d.ReduceOp.SUM)
                     optimizer_metrics[metric] = reduced / c10d.get_world_size()
@@ -440,8 +448,9 @@ class QHADOPT(Optimizer):
         """
         # Only L2 norm metric keys are present, can skip sorting at this stage
         for metric in optimizer_metrics:
-            # L2 norms need to be squared, before they are reduced via summation
-            optimizer_metrics[metric] **= 2
+            # L2 norms need to be squared before they are reduced via summation
+            if metric.startswith("l2_norm"):
+                optimizer_metrics[metric] **= 2
 
         return optimizer_metrics
 

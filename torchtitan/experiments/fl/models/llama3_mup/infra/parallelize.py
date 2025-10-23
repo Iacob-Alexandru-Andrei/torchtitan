@@ -20,6 +20,7 @@ from torch.distributed.tensor.parallel import (
 )
 
 from torchtitan.config import JobConfig, TORCH_DTYPE_MAP
+from torchtitan.distributed import NoParallel
 from torchtitan.distributed.activation_checkpoint import apply_ac
 from torchtitan.distributed.tensor_parallel import maybe_enable_async_tp
 from torchtitan.models.llama3.infra.parallelize import (
@@ -85,13 +86,15 @@ def _apply_mup_tp(
         layer_plan = {
             "attention_norm": SequenceParallel(),
             "attention": prepare_module_input(
-                input_layouts=(Shard(1), None),
-                desired_input_layouts=(Replicate(), None),
+                input_layouts=(Shard(1), Replicate()),
+                desired_input_layouts=(Replicate(), Replicate()),
             ),
             "attention.wq": colwise_parallel(),
             "attention.wk": colwise_parallel(),
             "attention.wv": colwise_parallel(),
             "attention.wo": rowwise_parallel(output_layouts=Shard(1)),
+            "attention.q_norm": NoParallel(use_local_output=False),
+            "attention.k_norm": NoParallel(use_local_output=False),
             "ffn_norm": SequenceParallel(),
             "feed_forward": prepare_module_input(
                 input_layouts=(Shard(1),),
@@ -150,6 +153,12 @@ def parallelize_llama_mup(
         )
         maybe_enable_async_tp(job_config, world_mesh["tp"])
 
+    def _maybe_tie_word_embeddings() -> None:
+        if model.model_args.tie_word_embeddings:
+            model.output.weight = model.tok_embeddings.weight
+
+    _maybe_tie_word_embeddings()
+
     model_compile_enabled = (
         job_config.compile.enable and "model" in job_config.compile.components
     )
@@ -204,11 +213,6 @@ def parallelize_llama_mup(
         )
         logger.info("Applied DDP to the model")
 
-    if (
-        model.model_args.tie_word_embeddings
-        and model.output is not None
-        and model.tok_embeddings is not None
-    ):
-        model.output.weight = model.tok_embeddings.weight
+    _maybe_tie_word_embeddings()
 
     return cast("Transformer", model)

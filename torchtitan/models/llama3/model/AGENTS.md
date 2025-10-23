@@ -63,8 +63,8 @@ args.py→[] model.py→[forward((self,x: torch.Tensor,freqs_cis: torch.Tensor,)
 ## DEPENDENCY_PATTERNS
 
 ### EDGE_PATTERNS
-Contains: 18 edges
 Call: 5 edges
+Contains: 18 edges
 
 ### CROSS_CLUSTER_FLOW
 

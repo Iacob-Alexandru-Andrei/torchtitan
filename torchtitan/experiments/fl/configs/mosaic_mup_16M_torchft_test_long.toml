@@ -42,7 +42,7 @@ pin_memory = true
 
 [fl_metrics.optimizer_monitor]
 interval = 8
-only_global = true
+only_global = false
 log_metrics = true
 
 [fl_metrics.activation_monitor]
@@ -70,7 +70,7 @@ switch_step = 10000
 switch_scale = 1000
 
 [training]
-local_batch_size = 16
+local_batch_size = 4
 global_batch_size = 64
 seq_len = 2048
 max_norm = 1.0  # grad norm clipping
@@ -152,7 +152,7 @@ num_workers = 0
 # prefetch_factor = 2
 pin_memory = true
 persistent_workers = false
-isolate_grouped_streams = false
+isolate_grouped_streams = true
 
 [mosaic_dataloader.dataset.common]
 max_seq_len = 2048

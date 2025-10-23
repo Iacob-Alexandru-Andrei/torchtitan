@@ -64,6 +64,7 @@ class AggregationType(Enum):
     L2_NORM = "l2_norm"
     MIN = "min"
     MAX = "max"
+    ZERO_COUNT = "zero_count"
 
 
 class PureUnigramCrossEntropy(Metric):
@@ -846,6 +847,8 @@ class OptimizerMonitor(Callback):
                         agg_dict[key] = float("inf")
                     case AggregationType.MAX:
                         agg_dict[key] = float("-inf")
+                    case AggregationType.ZERO_COUNT:
+                        agg_dict[key] = 0.0
 
         # Aggregate metrics
         for metric in optimizer_metrics:
@@ -859,6 +862,8 @@ class OptimizerMonitor(Callback):
             agg_type = AggregationType(agg_type_str)
             key = (agg_type, metric_name)
             value = optimizer_metrics[metric]
+            if isinstance(value, torch.Tensor):
+                value = value.item()
 
             # Pattern match on aggregation type to perform aggregation
             match agg_type:
@@ -868,6 +873,8 @@ class OptimizerMonitor(Callback):
                     agg_dict[key] = min(agg_dict[key], value)
                 case AggregationType.MAX:
                     agg_dict[key] = max(agg_dict[key], value)
+                case AggregationType.ZERO_COUNT:
+                    agg_dict[key] += value
 
         # Report all aggregated metrics as agg_type/metric_name/global
         for (agg_type, metric_name), agg_value in agg_dict.items():
@@ -876,6 +883,8 @@ class OptimizerMonitor(Callback):
                 case AggregationType.L2_NORM:
                     final_value = agg_value**0.5
                 case AggregationType.MIN | AggregationType.MAX:
+                    final_value = agg_value
+                case AggregationType.ZERO_COUNT:
                     final_value = agg_value
 
             optimizer_metrics[f"{agg_type.value}/{metric_name}/global"] = final_value
@@ -950,7 +959,7 @@ class BetasMonitor(Callback):
     def _collect_metrics(
         self, optimizers: Sequence[torch.optim.Optimizer]
     ) -> Iterator[tuple[str, float]]:
-        for name, group_idx, group in self._iter_param_groups(optimizers):
+        for optimizer, name, group_idx, group in self._iter_param_groups(optimizers):
             betas = group.get("betas")
             if betas is not None:
                 for beta_idx, beta_value in enumerate(
@@ -965,13 +974,17 @@ class BetasMonitor(Callback):
             if epsilon is not None:
                 yield (f"eps-{name}/group{group_idx}", epsilon)
 
+            inner_step = self._get_inner_step(optimizer)
+            if inner_step is not None:
+                yield (f"inner_step-{name}/group{group_idx}", inner_step)
+
     def _iter_param_groups(
         self, optimizers: Sequence[torch.optim.Optimizer]
-    ) -> Iterator[tuple[str, int, dict[str, Any]]]:
+    ) -> Iterator[tuple[torch.optim.Optimizer, str, int, dict[str, Any]]]:
         for optimizer in optimizers:
             name = optimizer.__class__.__name__
             for group_idx, group in enumerate(optimizer.param_groups):
-                yield name, group_idx, group
+                yield optimizer, name, group_idx, group
 
     def _iter_values(self, betas: Any) -> Iterator[Any]:
         if isinstance(betas, Sequence) and not isinstance(betas, (str, bytes)):
@@ -986,6 +999,12 @@ class BetasMonitor(Callback):
         if eps_value is None:
             return None
         return self._as_float(eps_value)
+
+    def _get_inner_step(self, optimizer: torch.optim.Optimizer) -> float | None:
+        step_count = getattr(optimizer, "_step_count", None)
+        if step_count is None:
+            return None
+        return self._as_float(step_count)
 
     def _as_float(self, value: Any) -> float:
         if isinstance(value, torch.Tensor):

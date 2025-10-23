@@ -155,3 +155,6 @@ def test_betas_monitor_collects_eps() -> None:
     assert metrics["beta1-Adam/group0"] == pytest.approx(0.1)
     assert metrics["beta2-Adam/group0"] == pytest.approx(0.2)
     assert metrics["eps-Adam/group0"] == pytest.approx(1e-6)
+    assert metrics["inner_step-Adam/group0"] == pytest.approx(
+        float(getattr(optimizer, "_step_count", 0))
+    )

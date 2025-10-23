@@ -100,14 +100,14 @@ llama3_mup_configs = {
         # MuP features
         use_embedding_norm=True,
         use_peri_norm=True,
-        tie_word_embeddings=False,
+        tie_word_embeddings=True,
         use_torch_layernorm=True,
         use_simple_silu_ffn=False,
         qk_norm=True,
         qk_norm_bias=False,
+        qk_norm_elementwise_affine=True,
         torch_layernorm_bias=False,
         torch_layernorm_elementwise_affine=True,
-        qk_norm_elementwise_affine=True,
         # Flex attention
         use_flex_attn=True,
         attn_mask_type="block_causal",
@@ -121,7 +121,7 @@ llama3_mup_configs = {
             "completep_depth_alpha_enabled": True,
             "completep_depth_multiplier": 1.0,
             "completep_depth_alpha_exp": 1.0,
-            "completep_eps_scaling_enabled": True,
+            "completep_eps_scaling_enabled": False,
         },
         init_config={
             "init_std": 0.02,
@@ -140,7 +140,7 @@ llama3_mup_configs = {
         # MuP features
         use_embedding_norm=True,
         use_peri_norm=True,
-        tie_word_embeddings=False,
+        tie_word_embeddings=True,
         use_torch_layernorm=True,
         use_simple_silu_ffn=False,
         qk_norm=True,
@@ -161,7 +161,7 @@ llama3_mup_configs = {
             "completep_depth_alpha_enabled": True,
             "completep_depth_multiplier": 3.0,
             "completep_depth_alpha_exp": 1.0,
-            "completep_eps_scaling_enabled": True,
+            "completep_eps_scaling_enabled": False,
         },
         init_config={
             "init_std": 0.02,
@@ -180,7 +180,7 @@ llama3_mup_configs = {
         # MuP features
         use_embedding_norm=True,
         use_peri_norm=True,
-        tie_word_embeddings=False,
+        tie_word_embeddings=True,
         use_torch_layernorm=True,
         use_simple_silu_ffn=False,
         qk_norm=True,
@@ -201,7 +201,7 @@ llama3_mup_configs = {
             "completep_depth_alpha_enabled": True,
             "completep_depth_multiplier": 3.0,
             "completep_depth_alpha_exp": 1.0,
-            "completep_eps_scaling_enabled": True,
+            "completep_eps_scaling_enabled": False,
         },
         init_config={
             "init_std": 0.02,
@@ -220,7 +220,7 @@ llama3_mup_configs = {
         # MuP features
         use_embedding_norm=True,
         use_peri_norm=True,
-        tie_word_embeddings=False,
+        tie_word_embeddings=True,
         use_torch_layernorm=True,
         use_simple_silu_ffn=False,
         qk_norm=True,
@@ -241,7 +241,7 @@ llama3_mup_configs = {
             "completep_depth_alpha_enabled": True,
             "completep_depth_multiplier": 6.0,
             "completep_depth_alpha_exp": 1.0,
-            "completep_eps_scaling_enabled": True,
+            "completep_eps_scaling_enabled": False,
         },
         init_config={
             "init_std": 0.02,

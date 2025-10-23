@@ -126,6 +126,11 @@ class AggMoAdamW(QHAdamW):
         ] = lambda _param, optim_state, _step_tensor: torch.linalg.vector_norm(
             optim_state["exp_avg_sq"],
         )
+        self.metric_functions["zero_count/exp_avg_sq"] = (
+            lambda _param, optim_state, _step_tensor: optim_state["exp_avg_sq"]
+            .eq(0)
+            .sum(dtype=torch.float32)
+        )
         self.metric_functions[
             "min/exp_avg_sq"
         ] = lambda _param, optim_state, _step_tensor: torch.min(

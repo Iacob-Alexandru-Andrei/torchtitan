@@ -72,8 +72,8 @@ image.py→[_resize_image_by_patch_count((image: Image.Image,max_patch_per_image
 ## DEPENDENCY_PATTERNS
 
 ### EDGE_PATTERNS
-Contains: 31 edges
 Call: 14 edges
+Contains: 31 edges
 
 ### CROSS_CLUSTER_FLOW
 UTILITY_LAYER→UTILS: 3

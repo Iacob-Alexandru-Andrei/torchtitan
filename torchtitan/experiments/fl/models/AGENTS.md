@@ -48,7 +48,7 @@ You are analyzing a codebase dependency graph optimized for AI understanding. Th
 ---
 
 # CODE_GRAPH
-NODES:158 EDGES:48
+NODES:159 EDGES:48
 
 ## DIRECTORY_TREE
 ROOT: torchtitan/experiments/fl/models/
@@ -64,15 +64,15 @@ ROOT: torchtitan/experiments/fl/models/
 ## ARCHITECTURAL_CLUSTERS
 
 ### DATA_MODELS
-NODES:158 CALL_DEPTH:2
+NODES:159 CALL_DEPTH:2
 
 __init__.py→[_get_llama3_mup_spec(void),_update_vocab_sizes((base_spec: TrainSpec,mosaic_spec: TrainSpec)),_update_vocab_sizes((base_spec: TrainSpec,mosaic_spec: TrainSpec)),build_mup_optimizers((model_parts: list[nn.Module],optimizer_config: OptimizerConfig,parallel_dims: ParallelDims,ft_manager: FTManager | None = None,))[HOT],get_train_spec(void),get_train_spec(void),get_train_spec(void)] mosaic_adapter.py→[] mup_args.py→[] mup_model.py→[forward((self,x: torch.Tensor))→{_cast_if_autocast_enabled,_cast_if_autocast_enabled,_cast_if_autocast_enabled},_build_param_groups((self,buckets: dict[str,list[Parameter]],*,base_lr: float,weight_decay: float,width_lr_scaling: float,depth_lr_scaling: float,))[HOT]→{test_mup_model::setUp,test_mup_model::setUp},_cast_if_autocast_enabled((tensor: torch.Tensor | None)),__init__((self,normalized_shape: int | tuple[int,...],eps: float = 1e-05,elementwise_affine: bool = True,device: torch.device | None = None,dtype: torch.dtype | None = None,bias: bool = False,))[CTOR,DUNDER],__init__((self,inner: nn.Module,scale: float))[CTOR,DUNDER],forward((self,q: torch.Tensor,k: torch.Tensor,v: torch.Tensor,*,scale: float | None = None,**kwargs: Any,)),__init__((self,model_args: TransformerModelArgsMuP))[CTOR,DUNDER],init_weights((self,init_std: float)),_build_head_norm((self,model_args: TransformerModelArgsMuP))[HOT],__init__((self,model_args: TransformerModelArgsMuP))[CTOR,DUNDER],forward((self,x: torch.Tensor)),init_weights((self,init_std: float)),__init__((self,layer_id: int,model_args: TransformerModelArgsMuP))[CTOR,DUNDER],forward((self,x: torch.Tensor,freqs_cis: torch.Tensor,)),init_weights((self)),__init__((self,model_args: TransformerModelArgsMuP))[CTOR,DUNDER],init_weights((self,buffer_device: torch.device | None = None)),_precompute_freqs_cis((self))[HOT],_iter_trainable_params((self)),_bucketize_parameters((self,param_entries: list[tuple[str,Parameter]])),_resolve_bucket_name((self,name: str,embed_suffixes: list[str],hidden_ln_suffixes: list[str],no_decay_suffixes: list[str],decay_weight_suffixes: list[str],))[HOT],_validate_bucket_counts((self,total_params: int,buckets: dict[str,list[Parameter]])),_compute_lr_scaling((self))[HOT],_resolve_optimizer_eps((self,eps: float,*,width_lr_scaling: float,))[HOT],build_mup_optimizer_overrides((self,*,lr: float,eps: float,weight_decay: float,))[HOT],get_optimizer_param_groups((self,optimizer_config: dict[str,Any])),forward((self,tokens: torch.Tensor,input_batch: torch.Tensor | None = None,# noqa: ARG002))] parallelize.py→[parallelize_llama_mup((model: Transformer,parallel_dims: ParallelDims,job_config: JobConfig,))→{_apply_mup_tp},_apply_mup_tp((model: Transformer,tp_mesh: DeviceMesh,loss_parallel: bool,enable_float8_tensorwise_tp: bool,))] state_dict_adapter.py→[__init__((self,model_args: TransformerModelArgs,hf_assets_path: str | None,))[CTOR,DUNDER],to_hf((self,state_dict: dict[str,Any]))] test_mosaic_adapter.py→[test_register_applies_builder_overrides((self))[HOT,TEST]→{__init__::get_train_spec},_dummy_builder((*_args: object,**_kwargs: object))[HOT],tearDown((self)),test_build_uses_mosaic_name_by_default((self))[HOT,TEST]] test_mup_model.py→[setUp((self)),_get_expected_mup_eps((self,base_eps: float)),test_model_initialization((self))[TEST],test_forward_pass((self))[TEST],test_weight_initialization((self))[TEST],test_optimizer_overrides_build_param_groups((self))[HOT,TEST],test_optimizer_overrides_disabled_when_hidden_scaling_off((self))[TEST],test_mosaic_builder_integrates_mup_overrides((self))[HOT,TEST],test_mosaic_builder_desloc_requires_ft((self))[HOT,TEST],test_tie_word_embeddings_shares_parameter((self))[TEST]] utils.py→[build_mosaic_spec((base_spec: TrainSpec,*,spec_name: str,overrides: MosaicSpecOverrides | None = None,))[HOT],ensure_mosaic_spec((base_spec_name: str,*,spec_name: str | None = None,overrides: MosaicSpecOverrides | None = None,))] 
 
 ## DEPENDENCY_PATTERNS
 
 ### EDGE_PATTERNS
-Contains: 41 edges
 Call: 7 edges
+Contains: 41 edges
 
 ### CROSS_CLUSTER_FLOW
 

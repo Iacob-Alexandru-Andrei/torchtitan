@@ -13,6 +13,7 @@ from typing import Any, TYPE_CHECKING
 import torch
 
 from torchtitan.components.optimizer import (
+    build_optimizers,
     FTOptimizersContainer,
     OptimizersContainer,
     OptimizersInBackwardContainer,
@@ -116,8 +117,6 @@ def _normalize_mosaic_optimizer_config(
         extra_kwargs["betas"] = config.get_betas_tuple()
     if name in {"QHADOPT", "QHAdamW", "AggMoAdopt", "AggMoAdamW"}:
         extra_kwargs["vs"] = config.vs
-    if name in {"ADOPT", "QHADOPT", "AggMoAdopt"}:
-        extra_kwargs["clip_lambda"] = None
     if name in {"DecoupledAdamW", "AggMoAdopt", "AggMoAdamW"}:
         extra_kwargs["decouple"] = config.decouple
 
@@ -290,6 +289,25 @@ def build_mosaic_optimizers(
         normalized_config,
         param_groups,
     )
+
+    if normalized_config.builder == "default":
+        if normalized_config.desloc.enabled:
+            msg = "DES-LOC is only supported when optimizer.builder is set to 'mosaic'."
+            raise ValueError(msg)
+        if normalized_config.name in _MOSAIC_OPTIMIZER_CLASSES:
+            msg = (
+                f"Optimizer {normalized_config.name!r} requires "
+                "optimizer.builder='mosaic'."
+            )
+            raise ValueError(msg)
+        return build_optimizers(
+            model_parts=model_parts,
+            optimizer_config=normalized_config,
+            parallel_dims=parallel_dims,
+            ft_manager=ft_manager,
+            param_groups=param_groups,
+        )
+
     optimizer_cls = _resolve_optimizer_class(normalized_config.name)
     optimizer_kwargs = _build_optimizer_kwargs(normalized_config, extra_kwargs)
 

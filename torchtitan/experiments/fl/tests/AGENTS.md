@@ -48,7 +48,7 @@ You are analyzing a codebase dependency graph optimized for AI understanding. Th
 ---
 
 # CODE_GRAPH
-NODES:26 EDGES:7
+NODES:38 EDGES:10
 
 ## DIRECTORY_TREE
 ROOT: torchtitan/experiments/fl/tests/
@@ -56,14 +56,15 @@ ROOT: torchtitan/experiments/fl/tests/
 ## ARCHITECTURAL_CLUSTERS
 
 ### TESTS
-NODES:26 CALL_DEPTH:1
+NODES:38 CALL_DEPTH:2
 
-test_unigram_metrics.py→[__init__((self,*_args: object,**_kwargs: object))[CTOR,DUNDER],add_state((self,name: str,default: torch.Tensor,dist_reduce_fx: str | None = None,)),register_buffer((self,name: str,tensor: torch.Tensor)),__init__((self,*_args: object,**_kwargs: object))[CTOR,DUNDER],__init__((self,*_args: object,**_kwargs: object))[CTOR,DUNDER],get_peak_stats((self)),reset_peak_stats((self)),test_unigram_manager_aggregation_and_reset(void)[TEST],test_unigram_manager_teardown_removes_metric(void)[TEST],test_fl_metrics_processor_registers_expected_callbacks(void)[TEST],test_unigram_payload_reports_local_and_global_metrics(void)[TEST],test_unigram_local_metric_logged_before_global(void)[TEST]] 
+test_optimizer_builder.py→[test_default_builder_uses_core_optimizer(void)[HOT,TEST]→{_dims},test_default_builder_rejects_mosaic_only_optimizer(void)[HOT,TEST]→{_dims},__init__((self))[CTOR,DUNDER],_dims(void)] test_unigram_metrics.py→[__init__((self,*_args: object,**_kwargs: object))[CTOR,DUNDER],add_state((self,name: str,default: torch.Tensor,dist_reduce_fx: str | None = None,)),register_buffer((self,name: str,tensor: torch.Tensor)),__init__((self,*_args: object,**_kwargs: object))[CTOR,DUNDER],__init__((self,*_args: object,**_kwargs: object))[CTOR,DUNDER],get_peak_stats((self)),reset_peak_stats((self)),test_unigram_manager_aggregation_and_reset(void)[TEST],test_unigram_manager_teardown_removes_metric(void)[TEST],test_fl_metrics_processor_registers_expected_callbacks(void)[TEST],test_unigram_payload_reports_local_and_global_metrics(void)[TEST],test_unigram_local_metric_logged_before_global(void)[TEST]] 
 
 ## DEPENDENCY_PATTERNS
 
 ### EDGE_PATTERNS
-Contains: 7 edges
+Contains: 8 edges
+Call: 2 edges
 
 ### CROSS_CLUSTER_FLOW
 
