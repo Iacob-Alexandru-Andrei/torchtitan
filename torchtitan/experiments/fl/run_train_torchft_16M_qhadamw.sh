@@ -65,6 +65,8 @@ LIGHTHOUSE_LOG_FILE="${LOG_DIR}/lighthouse.log"
 TIMESTAMP=$(date +"%Y%m%d-%H%M%S")
 export RUN_UUID="${RUN_UUID:-16M-baseline-${TIMESTAMP}}"
 export WANDB_RUN_NAME="${WANDB_RUN_NAME:-${RUN_UUID}}"
+export TORCHTITAN_WANDB_BASE_RUN_NAME="${RUN_UUID}"
+export TORCHTITAN_FORCE_WANDB_WORKER_SUFFIX="${TORCHTITAN_FORCE_WANDB_WORKER_SUFFIX:-1}"
 
 echo "=========================================="
 echo "TorchFT Multi-Replica Training Launch"

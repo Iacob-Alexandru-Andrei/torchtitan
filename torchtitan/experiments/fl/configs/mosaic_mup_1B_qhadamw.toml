@@ -79,11 +79,11 @@ new_betas = [0.999,0.999]
 reset_momenta = ["exp_avg"]
 
 [training]
-local_batch_size = 16
-global_batch_size = 64
+local_batch_size = 64
+global_batch_size = 1024
 seq_len = 2048
-max_norm = 1.0  # grad norm clipping
-steps = 6144
+max_norm = 0.05  # grad norm clipping
+steps = 38912
 dataset = "c4_test"  # supported datasets: c4_test (2K), c4 (177M)
 
 
@@ -109,7 +109,6 @@ enable = true
 bucket = "checkpoints"
 prefix = ""  # Root of bucket
 download_on_start = true
-resume_from_run_step = "16M-baseline-20251028-220735/step-2048"
 # run_uuid and remote_checkpoint_folder will be set via RUN_UUID environment variable
 
 [activation_checkpoint]

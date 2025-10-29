@@ -236,6 +236,7 @@ class CheckpointManager:
             }
         )
         self.ft_states = {DATALOADER: dataloader}
+        self.ft_dataloader_loaded = False
 
         self.staging = False
         self.sending_to_checkpoint_mp = False
@@ -669,6 +670,7 @@ class CheckpointManager:
         logger.info(f"Staging ft checkpoint took {time.monotonic() - begin} secs.")
 
     def _ft_load(self) -> None:
+        self.ft_dataloader_loaded = False
         step = self._find_load_step(folder=self._ft_folder())
         if step == -1:
             return
@@ -683,6 +685,7 @@ class CheckpointManager:
             from_hf=False,
         )
         GarbageCollection.collect("GC collection for checkpoint loading.")
+        self.ft_dataloader_loaded = True
         logger.info(
             f"Finished loading the ft checkpoint in {time.monotonic() - begin:.2f} seconds."
         )
@@ -726,8 +729,8 @@ class CheckpointManager:
 
         states_to_load = self._flattened_model_states_sd(states_to_load)
 
-        if self.ft_manager:
-            states_to_load.pop(DATALOADER)
+        if self.ft_manager and self.ft_dataloader_loaded:
+            states_to_load.pop(DATALOADER, None)
 
         return states_to_load
 

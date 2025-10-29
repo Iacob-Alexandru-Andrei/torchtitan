@@ -179,10 +179,6 @@ class OptimizersContainer(Optimizer, Stateful, Generic[T]):
     def __len__(self) -> int:
         return len(self.optimizers)
 
-    def mark_state_dirty(self) -> None:
-        """Optional hook for subclasses that cache optimizer state."""
-        return None
-
     @Optimizer.profile_hook_step  # ensure optimizer step hooks (e.g. torchft LocalSGD) fire
     def step(self, *args, **kwargs) -> None:
         for optimizer in self.optimizers:
@@ -193,86 +189,23 @@ class OptimizersContainer(Optimizer, Stateful, Generic[T]):
             optimizer.zero_grad(*args, **kwargs)
 
     def state_dict(self) -> dict[str, Any]:
-        options = StateDictOptions(flatten_optimizer_state_dict=True)
-        if len(self.optimizers) == 1:
-            func = functools.partial(get_optimizer_state_dict, options=options)
-            return {
-                k: v
-                for sd in map(func, self.model_parts, self.optimizers)
-                for k, v in sd.items()
-            }
-
-        merged: dict[str, Any] = {}
-        for idx, (model_part, optimizer) in enumerate(
-            zip(self.model_parts, self.optimizers)
-        ):
-            state_dict = get_optimizer_state_dict(
-                model_part,
-                optimizer,
-                options=options,
-            )
-            prefix = self._optimizer_state_prefix(idx, model_part)
-            merged.update({f"{prefix}.{key}": value for key, value in state_dict.items()})
-        return merged
+        func = functools.partial(
+            get_optimizer_state_dict,
+            options=StateDictOptions(flatten_optimizer_state_dict=True),
+        )
+        return {
+            k: v
+            for sd in map(func, self.model_parts, self.optimizers)
+            for k, v in sd.items()
+        }
 
     def load_state_dict(self, state_dict: dict[str, Any]) -> None:
-        options = StateDictOptions(flatten_optimizer_state_dict=True)
-        if len(self.optimizers) == 1:
-            func = functools.partial(
-                set_optimizer_state_dict,
-                optim_state_dict=state_dict,
-                options=options,
-            )
-            list(map(func, self.model_parts, self.optimizers))
-            return
-
-        prefixes = [
-            self._optimizer_state_prefix(idx, model_part)
-            for idx, model_part in enumerate(self.model_parts)
-        ]
-
-        prefixed_states: dict[str, dict[str, Any]] = {prefix: {} for prefix in prefixes}
-        matched_any_prefix = False
-        for key, value in state_dict.items():
-            matched = False
-            for prefix in prefixes:
-                prefix_token = f"{prefix}."
-                if key.startswith(prefix_token):
-                    sub_key = key[len(prefix_token) :]
-                    prefixed_states[prefix][sub_key] = value
-                    matched = True
-                    matched_any_prefix = True
-                    break
-            if not matched and matched_any_prefix:
-                # Once we detect prefixed keys, all optimizer entries should carry prefixes.
-                raise KeyError(
-                    f"Optimizer state key '{key}' is missing an expected prefix among {prefixes}."
-                )
-
-        if not matched_any_prefix:
-            # Fall back to legacy format (no prefixes).
-            func = functools.partial(
-                set_optimizer_state_dict,
-                optim_state_dict=state_dict,
-                options=options,
-            )
-            list(map(func, self.model_parts, self.optimizers))
-            return
-
-        missing_prefixes = [prefix for prefix, content in prefixed_states.items() if not content]
-        if missing_prefixes:
-            raise KeyError(
-                f"Missing optimizer state for model part prefixes: {missing_prefixes}"
-            )
-
-        for model_part, optimizer, prefix in zip(self.model_parts, self.optimizers, prefixes):
-            part_state_dict = prefixed_states[prefix]
-            func = functools.partial(
-                set_optimizer_state_dict,
-                optim_state_dict=part_state_dict,
-                options=options,
-            )
-            func(model_part, optimizer)
+        func = functools.partial(
+            set_optimizer_state_dict,
+            optim_state_dict=state_dict,
+            options=StateDictOptions(flatten_optimizer_state_dict=True),
+        )
+        list(map(func, self.model_parts, self.optimizers))
 
     def _validate_length(self, expected_length: int) -> None:
         assert expected_length == len(self.optimizers), (
@@ -305,25 +238,6 @@ class OptimizersContainer(Optimizer, Stateful, Generic[T]):
         else:
             self._state_proxy.refresh()
         self.state = self._state_proxy
-
-    @staticmethod
-    def _optimizer_state_prefix(idx: int, model_part: nn.Module) -> str:
-        """Return a stable, unique prefix for a given model shard."""
-        if hasattr(model_part, "_optim_state_prefix"):
-            candidate = getattr(model_part, "_optim_state_prefix")
-            if isinstance(candidate, str) and candidate:
-                return candidate
-
-        name = getattr(model_part, "_get_name", None)
-        if callable(name):
-            base_name = name()
-        else:
-            base_name = model_part.__class__.__name__ or "model"
-
-        sanitized = "".join(ch.lower() if ch.isalnum() else "_" for ch in base_name).strip("_")
-        if not sanitized:
-            sanitized = "model"
-        return f"model_part_{idx}_{sanitized}"
 
 
 class OptimizersInBackwardContainer(OptimizersContainer):
@@ -401,27 +315,19 @@ class FTOptimizersContainer(OptimizersContainer):
         # Whether to determine quorum using FT.optimizer,
         # in semi-sync training we use the synchronization step to start quorum
         self._use_ft_optimizer: bool = use_ft_optimizer
-        self._cache_dirty: bool = True
-        self.init_cache_state_dict()
 
     def init_cache_state_dict(self) -> None:
-        new_state = super().state_dict()
-        self.cache_state_dict.clear()
-        self.cache_state_dict.update(new_state)
-        self._cache_dirty = False
+        self.cache_state_dict = super().state_dict()
 
     def state_dict(self) -> dict[str, Any]:
-        if self._cache_dirty:
-            self.init_cache_state_dict()
         return self.cache_state_dict
 
     def load_state_dict(self, state_dict: dict[str, Any]) -> None:
         # We have to invalidate the `cache_state_dict` because optimizer uses
         # assign instead of copy when doing `load_state_dict()`. Without
         # invalidating the `cache_state_dict`, there will be memory leakage.
-        old_cache = self.cache_state_dict
+        self.cache_state_dict = {}
         super().load_state_dict(state_dict)
-        old_cache.clear()
         self.init_cache_state_dict()
 
     @Optimizer.profile_hook_step  # reuse step hooks under TorchFT wrappers
@@ -438,7 +344,6 @@ class FTOptimizersContainer(OptimizersContainer):
             self._use_ft_optimizer = True
         else:
             super().step(*args, **kwargs)
-        self._cache_dirty = True
 
     def zero_grad(self, *args, **kwargs) -> None:
         """Calling the correct zero_grad() depending on the caller.
@@ -451,9 +356,6 @@ class FTOptimizersContainer(OptimizersContainer):
             self._use_ft_optimizer = True
         else:
             super().zero_grad(*args, **kwargs)
-
-    def mark_state_dirty(self) -> None:
-        self._cache_dirty = True
 
 
 def build_optimizers(

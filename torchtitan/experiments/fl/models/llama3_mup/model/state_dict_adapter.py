@@ -76,6 +76,8 @@ class Llama3MuPStateDictAdapter(Llama3StateDictAdapter):
         self._mup_only_patterns = (
             re.compile(r"layers\.\d+\.post_attn_norm\.weight"),
             re.compile(r"layers\.\d+\.post_ffn_norm\.weight"),
+            re.compile(r"layers\.\d+\.attention\.q_norm\.weight"),
+            re.compile(r"layers\.\d+\.attention\.k_norm\.weight"),
         )
 
     def to_hf(self, state_dict: dict[str, Any]) -> dict[str, Any]:

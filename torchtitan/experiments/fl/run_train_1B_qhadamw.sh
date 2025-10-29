@@ -31,7 +31,7 @@ NPROC_PER_NODE=${NPROC_PER_NODE:-2}
 
 NGPU=${NGPU:-"4"}
 export LOG_RANK=${LOG_RANK:-0}
-CONFIG_FILE=${CONFIG_FILE:-"./torchtitan/experiments/fl/configs/mosaic_mup_16M_qhadamw.toml"}
+CONFIG_FILE=${CONFIG_FILE:-"./torchtitan/experiments/fl/configs/mosaic_mup_1B_qhadamw.toml"}
 TRAIN_FILE=${TRAIN_FILE:-"torchtitan.experiments.fl.train"}
 
 export WANDB_PROJECT="torchtitan"
@@ -41,16 +41,16 @@ export WANDB_TEAM="camlsys"
 
 # Create unified RUN_UUID for all naming (WandB, S3, dump folder)
 TIMESTAMP=$(date +"%Y%m%d-%H%M%S")
-export RUN_UUID="${RUN_UUID:-16M-baseline-${TIMESTAMP}}"
+export RUN_UUID="${RUN_UUID:-1B-baseline-${TIMESTAMP}}"
 export WANDB_RUN_NAME="${RUN_UUID}"
 export TORCHTITAN_WANDB_BASE_RUN_NAME="${RUN_UUID}"
 export TORCHTITAN_FORCE_WANDB_WORKER_SUFFIX="${TORCHTITAN_FORCE_WANDB_WORKER_SUFFIX:-1}"
 
 # Optional: Resume from a specific run and step
 # Format: {run_uuid}/step-{N}
-# Example: export RESUME_FROM_RUN_STEP="16M-baseline-20251011-122516/step-10"
+# Example: export RESUME_FROM_RUN_STEP="1B-baseline-20251011-122516/step-10"
 # export RESUME_FROM_RUN_STEP="${RESUME_FROM_RUN_STEP:-}"
-# export RESUME_FROM_RUN_STEP="16M-baseline-20251011-132852/step-10"
+# export RESUME_FROM_RUN_STEP="1B-baseline-20251011-132852/step-10"
 
 TORCHFT_LIGHTHOUSE=${TORCHFT_LIGHTHOUSE:-"http://localhost:29510"}
 

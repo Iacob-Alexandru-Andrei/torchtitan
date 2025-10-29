@@ -244,6 +244,204 @@ def _log_model_summary(trainer: Trainer) -> None:
             logger.info("Model part %d structure:\n%s", idx, structure_text)
 
 
+def _env_flag(name: str) -> bool:
+    """Return True when an environment variable is set to a truthy value."""
+    value = os.getenv(name)
+    if value is None:
+        return False
+    return value.strip().lower() not in {"0", "false", "no", "off", ""}
+
+
+def _safe_int_env(name: str, default: int) -> int:
+    """Safely parse an integer environment variable, returning a fallback on failure."""
+    value = os.getenv(name)
+    if not value:
+        return default
+    try:
+        return int(value)
+    except ValueError:
+        return default
+
+
+def _resolve_local_rank_world_size(*, allow_distributed: bool = True) -> tuple[int, int]:
+    """Return the local rank and world size using torch.distributed if available."""
+    if allow_distributed and torch.distributed.is_initialized():
+        local_rank = torch.distributed.get_rank()
+        world_size = torch.distributed.get_world_size()
+    else:
+        local_rank = _safe_int_env("LOCAL_RANK", 0)
+        world_size = max(_safe_int_env("WORLD_SIZE", 1), 1)
+    return local_rank, world_size
+
+
+def _resolve_replica_identifier(
+    job_config: Any,
+    *,
+    ft_mode: bool,
+    ft_manager: Any | None,
+) -> int | str | None:
+    """Determine the replica identifier from FT manager, config, or environment."""
+    replica_identifier: int | str | None = None
+    if ft_mode and ft_manager is not None:
+        replica_identifier = getattr(ft_manager, "replica_id", None)
+    if replica_identifier in (None, "", -1):
+        replica_identifier = getattr(job_config.fault_tolerance, "replica_id", None)
+    if replica_identifier in (None, "", -1):
+        for env_var in (
+            "TORCHFT_REPLICA_ID",
+            "FAULT_TOLERANCE_REPLICA_ID",
+            "FT_REPLICA_ID",
+            "REPLICA_ID",
+        ):
+            env_value = os.getenv(env_var)
+            if env_value:
+                try:
+                    replica_identifier = int(env_value)
+                except ValueError:
+                    replica_identifier = env_value
+                break
+    return replica_identifier
+
+
+def _build_wandb_run_name(
+    job_config: Any,
+    *,
+    replica_identifier: int | str | None,
+    local_rank: int,
+    world_size: int,
+) -> tuple[str, str, str]:
+    """Return base run name, desired run name, and worker identifier string."""
+    base_run_name = (
+        os.getenv("TORCHTITAN_WANDB_BASE_RUN_NAME")
+        or job_config.run_uuid
+        or os.getenv("RUN_UUID")
+        or os.getenv("WANDB_RUN_NAME")
+        or "torchtitan"
+    )
+
+    if job_config.run_uuid is None:
+        job_config.run_uuid = base_run_name
+
+    replica_index: int | None
+    try:
+        replica_index = (
+            int(replica_identifier)
+            if replica_identifier not in (None, "", -1)
+            else None
+        )
+    except (TypeError, ValueError):
+        replica_index = None
+
+    if replica_index is not None:
+        global_worker_id: int | str = replica_index * world_size + local_rank
+        replica_suffix = f"rep{replica_index}"
+    elif replica_identifier not in (None, "", -1):
+        global_worker_id = f"{replica_identifier}-rank{local_rank}"
+        replica_suffix = f"rep{replica_identifier}"
+    else:
+        pid = os.getpid()
+        global_worker_id = f"pid{pid}-rank{local_rank}"
+        replica_suffix = f"rep{pid}"
+
+    worker_token = str(global_worker_id)
+    suffix = f"{replica_suffix}-rank{local_rank}"
+
+    if f"-worker{worker_token}" in base_run_name:
+        desired_name = base_run_name
+    else:
+        desired_name = f"{base_run_name}-worker{worker_token}-{suffix}"
+
+    return base_run_name, desired_name, worker_token
+
+
+def _initialize_wandb_run_name_env(job_config: Any) -> None:
+    """Set WANDB_RUN_NAME before WandB initializes so each worker starts with its suffix."""
+    should_update = job_config.metrics.save_for_all_ranks or _env_flag(
+        "TORCHTITAN_FORCE_WANDB_WORKER_SUFFIX"
+    )
+    if not should_update:
+        return
+
+    try:
+        local_rank, world_size = _resolve_local_rank_world_size(allow_distributed=False)
+        replica_identifier = _resolve_replica_identifier(
+            job_config,
+            ft_mode=False,
+            ft_manager=None,
+        )
+        base_run_name, desired_name, _ = _build_wandb_run_name(
+            job_config,
+            replica_identifier=replica_identifier,
+            local_rank=local_rank,
+            world_size=world_size,
+        )
+        os.environ.setdefault("TORCHTITAN_WANDB_BASE_RUN_NAME", base_run_name)
+        os.environ["WANDB_RUN_NAME"] = desired_name
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Failed to preconfigure WandB run name: %s", exc)
+
+
+def _maybe_update_wandb_run_name(
+    job_config: Any,
+    *,
+    ft_mode: bool,
+    ft_manager: Any | None,
+) -> None:
+    """Ensure WandB run names include replica/worker identifiers."""
+    if not job_config.metrics.enable_wandb:
+        return
+
+    should_update = job_config.metrics.save_for_all_ranks or _env_flag(
+        "TORCHTITAN_FORCE_WANDB_WORKER_SUFFIX"
+    )
+    if not should_update:
+        return
+
+    try:
+        import wandb  # noqa: PLC0415
+    except ImportError:
+        logger.warning("wandb not available, skipping run name update")
+        return
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Failed to import wandb: %s", exc)
+        return
+
+    run = wandb.run
+    if run is None:
+        return
+
+    try:
+        local_rank, world_size = _resolve_local_rank_world_size()
+        replica_identifier = _resolve_replica_identifier(
+            job_config,
+            ft_mode=ft_mode,
+            ft_manager=ft_manager,
+        )
+        base_run_name, desired_name, worker_token = _build_wandb_run_name(
+            job_config,
+            replica_identifier=replica_identifier,
+            local_rank=local_rank,
+            world_size=world_size,
+        )
+
+        os.environ.setdefault("TORCHTITAN_WANDB_BASE_RUN_NAME", base_run_name)
+        current_run_name = run.name or base_run_name
+        run.group = job_config.run_uuid
+
+        if current_run_name != desired_name:
+            run.name = desired_name
+            run.save()
+            logger.info(
+                "Updated WandB run name from '%s' to '%s' (worker %s)",
+                current_run_name,
+                desired_name,
+                worker_token,
+            )
+        os.environ["WANDB_RUN_NAME"] = desired_name
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Failed to update WandB run name: %s", exc)
+
+
 def main() -> None:  # noqa: C901, PLR0912, PLR0915
     """The main entry point for the Mosaic training script.
 
@@ -274,6 +472,8 @@ def main() -> None:  # noqa: C901, PLR0912, PLR0915
     if resume_from_run_step:
         job_config.s3_checkpoint.resume_from_run_step = resume_from_run_step  # type: ignore[attr-defined]
         logger.info(f"Will resume training from run step: {resume_from_run_step}")
+
+    _initialize_wandb_run_name_env(job_config)
 
     # Launch the trainer
     trainer: Trainer | None = None
@@ -353,86 +553,11 @@ def main() -> None:  # noqa: C901, PLR0912, PLR0915
                 )
                 logger.info(f"[S3 DEBUG] download_manager={download_manager}")
 
-        # Override WandB run name to include rank if save_for_all_ranks is enabled
-        if job_config.metrics.save_for_all_ranks and job_config.metrics.enable_wandb:
-            try:
-                import wandb  # noqa: PLC0415
-
-                if wandb.run is not None:
-                    if torch.distributed.is_initialized():
-                        local_rank = torch.distributed.get_rank()
-                        world_size = torch.distributed.get_world_size()
-                    else:
-                        local_rank = 0
-                        world_size = 1
-
-                    replica_identifier: int | str | None = None
-                    if ft_mode and ft_manager is not None:
-                        replica_identifier = getattr(ft_manager, "replica_id", None)
-                    if replica_identifier in (None, "", -1):
-                        replica_identifier = getattr(
-                            job_config.fault_tolerance, "replica_id", None
-                        )
-                    if replica_identifier in (None, "", -1):
-                        for env_var in (
-                            "TORCHFT_REPLICA_ID",
-                            "FAULT_TOLERANCE_REPLICA_ID",
-                            "FT_REPLICA_ID",
-                            "REPLICA_ID",
-                        ):
-                            env_value = os.getenv(env_var)
-                            if env_value:
-                                try:
-                                    replica_identifier = int(env_value)
-                                except ValueError:
-                                    replica_identifier = env_value
-                                break
-                    replica_index: int | None
-                    try:
-                        replica_index = (
-                            int(replica_identifier)
-                            if replica_identifier not in (None, "", -1)
-                            else None
-                        )
-                    except (TypeError, ValueError):
-                        replica_index = None
-
-                    if replica_index is not None:
-                        global_worker_id = replica_index * world_size + local_rank
-                        replica_suffix = f"rep{replica_index}"
-                    elif replica_identifier not in (None, "", -1):
-                        global_worker_id = f"{replica_identifier}-rank{local_rank}"
-                        replica_suffix = f"rep{replica_identifier}"
-                    else:
-                        replica_identifier = os.getpid()
-                        global_worker_id = f"pid{replica_identifier}-rank{local_rank}"
-                        replica_suffix = f"rep{replica_identifier}"
-
-                    suffix = f"{replica_suffix}-rank{local_rank}"
-
-                    base_run_name = (
-                        wandb.run.name or job_config.run_uuid or "torchtitan"
-                    )
-                    if job_config.run_uuid is None:
-                        job_config.run_uuid = base_run_name
-                    wandb.run.group = job_config.run_uuid
-                    original_name = base_run_name
-                    if f"-worker{global_worker_id}" in original_name:
-                        new_name = original_name
-                    else:
-                        new_name = f"{original_name}-worker{global_worker_id}-{suffix}"
-                        wandb.run.name = new_name
-                        wandb.run.save()
-                        logger.info(
-                            "Updated WandB run name from '%s' to '%s' (global worker id %s)",
-                            original_name,
-                            new_name,
-                            global_worker_id,
-                        )
-            except ImportError:
-                logger.warning("wandb not available, skipping run name update")
-            except Exception as e:  # noqa: BLE001
-                logger.warning(f"Failed to update WandB run name: {e}")
+        _maybe_update_wandb_run_name(
+            job_config,
+            ft_mode=ft_mode,
+            ft_manager=ft_manager,
+        )
 
         if job_config.checkpoint.create_seed_checkpoint:
             assert (
@@ -479,93 +604,11 @@ def main() -> None:  # noqa: C901, PLR0912, PLR0915
                     )
                     logger.info(f"[S3 DEBUG] download_manager={download_manager}")
 
-            # Override WandB run name to include rank if save_for_all_ranks is enabled
-            if (
-                job_config.metrics.save_for_all_ranks
-                and job_config.metrics.enable_wandb
-            ):
-                try:
-                    import wandb  # noqa: PLC0415
-
-                    if wandb.run is not None:
-                        if torch.distributed.is_initialized():
-                            local_rank = torch.distributed.get_rank()
-                            world_size = torch.distributed.get_world_size()
-                        else:
-                            local_rank = 0
-                            world_size = 1
-
-                        replica_identifier: int | str | None = None
-                        if ft_mode and ft_manager is not None:
-                            replica_identifier = getattr(ft_manager, "replica_id", None)
-                        if replica_identifier in (None, "", -1):
-                            replica_identifier = getattr(
-                                job_config.fault_tolerance, "replica_id", None
-                            )
-                        if replica_identifier in (None, "", -1):
-                            for env_var in (
-                                "TORCHFT_REPLICA_ID",
-                                "FAULT_TOLERANCE_REPLICA_ID",
-                                "FT_REPLICA_ID",
-                                "REPLICA_ID",
-                            ):
-                                env_value = os.getenv(env_var)
-                                if env_value:
-                                    try:
-                                        replica_identifier = int(env_value)
-                                    except ValueError:
-                                        replica_identifier = env_value
-                                    break
-                        replica_index: int | None
-                        try:
-                            replica_index = (
-                                int(replica_identifier)
-                                if replica_identifier not in (None, "", -1)
-                                else None
-                            )
-                        except (TypeError, ValueError):
-                            replica_index = None
-
-                        if replica_index is not None:
-                            global_worker_id = replica_index * world_size + local_rank
-                            replica_suffix = f"rep{replica_index}"
-                        elif replica_identifier not in (None, "", -1):
-                            global_worker_id = f"{replica_identifier}-rank{local_rank}"
-                            replica_suffix = f"rep{replica_identifier}"
-                        else:
-                            replica_identifier = os.getpid()
-                            global_worker_id = (
-                                f"pid{replica_identifier}-rank{local_rank}"
-                            )
-                            replica_suffix = f"rep{replica_identifier}"
-
-                        suffix = f"{replica_suffix}-rank{local_rank}"
-
-                        base_run_name = (
-                            wandb.run.name or job_config.run_uuid or "torchtitan"
-                        )
-                        if job_config.run_uuid is None:
-                            job_config.run_uuid = base_run_name
-                        wandb.run.group = job_config.run_uuid
-                        original_name = base_run_name
-                        if f"-worker{global_worker_id}" in original_name:
-                            new_name = original_name
-                        else:
-                            new_name = (
-                                f"{original_name}-worker{global_worker_id}-{suffix}"
-                            )
-                            wandb.run.name = new_name
-                            wandb.run.save()
-                            logger.info(
-                                "Updated WandB run name from '%s' to '%s' (global worker id %s)",
-                                original_name,
-                                new_name,
-                                global_worker_id,
-                            )
-                except ImportError:
-                    logger.warning("wandb not available, skipping run name update")
-                except Exception as e:  # noqa: BLE001
-                    logger.warning(f"Failed to update WandB run name: {e}")
+            _maybe_update_wandb_run_name(
+                job_config,
+                ft_mode=ft_mode,
+                ft_manager=ft_manager,
+            )
 
             if job_config.checkpoint.create_seed_checkpoint:
                 assert (

@@ -21,6 +21,10 @@ from torchmetrics import Metric
 
 from torchtitan.components.metrics import MetricsProcessor
 from torchtitan.distributed import utils as dist_utils
+from torchtitan.experiments.fl.optimizers._metric_utils import (
+    METRIC_COUNT_PREFIX,
+    metric_count_key,
+)
 from torchtitan.experiments.fl.callbacks import (
     Callback,
     CallbackSetupContext,
@@ -715,28 +719,60 @@ class OptimizerMonitor(Callback):
         """
         reduced_metrics = {}
 
-        for metric_name, metric_value in optimizer_metrics.items():
+        for metric_name, metric_value in list(optimizer_metrics.items()):
+            if metric_name.startswith(METRIC_COUNT_PREFIX):
+                continue
+
+            count_key = metric_count_key(metric_name)
+            count_value = optimizer_metrics.pop(count_key, None)
             if not isinstance(metric_value, torch.Tensor):
                 # Skip non-tensor metrics
                 reduced_metrics[metric_name] = metric_value
                 continue
+
+            if isinstance(count_value, torch.Tensor):
+                count_tensor = count_value.to(device=metric_value.device, dtype=metric_value.dtype)
+            elif isinstance(count_value, (int, float)):
+                count_tensor = torch.tensor(
+                    count_value,
+                    device=metric_value.device,
+                    dtype=metric_value.dtype,
+                )
+            else:
+                count_tensor = torch.tensor(
+                    1.0,
+                    device=metric_value.device,
+                    dtype=metric_value.dtype,
+                )
 
             # Determine reduction operation based on metric name
             if "l2_norm" in metric_name or "norm" in metric_name:
                 # For L2 norms, the values are already squared by pre_reduce_metrics
                 # Sum across ranks then sqrt (dist_utils returns float)
                 sum_squared = dist_utils.dist_sum(metric_value, mesh)
-                reduced_metrics[metric_name] = math.sqrt(sum_squared)
+                replica_count = dist_utils.dist_sum(count_tensor, mesh)
+                denom = max(replica_count, 1.0)
+                reduced_metrics[metric_name] = math.sqrt(sum_squared / denom)
             elif "max" in metric_name:
                 reduced_metrics[metric_name] = dist_utils.dist_max(metric_value, mesh)
             elif "min" in metric_name:
                 # dist_min not implemented, use -dist_max(-x)
                 reduced_metrics[metric_name] = -dist_utils.dist_max(-metric_value, mesh)
             elif "mean" in metric_name or "avg" in metric_name:
-                reduced_metrics[metric_name] = dist_utils.dist_mean(metric_value, mesh)
+                total = dist_utils.dist_sum(metric_value, mesh)
+                replica_count = dist_utils.dist_sum(count_tensor, mesh)
+                denom = max(replica_count, 1.0)
+                reduced_metrics[metric_name] = total / denom
+            elif "zero_count" in metric_name:
+                reduced_metrics[metric_name] = dist_utils.dist_sum(metric_value, mesh)
             else:
                 # Default to sum for other metrics
                 reduced_metrics[metric_name] = dist_utils.dist_sum(metric_value, mesh)
+
+        # Remove any auxiliary replica count keys that may remain.
+        for key in list(optimizer_metrics.keys()):
+            if key.startswith(METRIC_COUNT_PREFIX):
+                optimizer_metrics.pop(key)
 
         return reduced_metrics
 

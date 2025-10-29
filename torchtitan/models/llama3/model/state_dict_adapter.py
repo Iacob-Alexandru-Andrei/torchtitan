@@ -82,7 +82,9 @@ class Llama3StateDictAdapter(StateDictAdapter):
             if "layers" in key:
                 abstract_key = re.sub(r"(\d+)", "{}", key, count=1)
                 layer_num = re.search(r"\d+", key).group(0)
-                new_key = to_hf_map[abstract_key]
+                new_key = to_hf_map.get(abstract_key)
+                if new_key is None:
+                    continue
                 # We need to permute the weights in wq and wk layer in order to account for the difference between
                 # the native Llama and huggingface RoPE implementation.
                 if abstract_key == "layers.{}.attention.wq.weight":
@@ -95,7 +97,9 @@ class Llama3StateDictAdapter(StateDictAdapter):
                     continue
                 new_key = new_key.format(layer_num)
             else:
-                new_key = to_hf_map[key]
+                new_key = to_hf_map.get(key)
+                if new_key is None:
+                    continue
 
             hf_state_dict[new_key] = value
 
@@ -116,7 +120,9 @@ class Llama3StateDictAdapter(StateDictAdapter):
             if "layers" in key:
                 abstract_key = re.sub(r"(\d+)", "{}", key, count=1)
                 layer_num = re.search(r"\d+", key).group(0)
-                new_key = self.from_hf_map[abstract_key]
+                new_key = self.from_hf_map.get(abstract_key)
+                if new_key is None:
+                    continue
 
                 # We need to permute the weights in wq and wk layer in order to account for the difference between
                 # the native Llama and huggingface RoPE implementation.
@@ -130,7 +136,9 @@ class Llama3StateDictAdapter(StateDictAdapter):
                     continue
                 new_key = new_key.format(layer_num)
             else:
-                new_key = self.from_hf_map[key]
+                new_key = self.from_hf_map.get(key)
+                if new_key is None:
+                    continue
 
             state_dict[new_key] = value
         return state_dict

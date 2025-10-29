@@ -67,6 +67,7 @@ class StateDictAdapter(BaseStateDictAdapter):
         model_args: BaseModelArgs,
         hf_assets_path: str | None,
     ):
+        self.fqn_to_index_mapping: dict[str, int] | None = None
         if hf_assets_path:
             mapping_path = os.path.join(hf_assets_path, "model.safetensors.index.json")
             try:

@@ -109,7 +109,7 @@ enable = true
 bucket = "checkpoints"
 prefix = ""  # Root of bucket
 download_on_start = true
-resume_from_run_step = "16M-baseline-20251028-191709/step-2048"
+resume_from_run_step = "16M-baseline-20251029-095728/step-2048"
 # run_uuid and remote_checkpoint_folder will be set via RUN_UUID environment variable
 
 [activation_checkpoint]

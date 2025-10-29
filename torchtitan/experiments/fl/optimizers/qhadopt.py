@@ -29,6 +29,10 @@ from torch.optim.optimizer import (
 from torch.types import Number
 
 from ._decoupled_decay import _compute_decay_factor
+from ._metric_utils import (
+    prepare_metrics_for_reduction,
+    reduce_metrics_across_ranks,
+)
 
 
 if TYPE_CHECKING:
@@ -369,60 +373,7 @@ class QHADOPT(Optimizer):
         Returns:
             The optimizer metrics reduced across all workers.
         """
-        local_keys = list(optimizer_metrics.keys())
-        all_gathered_keys = [None for _ in range(c10d.get_world_size())]
-        c10d.all_gather_object(all_gathered_keys, local_keys)
-        all_keys = set()
-        for keys in all_gathered_keys:
-            if keys is not None:
-                all_keys.update(set(keys))
-
-        # Sort keys to ensure every rank has the same keys order
-        # Only L2 norm metric keys are present, can apply regular sort
-        list_all_keys = sorted(all_keys)
-
-        # Determine device from existing metrics, fallback to default device
-        device = None
-        for value in optimizer_metrics.values():
-            if isinstance(value, torch.Tensor):
-                device = value.device
-                break
-        if device is None:
-            # Use default device (respects torch.set_default_device if set)
-            device = torch.tensor(0.0).device
-
-        for metric in list_all_keys:
-            reduced = optimizer_metrics.get(
-                metric,
-                torch.tensor(0.0, device=device),
-            )
-
-            # Convert DTensor to regular tensor if needed (FSDP2 compatibility)
-            if isinstance(reduced, DTensor):
-                reduced = reduced.full_tensor()
-
-            if c10d.get_world_size() > 1:
-                if metric.startswith("l2_norm"):
-                    c10d.all_reduce(reduced, op=c10d.ReduceOp.SUM)
-                    optimizer_metrics[metric] = torch.sqrt(reduced)
-                elif metric.startswith("min"):
-                    c10d.all_reduce(reduced, op=c10d.ReduceOp.MIN)
-                    optimizer_metrics[metric] = reduced
-                elif metric.startswith("max"):
-                    c10d.all_reduce(reduced, op=c10d.ReduceOp.MAX)
-                    optimizer_metrics[metric] = reduced
-                elif metric.startswith("zero_count"):
-                    c10d.all_reduce(reduced, op=c10d.ReduceOp.SUM)
-                    optimizer_metrics[metric] = reduced
-                else:
-                    c10d.all_reduce(reduced, op=c10d.ReduceOp.SUM)
-                    optimizer_metrics[metric] = reduced / c10d.get_world_size()
-            elif metric.startswith("l2_norm"):
-                optimizer_metrics[metric] = torch.sqrt(reduced)
-            else:
-                optimizer_metrics[metric] = reduced
-
-        return optimizer_metrics
+        return reduce_metrics_across_ranks(optimizer_metrics)
 
     @staticmethod
     def pre_reduce_metrics(optimizer_metrics: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
@@ -434,13 +385,7 @@ class QHADOPT(Optimizer):
         Returns:
             The optimizer metrics containing the squared L2 norms.
         """
-        # Only L2 norm metric keys are present, can skip sorting at this stage
-        for metric in optimizer_metrics:
-            # L2 norms need to be squared before they are reduced via summation
-            if metric.startswith("l2_norm"):
-                optimizer_metrics[metric] **= 2
-
-        return optimizer_metrics
+        return prepare_metrics_for_reduction(optimizer_metrics)
 
     def report_per_parameter_metrics(
         self,
