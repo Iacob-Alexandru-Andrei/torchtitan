@@ -208,6 +208,27 @@ class TestCheckpointManager(unittest.TestCase):
         self.assertTrue(torch.equal(self.optimizers._fake_param, p0))
         manager.close()
 
+    def test_find_load_step_detects_distcp_only_checkpoints(self):
+        manager = CheckpointManager(
+            dataloader=self.data_loader,
+            model_parts=self.model_parts,
+            optimizers=self.optimizers,
+            lr_schedulers=self.lr_schedulers,
+            states=self.states,
+            checkpoint_config=self.job_config.checkpoint,
+            sd_adapter=None,
+            base_folder=self.job_config.job.dump_folder,
+            ft_manager=self.ft_manager,
+        )
+
+        step_dir = os.path.join(manager.folder, "step-42")
+        os.makedirs(step_dir, exist_ok=True)
+        with open(os.path.join(step_dir, "__0_0.distcp"), "wb") as handle:
+            handle.write(b"test")
+
+        self.assertEqual(manager._find_load_step(), 42)
+        manager.close()
+
     @mock.patch("torch.distributed.get_rank", return_value=0)
     @mock.patch("torchtitan.components.checkpoint.dcp.save")
     @mock.patch("torchtitan.components.checkpoint.dcp.load")

@@ -141,10 +141,7 @@ class S3CheckpointWrapper:
         # Set the run name for the RemoteUploaderDownloader
         # This is normally set in init() but we're using it standalone
         run_name = (
-            config.run_uuid
-            or job_config.job.description
-            or Path(job_config.job.dump_folder).name
-            or "torchtitan-run"
+            config.run_uuid or job_config.job.description or Path(job_config.job.dump_folder).name or "torchtitan-run"
         )
         self.remote_up_down._run_name = str(run_name)
 
@@ -168,6 +165,7 @@ class S3CheckpointWrapper:
         # Install tracking
         self._missing_directory_steps: set[int] = set()
         self._not_ready_steps: set[int] = set()
+        self._missing_metadata_steps: set[int] = set()
         self._orig_save = checkpointer.save
         self._orig_maybe_wait = checkpointer.maybe_wait_for_staging
         self._orig_close = checkpointer.close
@@ -256,9 +254,7 @@ class S3CheckpointWrapper:
 
         if self._ft_mode and self._ft_folder_path is not None:
             base_folder = self._ft_folder_path
-            local_latest = self.checkpointer._find_load_step(
-                folder=str(self._ft_folder_path)
-            )
+            local_latest = self.checkpointer._find_load_step(folder=str(self._ft_folder_path))
         else:
             base_folder = self._base_folder
             local_latest = self._find_local_latest_step()
@@ -268,9 +264,7 @@ class S3CheckpointWrapper:
             local_latest if local_latest != -1 else "none",
         )
         if local_latest != -1:
-            logger.info(
-                "Skipping S3 download: local checkpoint found at step %s", local_latest
-            )
+            logger.info("Skipping S3 download: local checkpoint found at step %s", local_latest)
             return
 
         # Determine what to download
@@ -278,9 +272,7 @@ class S3CheckpointWrapper:
             # Parse format: "{run_uuid}/step-{N}"
             try:
                 parts = self.config.resume_from_run_step.split("/")
-                if len(parts) != RESUME_FORMAT_PARTS_COUNT or not parts[1].startswith(
-                    STEP_PREFIX
-                ):
+                if len(parts) != RESUME_FORMAT_PARTS_COUNT or not parts[1].startswith(STEP_PREFIX):
                     self._raise_invalid_resume_format()
                 run_uuid = parts[0]
                 step_str = parts[1][len(STEP_PREFIX) :]  # Remove "step-" prefix
@@ -346,9 +338,7 @@ class S3CheckpointWrapper:
         try:
             self._orig_maybe_wait()
         except Exception:  # noqa: BLE001
-            logger.exception(
-                "Failed while waiting for staged checkpoints before upload."
-            )
+            logger.exception("Failed while waiting for staged checkpoints before upload.")
         if self._enable_uploads:
             self._process_pending(flush=True)
         # Note: RemoteUploaderDownloader cleanup is handled by Composer internally
@@ -358,7 +348,7 @@ class S3CheckpointWrapper:
         return root.strip("/")
 
     def _checkpoint_dir(self, step: int) -> Path:
-        if self._ft_mode and self._ft_folder_path is not None:
+        if self._enable_uploads and self._ft_mode and self._ft_folder_path is not None:
             return self._ft_folder_path / f"step-{step}"
         return self._base_folder / f"step-{step}"
 
@@ -412,9 +402,7 @@ class S3CheckpointWrapper:
             try:
                 self._orig_maybe_wait()
             except Exception:  # noqa: BLE001
-                logger.exception(
-                    "Failed while waiting for staged checkpoints before final upload."
-                )
+                logger.exception("Failed while waiting for staged checkpoints before final upload.")
             self._process_pending(flush=True)
 
     def maybe_wait_for_staging(self) -> None:
@@ -438,16 +426,11 @@ class S3CheckpointWrapper:
                     )
                 else:
                     if step not in self._missing_directory_steps:
-                        logger.warning(
-                            "Checkpoint directory %s for step %s is not available yet; retrying staging before upload.",
-                            directory,
-                            step,
-                        )
                         self._missing_directory_steps.add(step)
                     pending.append((step, directory))
                 continue
             self._missing_directory_steps.discard(step)
-            if not self._is_directory_ready_for_upload(directory):
+            if not self._is_directory_ready_for_upload(step, directory):
                 if flush:
                     logger.error(
                         "Checkpoint directory %s for step %s is not ready for upload during flush and will be skipped.",
@@ -468,18 +451,49 @@ class S3CheckpointWrapper:
             self._upload_step(step, directory)
         self._pending_steps = pending
 
-    def _is_directory_ready_for_upload(self, directory: Path) -> bool:
+    def _is_directory_ready_for_upload(self, step: int, directory: Path) -> bool:
         try:
-            has_entries = any(directory.iterdir())
+            entries = list(directory.iterdir())
         except FileNotFoundError:
             return False
-        if not has_entries:
+        if not entries:
             return False
         try:
             has_temp_files = any(directory.rglob("*.tmp"))
         except FileNotFoundError:
             return False
-        return not has_temp_files
+        if has_temp_files:
+            return False
+
+        files = [path for path in entries if path.is_file()]
+        has_distcp = any(path.suffix == ".distcp" for path in files)
+        metadata_path = directory / ".metadata"
+        if has_distcp and not metadata_path.exists():
+            if step not in self._missing_metadata_steps:
+                logger.info(
+                    "Checkpoint step %s is waiting for metadata file before upload (expected at %s).",
+                    step,
+                    metadata_path,
+                )
+                self._missing_metadata_steps.add(step)
+            return False
+        self._missing_metadata_steps.discard(step)
+
+        has_safetensors = any(path.suffix == ".safetensors" for path in files)
+        if has_safetensors:
+            index_file = directory / "model.safetensors.index.json"
+            if not index_file.exists():
+                if step not in self._missing_metadata_steps:
+                    logger.info(
+                        "Checkpoint step %s is waiting for safetensors index file before upload (expected at %s).",
+                        step,
+                        index_file,
+                    )
+                    self._missing_metadata_steps.add(step)
+                return False
+            self._missing_metadata_steps.discard(step)
+
+        return True
 
     def _upload_step(self, step: int, directory: Path) -> None:
         files = sorted(self._iter_checkpoint_files(directory))
@@ -566,25 +580,49 @@ class S3CheckpointWrapper:
         checkpoint_dir.mkdir(parents=True, exist_ok=True)
         manifest_path = checkpoint_dir / MANIFEST_FILENAME
 
-        relative_base = Path(f"step-{step}")
+        candidate_relatives: list[Path] = []
+        base_relative = Path(f"step-{step}")
         if self._ft_relative is not None:
-            relative_base = self._ft_relative / relative_base
+            candidate_relatives.append(self._ft_relative / base_relative)
+        candidate_relatives.append(base_relative)
 
-        remote_manifest_key = self._remote_key(
-            relative_base / MANIFEST_FILENAME, remote_root=remote_path
-        )
-        logger.info(
-            "Downloading manifest from S3: s3://%s/%s/%s",
-            self.config.bucket,
-            self.config.prefix,
-            remote_manifest_key,
-        )
-        download_file_from_s3(
-            self.remote_up_down,
-            remote_manifest_key,
-            manifest_path,
-        )
-        manifest_entries = json.loads(manifest_path.read_text())
+        manifest_entries: list[str] | None = None
+        chosen_relative_base: Path | None = None
+        last_error: Exception | None = None
+
+        for idx, relative_base in enumerate(candidate_relatives):
+            remote_manifest_key = self._remote_key(relative_base / MANIFEST_FILENAME, remote_root=remote_path)
+            logger.info(
+                "Downloading manifest from S3: s3://%s/%s/%s",
+                self.config.bucket,
+                self.config.prefix,
+                remote_manifest_key,
+            )
+            try:
+                download_file_from_s3(
+                    self.remote_up_down,
+                    remote_manifest_key,
+                    manifest_path,
+                )
+                manifest_entries = json.loads(manifest_path.read_text())
+                chosen_relative_base = relative_base
+                if idx > 0:
+                    logger.info("Checkpoint manifest located without TorchFT replica directory; using fallback layout.")
+                break
+            except Exception as err:  # noqa: BLE001
+                last_error = err
+                logger.warning(
+                    "Failed to download manifest from %s (attempt %d/%d).",
+                    remote_manifest_key,
+                    idx + 1,
+                    len(candidate_relatives),
+                )
+                manifest_path.unlink(missing_ok=True)
+
+        if manifest_entries is None or chosen_relative_base is None:
+            assert last_error is not None
+            raise last_error
+
         logger.info("Manifest contains %d files to download", len(manifest_entries))
 
         for relative in manifest_entries:
@@ -594,7 +632,8 @@ class S3CheckpointWrapper:
             download_file_from_s3(
                 self.remote_up_down,
                 self._remote_key(
-                    relative_base / relative_path, remote_root=remote_path
+                    chosen_relative_base / relative_path,
+                    remote_root=remote_path,
                 ),
                 local_path,
             )
@@ -606,8 +645,15 @@ class S3CheckpointWrapper:
 
         # Verify the checkpoint directory structure
         metadata_file = checkpoint_dir / ".metadata"
+        distcp_shards = list(checkpoint_dir.glob("*.distcp"))
         if metadata_file.exists():
             logger.info("✓ Checkpoint metadata file exists: %s", metadata_file)
+        elif distcp_shards:
+            logger.info(
+                "Checkpoint metadata file not found for step %s; detected %d distcp shard(s).",
+                step,
+                len(distcp_shards),
+            )
         else:
             logger.error("✗ Checkpoint metadata file MISSING: %s", metadata_file)
 
@@ -672,9 +718,7 @@ def get_s3_checkpoint_wrapper_factory(
     if not config.enable:
         return None
     if not config.bucket or config.prefix is None:
-        logger.warning(
-            "S3 checkpointing is enabled but bucket or prefix is not provided; skipping."
-        )
+        logger.warning("S3 checkpointing is enabled but bucket or prefix is not provided; skipping.")
         return None
 
     def factory(

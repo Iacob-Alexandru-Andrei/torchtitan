@@ -86,17 +86,17 @@ class DecoupledAdamW(AdamW):
                 optim_state["exp_avg_sq"],
             )
         ),
-        "zero_count/moment2": (
-            lambda _param, optim_state, _step_tensor: optim_state["exp_avg_sq"]
-            .eq(0)
-            .sum(dtype=torch.float32)
-        ),
-        "min/moment2": lambda _param, optim_state, _step_tensor: torch.min(
-            optim_state["exp_avg_sq"],
-        ),
-        "max/moment2": lambda _param, optim_state, _step_tensor: torch.max(
-            optim_state["exp_avg_sq"],
-        ),
+        # "zero_count/moment2": (
+        #     lambda _param, optim_state, _step_tensor: optim_state["exp_avg_sq"]
+        #     .eq(0)
+        #     .sum(dtype=torch.float32)
+        # ),
+        # "min/moment2": lambda _param, optim_state, _step_tensor: torch.min(
+        #     optim_state["exp_avg_sq"],
+        # ),
+        # "max/moment2": lambda _param, optim_state, _step_tensor: torch.max(
+        #     optim_state["exp_avg_sq"],
+        # ),
         "l2_norm/param": (
             lambda param, _optim_state, _step_tensor: torch.linalg.vector_norm(
                 param.data,
@@ -395,9 +395,7 @@ class DecoupledAdamW(AdamW):
         return optimizer_metrics
 
     @staticmethod
-    def pre_reduce_metrics(
-        optimizer_metrics: dict[str, torch.Tensor]
-    ) -> dict[str, torch.Tensor]:
+    def pre_reduce_metrics(optimizer_metrics: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
         """Preprocess metrics to reduce across ranks correctly.
 
         Args:
@@ -439,21 +437,26 @@ class DecoupledAdamW(AdamW):
         beta1, beta2 = self.param_groups[0]["betas"]
         if param in self.state:
             param_optim_state = self.state[param]
+            step_state = param_optim_state["step"]
+            if "max/optimizer_step" not in optimizer_metrics:
+                if isinstance(step_state, torch.Tensor):
+                    step_tensor = step_state.detach().clone()
+                    if step_tensor.device != param.device:
+                        step_tensor = step_tensor.to(param.device)
+                else:
+                    step_tensor = torch.tensor(float(step_state), device=param.device)
+                optimizer_metrics["max/optimizer_step"] = step_tensor
             step = param_optim_state["step"].item()
             bias_correction1 = 1 - beta1**step
             bias_correction2 = 1 - beta2**step
-            denom = (
-                param_optim_state["exp_avg_sq"].sqrt() / math.sqrt(bias_correction2)
-            ).add_(eps)
+            denom = (param_optim_state["exp_avg_sq"].sqrt() / math.sqrt(bias_correction2)).add_(eps)
             step_size = lr / bias_correction1
             step_tensor = step_size * param_optim_state["exp_avg"].div(denom)
             # NOTE: This is inverting the AdamW update step to get the actual
             # update step. The original implementation was wrong
             if weight_decay != 0 and decouple:
                 decay_factor = _compute_decay_factor(lr, initial_lr)
-                scaling_factor = (decay_factor * weight_decay) / (
-                    1 - decay_factor * weight_decay
-                )
+                scaling_factor = (decay_factor * weight_decay) / (1 - decay_factor * weight_decay)
                 # Apply decoupled weight decay adjustment to the parameter update.
                 # This mirrors the formulation from "Decoupled Weight Decay Regularization"
                 # (Loshchilov & Hutter, 2017) by scaling both the update and parameter by

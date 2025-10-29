@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -86,9 +87,7 @@ def _apply_split_overrides(
         num_workers=overrides.get("num_workers", runtime.num_workers),
         prefetch_factor=overrides.get("prefetch_factor", runtime.prefetch_factor),
         pin_memory=overrides.get("pin_memory", runtime.pin_memory),
-        persistent_workers=overrides.get(
-            "persistent_workers", runtime.persistent_workers
-        ),
+        persistent_workers=overrides.get("persistent_workers", runtime.persistent_workers),
         drop_last=overrides.get("drop_last", runtime.drop_last),
         batch_size=runtime.batch_size,
     )
@@ -97,6 +96,25 @@ def _apply_split_overrides(
         runtime=updated_runtime,
         isolate_grouped_streams=normalized.isolate_grouped_streams,
     )
+
+
+def _resolve_replica_identifier(job_config: MosaicJobConfig) -> str | None:
+    """Resolve a stable identifier for the current replica if available."""
+    candidate: int | str | None = getattr(job_config.fault_tolerance, "replica_id", None)
+    if candidate in (None, "", -1):
+        for env_var in (
+            "TORCHFT_REPLICA_ID",
+            "FAULT_TOLERANCE_REPLICA_ID",
+            "FT_REPLICA_ID",
+            "REPLICA_ID",
+        ):
+            env_value = os.getenv(env_var)
+            if env_value not in (None, "", "-1"):
+                candidate = env_value
+                break
+    if candidate in (None, "", -1):
+        return None
+    return str(candidate)
 
 
 def _build_mosaic_dataloader(
@@ -119,11 +137,12 @@ def _build_mosaic_dataloader(
         split=request.split,
         default_drop_last=request.default_drop_last,
     )
-    normalized = _apply_split_overrides(
-        normalized, job_config=request.job_config, split=request.split
-    )
+    normalized = _apply_split_overrides(normalized, job_config=request.job_config, split=request.split)
 
     extraction = _extract_streams(dict(normalized.dataset_config))
+    replica_identifier = _resolve_replica_identifier(request.job_config)
+    namespace_base = f"rep{replica_identifier}" if replica_identifier is not None else f"pid{os.getpid()}"
+    shared_memory_namespace = f"{namespace_base}-{request.split}-dp{request.dp_rank}"
     dataset, assignment = build_dataset_for_rank(
         normalized,
         extraction,
@@ -131,6 +150,7 @@ def _build_mosaic_dataloader(
         dp_world_size=request.dp_world_size,
         tokenizer=request.tokenizer,
         split=request.split,
+        shared_memory_namespace=shared_memory_namespace,
     )
 
     unigram_manager = get_or_create_unigram_manager(request.job_config)
@@ -184,9 +204,7 @@ def build_mosaic_dataloader(
         split="train",
         default_drop_last=True,
     )
-    return _build_mosaic_dataloader(
-        request, register_unigram_metric=register_unigram_metric
-    )
+    return _build_mosaic_dataloader(request, register_unigram_metric=register_unigram_metric)
 
 
 def build_mosaic_validation_dataloader(  # noqa: PLR0913
@@ -220,9 +238,7 @@ def build_mosaic_validation_dataloader(  # noqa: PLR0913
         split="val",
         default_drop_last=False,
     )
-    return _build_mosaic_dataloader(
-        request, register_unigram_metric=register_unigram_metric
-    )
+    return _build_mosaic_dataloader(request, register_unigram_metric=register_unigram_metric)
 
 
 __all__ = [

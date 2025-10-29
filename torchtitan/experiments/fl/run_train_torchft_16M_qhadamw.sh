@@ -41,7 +41,7 @@ fi
 
 # Configuration
 NGPU=${1:-"4"}  # Number of GPUs / replicas (default: 2)
-CONFIG_FILE=${2:-"./torchtitan/experiments/fl/configs/mosaic_mup_16M_torchft_test_long.toml"}
+CONFIG_FILE=${2:-"./torchtitan/experiments/fl/configs/mosaic_mup_16M_torchft_qhadamw.toml"}
 TRAIN_FILE=${TRAIN_FILE:-"torchtitan.experiments.fl.train"}
 
 # TorchFT lighthouse configuration

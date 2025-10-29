@@ -757,6 +757,16 @@ class MosaicJobConfig(JobConfig):
     It inherits from the base `JobConfig` and adds Mosaic-specific sections.
     """
 
+    run_uuid: str | None = field(
+        default=None,
+        metadata={
+            "help": (
+                "Stable identifier for this run, typically the base WandB run name before "
+                "per-rank suffixes are appended."
+            )
+        },
+    )
+
     # Override optimizer field to use MosaicOptimizerConfig
     optimizer: MosaicOptimizerConfig = field(  # type: ignore[assignment]
         default_factory=MosaicOptimizerConfig,

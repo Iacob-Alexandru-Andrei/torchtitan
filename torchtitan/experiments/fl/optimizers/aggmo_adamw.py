@@ -88,9 +88,7 @@ class AggMoAdamW(QHAdamW):
             msg = f"Sum of vs coefficients must be <= 1. Got {total}."
             raise ValueError(msg)
 
-    def _validate_betas_tuple(
-        self, betas: Sequence[float], vs: Sequence[float]
-    ) -> None:
+    def _validate_betas_tuple(self, betas: Sequence[float], vs: Sequence[float]) -> None:
         moment_specs = _build_moment_specs(vs)
         num_moments = len(moment_specs)
         if len(betas) != num_moments + 1:
@@ -114,43 +112,33 @@ class AggMoAdamW(QHAdamW):
         # Create metrics for each first moment buffer
         self.metric_functions = {}
         for _, name in moment_specs:
-            self.metric_functions[
-                f"l2_norm/{name}"
-            ] = lambda _param, optim_state, _step_tensor, key=name: torch.linalg.vector_norm(
-                optim_state[key],
+            self.metric_functions[f"l2_norm/{name}"] = (
+                lambda _param, optim_state, _step_tensor, key=name: torch.linalg.vector_norm(
+                    optim_state[key],
+                )
             )
 
         # Add metric for second moment (exp_avg_sq)
-        self.metric_functions[
-            "l2_norm/exp_avg_sq"
-        ] = lambda _param, optim_state, _step_tensor: torch.linalg.vector_norm(
-            optim_state["exp_avg_sq"],
+        self.metric_functions["l2_norm/exp_avg_sq"] = (
+            lambda _param, optim_state, _step_tensor: torch.linalg.vector_norm(
+                optim_state["exp_avg_sq"],
+            )
         )
         self.metric_functions["zero_count/exp_avg_sq"] = (
-            lambda _param, optim_state, _step_tensor: optim_state["exp_avg_sq"]
-            .eq(0)
-            .sum(dtype=torch.float32)
+            lambda _param, optim_state, _step_tensor: optim_state["exp_avg_sq"].eq(0).sum(dtype=torch.float32)
         )
-        self.metric_functions[
-            "min/exp_avg_sq"
-        ] = lambda _param, optim_state, _step_tensor: torch.min(
+        self.metric_functions["min/exp_avg_sq"] = lambda _param, optim_state, _step_tensor: torch.min(
             optim_state["exp_avg_sq"]
         )
-        self.metric_functions[
-            "max/exp_avg_sq"
-        ] = lambda _param, optim_state, _step_tensor: torch.max(
+        self.metric_functions["max/exp_avg_sq"] = lambda _param, optim_state, _step_tensor: torch.max(
             optim_state["exp_avg_sq"]
         )
 
         # Keep param and update metrics
-        self.metric_functions[
-            "l2_norm/param"
-        ] = lambda param, _optim_state, _step_tensor: torch.linalg.vector_norm(
+        self.metric_functions["l2_norm/param"] = lambda param, _optim_state, _step_tensor: torch.linalg.vector_norm(
             param.data
         )
-        self.metric_functions[
-            "l2_norm/update"
-        ] = lambda _param, _optim_state, step_tensor: torch.linalg.vector_norm(
+        self.metric_functions["l2_norm/update"] = lambda _param, _optim_state, step_tensor: torch.linalg.vector_norm(
             step_tensor
         )
 
@@ -195,11 +183,7 @@ class AggMoAdamW(QHAdamW):
             msg = "`requires_grad` not supported for `step` in differentiable mode"
             raise RuntimeError(msg)
 
-        if (
-            group["foreach"]
-            and isinstance(group["lr"], Tensor)
-            and not group["capturable"]
-        ):
+        if group["foreach"] and isinstance(group["lr"], Tensor) and not group["capturable"]:
             msg = "Tensor lr not supported for capturable=False and foreach=True"
             raise RuntimeError(msg)
 
@@ -317,24 +301,27 @@ class AggMoAdamW(QHAdamW):
         betas = cast("Sequence[float]", self.param_groups[0]["betas"])
         beta1s = betas[:-1]  # All but the last are beta1_i values
         beta2 = betas[-1]  # Last is beta2
-        moment_specs = _build_moment_specs(
-            cast("Sequence[float]", self.param_groups[0]["vs"])
-        )
+        moment_specs = _build_moment_specs(cast("Sequence[float]", self.param_groups[0]["vs"]))
         grad_coeff = 1.0 - _sum_weights(moment_specs)
 
         if param in self.state:
             param_optim_state = self.state[param]
-            step = param_optim_state["step"].item()
-            bias_correction2 = 1 - beta2**step
-            denom = (
-                param_optim_state["exp_avg_sq"].sqrt() / math.sqrt(bias_correction2)
-            ).add_(eps)
+            step_state = param_optim_state["step"]
+            if "max/optimizer_step" not in optimizer_metrics:
+                if isinstance(step_state, torch.Tensor):
+                    step_tensor = step_state.detach().clone()
+                    if step_tensor.device != param.device:
+                        step_tensor = step_tensor.to(param.device)
+                else:
+                    step_tensor = torch.tensor(float(step_state), device=param.device)
+                optimizer_metrics["max/optimizer_step"] = step_tensor
 
-            numerator = (
-                param.grad.mul(grad_coeff)
-                if param.grad is not None
-                else torch.zeros_like(param)
-            )
+            step = float(param_optim_state["step"].item())
+
+            bias_correction2 = 1 - beta2**step
+            denom = (param_optim_state["exp_avg_sq"].sqrt() / math.sqrt(bias_correction2)).add_(eps)
+
+            numerator = param.grad.mul(grad_coeff) if param.grad is not None else torch.zeros_like(param)
 
             # Each momentum buffer has its own beta1_i and thus its own bias correction
             for (weight, name_key), beta1_i in zip(moment_specs, beta1s, strict=True):
@@ -401,9 +388,7 @@ def _single_tensor_aggmo_qhadamw(  # noqa: C901, PLR0913, PLR0912
         if not torch._utils.is_compiling() and capturable:  # type: ignore[attr-defined]
             device = _get_capturable_supported_devices()
             assert param.device.type == step_t.device.type
-            assert (
-                param.device.type in device
-            ), f"If capturable=True, params, state_steps must be on: {device}."
+            assert param.device.type in device, f"If capturable=True, params, state_steps must be on: {device}."
 
         step_t += 1
         step = step_t if capturable or differentiable else _get_value(step_t)
@@ -431,17 +416,14 @@ def _single_tensor_aggmo_qhadamw(  # noqa: C901, PLR0913, PLR0912
 
         exp_avg_sq.mul_(beta2).addcmul_(grad, grad, value=1 - beta2)
 
-        step_val = float(step) if not (capturable or differentiable) else None
-
-        bias_correction2 = (
-            1.0 - beta2**step if capturable or differentiable else 1.0 - beta2**step_val  # type: ignore[operator]
-        )
-
-        bc2_sqrt = (
-            torch.sqrt(bias_correction2)  # type: ignore[arg-type]
-            if capturable or differentiable
-            else math.sqrt(bias_correction2)
-        )
+        if capturable or differentiable:
+            beta2_tensor = torch.tensor(beta2, dtype=step.dtype, device=step.device)
+            bias_correction2 = 1.0 - torch.pow(beta2_tensor, step)
+            bc2_sqrt = torch.sqrt(bias_correction2)
+        else:
+            step_val = float(_get_value(step))
+            bias_correction2 = 1.0 - beta2**step_val
+            bc2_sqrt = math.sqrt(bias_correction2)
 
         if amsgrad and max_exp_avg_sqs is not None:
             max_exp_avg_sq = max_exp_avg_sqs[i]
@@ -452,11 +434,16 @@ def _single_tensor_aggmo_qhadamw(  # noqa: C901, PLR0913, PLR0912
 
         # Compute bias-corrected momentum buffers, each with its own beta1_i
         m_hats = []
-        for buf, beta1_i in zip(buffers, beta1s, strict=True):
-            bias_correction1_i = (
-                1.0 - beta1_i**step if capturable or differentiable else 1.0 - beta1_i**step_val  # type: ignore[operator]
-            )
-            m_hats.append(buf / bias_correction1_i)
+        if capturable or differentiable:
+            for buf, beta1_i in zip(buffers, beta1s, strict=True):
+                beta1_tensor = torch.tensor(beta1_i, dtype=step.dtype, device=step.device)
+                bias_correction1_i = 1.0 - torch.pow(beta1_tensor, step)
+                m_hats.append(buf / bias_correction1_i)
+        else:
+            step_val = float(_get_value(step))
+            for buf, beta1_i in zip(buffers, beta1s, strict=True):
+                bias_correction1_i = 1.0 - beta1_i**step_val
+                m_hats.append(buf / bias_correction1_i)
 
         qh_numerator = grad.mul(grad_coeff)
         for (weight, _), m_hat in zip(moment_specs, m_hats, strict=True):

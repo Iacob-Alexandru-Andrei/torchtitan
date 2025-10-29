@@ -93,17 +93,17 @@ class QHADOPT(Optimizer):
                 optim_state["exp_avg_sq"],
             )
         ),
-        "zero_count/moment2": (
-            lambda _param, optim_state, _step_tensor: optim_state["exp_avg_sq"]
-            .eq(0)
-            .sum(dtype=torch.float32)
-        ),
-        "min/moment2": lambda _param, optim_state, _step_tensor: torch.min(
-            optim_state["exp_avg_sq"],
-        ),
-        "max/moment2": lambda _param, optim_state, _step_tensor: torch.max(
-            optim_state["exp_avg_sq"],
-        ),
+        # "zero_count/moment2": (
+        #     lambda _param, optim_state, _step_tensor: optim_state["exp_avg_sq"]
+        #     .eq(0)
+        #     .sum(dtype=torch.float32)
+        # ),
+        # "min/moment2": lambda _param, optim_state, _step_tensor: torch.min(
+        #     optim_state["exp_avg_sq"],
+        # ),
+        # "max/moment2": lambda _param, optim_state, _step_tensor: torch.max(
+        #     optim_state["exp_avg_sq"],
+        # ),
         "l2_norm/param": (
             lambda param, _optim_state, _step_tensor: torch.linalg.vector_norm(
                 param.data,
@@ -123,9 +123,7 @@ class QHADOPT(Optimizer):
         betas: tuple[float, float] = (0.999, 0.9999),
         vs: tuple[float, ...] = (0.9,),
         eps: float = 1e-6,
-        clip_lambda: (
-            Callable[[Number | Tensor | Any], float] | None
-        ) = _default_clip_lambda,
+        clip_lambda: (Callable[[Number | Tensor | Any], float] | None) = _default_clip_lambda,
         weight_decay: float = 0.0,
         *,
         decouple: bool = False,
@@ -139,9 +137,7 @@ class QHADOPT(Optimizer):
             msg = f"Invalid learning rate: {lr}"
             raise ValueError(msg)
         if isinstance(lr, Tensor) and foreach and not capturable:
-            msg = (
-                "lr as a Tensor is not supported for capturable=False and foreach=True"
-            )
+            msg = "lr as a Tensor is not supported for capturable=False and foreach=True"
             raise ValueError(
                 msg,
             )
@@ -163,9 +159,7 @@ class QHADOPT(Optimizer):
             raise ValueError(msg)
         for i, v in enumerate(vs):
             if not 0.0 <= v <= 1.0:
-                msg = (
-                    f"Invalid vs parameter at index {i}: {v}. Must be between 0 and 1."
-                )
+                msg = f"Invalid vs parameter at index {i}: {v}. Must be between 0 and 1."
                 raise ValueError(msg)
 
         self.clip_lambda = clip_lambda
@@ -296,11 +290,7 @@ class QHADOPT(Optimizer):
                     msg,
                 )
 
-            if (
-                group["foreach"]
-                and isinstance(group["lr"], Tensor)
-                and not group["capturable"]
-            ):
+            if group["foreach"] and isinstance(group["lr"], Tensor) and not group["capturable"]:
                 msg = "Tensor lr not supported for capturable=False and foreach=True"
                 raise RuntimeError(
                     msg,
@@ -435,9 +425,7 @@ class QHADOPT(Optimizer):
         return optimizer_metrics
 
     @staticmethod
-    def pre_reduce_metrics(
-        optimizer_metrics: dict[str, torch.Tensor]
-    ) -> dict[str, torch.Tensor]:
+    def pre_reduce_metrics(optimizer_metrics: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
         """Preprocess metrics to reduce across ranks correctly.
 
         Args:
@@ -480,6 +468,15 @@ class QHADOPT(Optimizer):
 
         if param in self.state:
             param_optim_state = self.state[param]
+            step_state = param_optim_state["step"]
+            if "max/optimizer_step" not in optimizer_metrics:
+                if isinstance(step_state, torch.Tensor):
+                    step_tensor = step_state.detach().clone()
+                    if step_tensor.device != param.device:
+                        step_tensor = step_tensor.to(param.device)
+                else:
+                    step_tensor = torch.tensor(float(step_state), device=param.device)
+                optimizer_metrics["max/optimizer_step"] = step_tensor
             step = param_optim_state["step"].item()
 
             # Compute ADOPT-style update (normed gradient with clipping)
@@ -493,20 +490,14 @@ class QHADOPT(Optimizer):
                 normed_grad = torch.zeros_like(param)
 
             # Compute quasi-hyperbolic update: interpolate between normed_grad and exp_avg
-            qh_update = normed_grad.mul(1 - v1).add(
-                param_optim_state["exp_avg"], alpha=v1
-            )
+            qh_update = normed_grad.mul(1 - v1).add(param_optim_state["exp_avg"], alpha=v1)
             step_tensor = qh_update * lr
 
             # Apply weight decay adjustment if decoupled
             if weight_decay != 0 and decouple:
                 decay_factor = _compute_decay_factor(lr, initial_lr)
-                scaling_factor = (decay_factor * weight_decay) / (
-                    1 - decay_factor * weight_decay
-                )
-                step_tensor = (
-                    step_tensor * (1 + scaling_factor) + param * scaling_factor
-                )
+                scaling_factor = (decay_factor * weight_decay) / (1 - decay_factor * weight_decay)
+                step_tensor = step_tensor * (1 + scaling_factor) + param * scaling_factor
 
             for metric in self.metric_functions:
                 optimizer_metrics[f"{metric}/{name}"] = self.metric_functions[metric](
@@ -556,9 +547,7 @@ def _single_tensor_qhadopt(  # noqa: PLR0913
         if not torch._utils.is_compiling() and capturable:  # type: ignore[attr-defined]
             device = _get_capturable_supported_devices()
             assert param.device.type == step_t.device.type
-            assert (
-                param.device.type in device
-            ), f"If capturable=True, params, state_steps must be on: {device}."
+            assert param.device.type in device, f"If capturable=True, params, state_steps must be on: {device}."
 
         step = step_t if capturable or differentiable else _get_value(step_t)
 

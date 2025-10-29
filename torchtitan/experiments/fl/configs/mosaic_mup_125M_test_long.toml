@@ -43,25 +43,25 @@ betas = [0.9,0.999]
 # pin_memory = true
 
 [fl_metrics.optimizer_monitor]
-interval = 8
+interval = 16
 only_global = false
 log_metrics = true
 
 [fl_metrics.activation_monitor]
-interval = 8
+interval = 16
 ignore_module_types = ["dropout", "ln"]
 
 [fl_metrics.lr_monitor]
 enabled = true
-interval = 8
+interval = 16
 
 [fl_metrics.betas_monitor]
 enabled = true
-interval = 8
+interval = 16
 
 [fl_metrics.vs_monitor]
 enabled = true
-interval = 8
+interval = 16
 
 [lr_scheduler]
 warmup_steps = 512  # lr scheduler warm up, normally 20% of the train steps
@@ -128,8 +128,9 @@ sync_steps = 32
 semi_sync_method = "desloc"  # Options: "diloco", "local_sgd", or comment out for async quorum
 
 [validation]
-enable = true
+enable = false
 dataset = "c4_validation"
+local_batch_size = 32
 freq = 2048
 steps = 32
 
@@ -678,7 +679,7 @@ streams = [
 split = "train"
 root_remote = "s3://smollm-corpus/shared"
 root_local = "/nfs-share/datasets/photon/dataset_cache/smollm-corpus-shared-val"
-subset_num_samples = 512
+# subset_num_samples = 512
 sampling_groups_mode = "grouped"
 
 [mosaic_dataloader.dataset.val.streams.client_streams.stream_0]

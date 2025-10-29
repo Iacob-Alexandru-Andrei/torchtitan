@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import json
 import sys
 from dataclasses import dataclass, field
 
@@ -349,3 +350,192 @@ def test_setup_helper_respects_install_flag(
     assert checkpointer.maybe_wait_for_staging.__self__ is checkpointer  # type: ignore[attr-defined]
     assert checkpointer.close.__self__ is checkpointer  # type: ignore[attr-defined]
     assert wrapper._enable_uploads is False  # noqa: SLF001
+
+
+def test_resume_from_run_step_downloads_ddp_layout_when_torchft_enabled(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    base = tmp_path / "ckpt"
+    base.mkdir()
+    checkpointer = _DummyCheckpointer(base, ft_enabled=True)
+    job_config = _make_job_config(tmp_path)
+    config = job_config.s3_checkpoint
+    config.resume_from_run_step = "run-uuid/step-7"
+    config.download_on_start = True
+
+    remote_files = {
+        "torchtitan/run-uuid/step-7/s3_manifest.json": json.dumps(
+            [".metadata", "tensor.bin"]
+        ),
+        "torchtitan/run-uuid/step-7/.metadata": "meta",
+        "torchtitan/run-uuid/step-7/tensor.bin": "payload",
+    }
+    download_calls: list[str] = []
+    uploaded_markers: list[str] = []
+
+    def fake_download(
+        _remote_client: _FakeRemoteUploaderDownloader,
+        remote_file_name: str,
+        local_file_name: Path | str,
+    ) -> None:
+        download_calls.append(remote_file_name)
+        if remote_file_name not in remote_files:
+            raise FileNotFoundError(remote_file_name)
+        destination = Path(local_file_name)
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_text(remote_files[remote_file_name])
+
+    def fake_upload(
+        _remote_client: _FakeRemoteUploaderDownloader,
+        remote_file_name: str,
+        local_file_name: Path,
+    ) -> None:
+        uploaded_markers.append(remote_file_name)
+
+    monkeypatch.setattr(
+        s3_module, "create_remote_up_down", lambda *args, **kwargs: _FakeRemoteUploaderDownloader()
+    )
+    monkeypatch.setattr(s3_module, "download_file_from_s3", fake_download)
+    monkeypatch.setattr(s3_module, "upload_file_to_s3", fake_upload)
+    monkeypatch.setattr(
+        s3_module.S3CheckpointWrapper,
+        "_start_remote_workers",
+        lambda self: None,
+    )
+
+    wrapper = s3_module.S3CheckpointWrapper(
+        checkpointer,
+        config,
+        job_config,
+        enable_uploads=False,
+    )
+    wrapper.download_if_needed()
+
+    checkpoint_dir = base / "step-7"
+    assert checkpoint_dir.is_dir()
+    assert (checkpoint_dir / ".metadata").read_text() == "meta"
+    assert (checkpoint_dir / "tensor.bin").read_text() == "payload"
+    assert download_calls[0].endswith("ft-replicat-0/step-7/s3_manifest.json")
+    assert any(
+        call.endswith("step-7/s3_manifest.json") and "ft-replicat-0" not in call
+        for call in download_calls
+    )
+    assert uploaded_markers, "Latest marker should be refreshed after download."
+    assert uploaded_markers[0].endswith(s3_module.LATEST_FILENAME)
+    assert (base / s3_module.LATEST_FILENAME).read_text().strip() == "7"
+
+
+def test_resume_from_run_step_handles_distcp_only_manifest(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    base = tmp_path / "ckpt"
+    base.mkdir()
+    checkpointer = _DummyCheckpointer(base, ft_enabled=True)
+    job_config = _make_job_config(tmp_path)
+    config = job_config.s3_checkpoint
+    config.resume_from_run_step = "run-uuid/step-7"
+    config.download_on_start = True
+
+    remote_files: dict[str, str | bytes] = {
+        "torchtitan/run-uuid/step-7/s3_manifest.json": json.dumps(["__0_0.distcp"]),
+        "torchtitan/run-uuid/step-7/__0_0.distcp": b"payload",
+    }
+    download_calls: list[str] = []
+    uploaded_markers: list[str] = []
+
+    def fake_download(
+        _remote_client: _FakeRemoteUploaderDownloader,
+        remote_file_name: str,
+        local_file_name: Path | str,
+    ) -> None:
+        download_calls.append(remote_file_name)
+        if remote_file_name not in remote_files:
+            raise FileNotFoundError(remote_file_name)
+        destination = Path(local_file_name)
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        content = remote_files[remote_file_name]
+        if isinstance(content, bytes):
+            destination.write_bytes(content)
+        else:
+            destination.write_text(content)
+
+    def fake_upload(
+        _remote_client: _FakeRemoteUploaderDownloader,
+        remote_file_name: str,
+        local_file_name: Path,
+    ) -> None:
+        uploaded_markers.append(remote_file_name)
+
+    monkeypatch.setattr(
+        s3_module, "create_remote_up_down", lambda *args, **kwargs: _FakeRemoteUploaderDownloader()
+    )
+    monkeypatch.setattr(s3_module, "download_file_from_s3", fake_download)
+    monkeypatch.setattr(s3_module, "upload_file_to_s3", fake_upload)
+    monkeypatch.setattr(
+        s3_module.S3CheckpointWrapper,
+        "_start_remote_workers",
+        lambda self: None,
+    )
+
+    wrapper = s3_module.S3CheckpointWrapper(
+        checkpointer,
+        config,
+        job_config,
+        enable_uploads=False,
+    )
+    wrapper.download_if_needed()
+
+    checkpoint_dir = base / "step-7"
+    assert checkpoint_dir.is_dir()
+    shard = checkpoint_dir / "__0_0.distcp"
+    assert shard.is_file()
+    assert shard.read_bytes() == b"payload"
+    assert any(
+        call.endswith("step-7/s3_manifest.json") and "ft-replicat-0" in call
+        for call in download_calls
+    )
+    assert any(
+        call.endswith("step-7/s3_manifest.json") and "ft-replicat-0" not in call
+        for call in download_calls
+    )
+    assert uploaded_markers, "Latest marker should be refreshed after download."
+    assert uploaded_markers[0].endswith(s3_module.LATEST_FILENAME)
+    assert (base / s3_module.LATEST_FILENAME).read_text().strip() == "7"
+
+
+def test_upload_waits_for_metadata(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    base = tmp_path / "ckpt"
+    base.mkdir()
+    checkpointer = _DummyCheckpointer(base)
+    job_config = _make_job_config(tmp_path)
+    config = job_config.s3_checkpoint
+
+    remote = _FakeRemoteUploaderDownloader()
+    monkeypatch.setattr(
+        s3_module, "create_remote_up_down", lambda *args, **kwargs: remote
+    )
+    monkeypatch.setattr(
+        s3_module.S3CheckpointWrapper,
+        "_start_remote_workers",
+        lambda self: None,
+    )
+
+    wrapper = s3_module.S3CheckpointWrapper(checkpointer, config, job_config)
+
+    step_dir = base / "step-1"
+    step_dir.mkdir(parents=True, exist_ok=True)
+    (step_dir / "__0_0.distcp").write_text("payload")
+
+    wrapper._pending_steps.clear()
+    wrapper._pending_steps.append((1, step_dir))
+
+    wrapper._process_pending()
+    assert wrapper._pending_steps, "Upload should be deferred until metadata exists."
+    assert 1 in wrapper._missing_metadata_steps
+    assert not remote.uploads
+
+    (step_dir / ".metadata").write_text("meta")
+    wrapper._process_pending()
+
+    uploaded_names = [path.name for _, path in remote.uploads]
+    assert ".metadata" in uploaded_names

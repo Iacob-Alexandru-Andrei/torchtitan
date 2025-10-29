@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH -c 8
-#SBATCH -w ruapehu
-#SBATCH --gres=gpu:1
+#SBATCH -w mauao
+#SBATCH --gres=gpu:4
 #SBATCH --job-name=tune_lr
 #SBATCH --tasks-per-node=1
 #SBATCH --output=%x-%j.out
@@ -29,9 +29,9 @@ export S3_ENDPOINT_URL='http://taranaki.cl.cam.ac.uk:9000'
 NPROC_PER_NODE=${NPROC_PER_NODE:-2}
 
 
-NGPU=${NGPU:-"1"}
+NGPU=${NGPU:-"4"}
 export LOG_RANK=${LOG_RANK:-0}
-CONFIG_FILE=${CONFIG_FILE:-"./torchtitan/experiments/fl/configs/mosaic_mup_125M_test_long.toml"}
+CONFIG_FILE=${CONFIG_FILE:-"./torchtitan/experiments/fl/configs/mosaic_mup_16M_qhadamw.toml"}
 TRAIN_FILE=${TRAIN_FILE:-"torchtitan.experiments.fl.train"}
 
 export WANDB_PROJECT="torchtitan"
@@ -41,14 +41,14 @@ export WANDB_TEAM="camlsys"
 
 # Create unified RUN_UUID for all naming (WandB, S3, dump folder)
 TIMESTAMP=$(date +"%Y%m%d-%H%M%S")
-export RUN_UUID="${RUN_UUID:-125M-baseline-${TIMESTAMP}}"
+export RUN_UUID="${RUN_UUID:-16M-baseline-${TIMESTAMP}}"
 export WANDB_RUN_NAME="${RUN_UUID}"
 
 # Optional: Resume from a specific run and step
 # Format: {run_uuid}/step-{N}
-# Example: export RESUME_FROM_RUN_STEP="125M-baseline-20251011-122516/step-10"
+# Example: export RESUME_FROM_RUN_STEP="16M-baseline-20251011-122516/step-10"
 # export RESUME_FROM_RUN_STEP="${RESUME_FROM_RUN_STEP:-}"
-# export RESUME_FROM_RUN_STEP="125M-baseline-20251011-132852/step-10"
+# export RESUME_FROM_RUN_STEP="16M-baseline-20251011-132852/step-10"
 
 TORCHFT_LIGHTHOUSE=${TORCHFT_LIGHTHOUSE:-"http://localhost:29510"}
 

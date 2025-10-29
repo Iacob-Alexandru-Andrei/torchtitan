@@ -80,17 +80,17 @@ class QHAdamW(Optimizer):
                 optim_state["exp_avg_sq"],
             )
         ),
-        "zero_count/moment2": (
-            lambda _param, optim_state, _step_tensor: optim_state["exp_avg_sq"]
-            .eq(0)
-            .sum(dtype=torch.float32)
-        ),
-        "min/moment2": lambda _param, optim_state, _step_tensor: torch.min(
-            optim_state["exp_avg_sq"],
-        ),
-        "max/moment2": lambda _param, optim_state, _step_tensor: torch.max(
-            optim_state["exp_avg_sq"],
-        ),
+        # "zero_count/moment2": (
+        #     lambda _param, optim_state, _step_tensor: optim_state["exp_avg_sq"]
+        #     .eq(0)
+        #     .sum(dtype=torch.float32)
+        # ),
+        # "min/moment2": lambda _param, optim_state, _step_tensor: torch.min(
+        #     optim_state["exp_avg_sq"],
+        # ),
+        # "max/moment2": lambda _param, optim_state, _step_tensor: torch.max(
+        #     optim_state["exp_avg_sq"],
+        # ),
         "l2_norm/param": (
             lambda param, _optim_state, _step_tensor: torch.linalg.vector_norm(
                 param.data,
@@ -124,9 +124,7 @@ class QHAdamW(Optimizer):
             msg = f"Invalid learning rate: {lr}"
             raise ValueError(msg)
         if isinstance(lr, Tensor) and foreach and not capturable:
-            msg = (
-                "lr as a Tensor is not supported for capturable=False and foreach=True"
-            )
+            msg = "lr as a Tensor is not supported for capturable=False and foreach=True"
             raise ValueError(
                 msg,
             )
@@ -148,9 +146,7 @@ class QHAdamW(Optimizer):
             raise ValueError(msg)
         for i, v in enumerate(vs):
             if not 0.0 <= v <= 1.0:
-                msg = (
-                    f"Invalid vs parameter at index {i}: {v}. Must be between 0 and 1."
-                )
+                msg = f"Invalid vs parameter at index {i}: {v}. Must be between 0 and 1."
                 raise ValueError(msg)
 
         defaults = {
@@ -286,11 +282,7 @@ class QHAdamW(Optimizer):
                     msg,
                 )
 
-            if (
-                group["foreach"]
-                and isinstance(group["lr"], Tensor)
-                and not group["capturable"]
-            ):
+            if group["foreach"] and isinstance(group["lr"], Tensor) and not group["capturable"]:
                 msg = "Tensor lr not supported for capturable=False and foreach=True"
                 raise RuntimeError(
                     msg,
@@ -437,9 +429,7 @@ class QHAdamW(Optimizer):
         return optimizer_metrics
 
     @staticmethod
-    def pre_reduce_metrics(
-        optimizer_metrics: dict[str, torch.Tensor]
-    ) -> dict[str, torch.Tensor]:
+    def pre_reduce_metrics(optimizer_metrics: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
         """Preprocess metrics to reduce across ranks correctly.
 
         Args:
@@ -482,12 +472,21 @@ class QHAdamW(Optimizer):
         beta1, beta2 = self.param_groups[0]["betas"]
         if param in self.state:
             param_optim_state = self.state[param]
-            step = param_optim_state["step"].item()
+            step_state = param_optim_state["step"]
+            if "max/optimizer_step" not in optimizer_metrics:
+                if isinstance(step_state, torch.Tensor):
+                    step_tensor = step_state.detach().clone()
+                    if step_tensor.device != param.device:
+                        step_tensor = step_tensor.to(param.device)
+                else:
+                    step_tensor = torch.tensor(float(step_state), device=param.device)
+                optimizer_metrics["max/optimizer_step"] = step_tensor
+
+            step = float(param_optim_state["step"].item())
+
             bias_correction1 = 1 - beta1**step
             bias_correction2 = 1 - beta2**step
-            denom = (
-                param_optim_state["exp_avg_sq"].sqrt() / math.sqrt(bias_correction2)
-            ).add_(eps)
+            denom = (param_optim_state["exp_avg_sq"].sqrt() / math.sqrt(bias_correction2)).add_(eps)
             m_hat = param_optim_state["exp_avg"] / bias_correction1
 
             # Compute quasi-hyperbolic update
@@ -500,12 +499,8 @@ class QHAdamW(Optimizer):
             # Apply weight decay adjustment if decoupled
             if weight_decay != 0 and decouple:
                 decay_factor = _compute_decay_factor(lr, initial_lr)
-                scaling_factor = (decay_factor * weight_decay) / (
-                    1 - decay_factor * weight_decay
-                )
-                step_tensor = (
-                    step_tensor * (1 + scaling_factor) + param * scaling_factor
-                )
+                scaling_factor = (decay_factor * weight_decay) / (1 - decay_factor * weight_decay)
+                step_tensor = step_tensor * (1 + scaling_factor) + param * scaling_factor
 
             for metric in self.metric_functions:
                 optimizer_metrics[f"{metric}/{name}"] = self.metric_functions[metric](
@@ -554,14 +549,11 @@ def _single_tensor_qhadamw(  # noqa: PLR0913
         step_t = state_steps[i]
 
         if (
-            not torch._utils.is_compiling()
-            and capturable  # pyright: ignore[reportAttributeAccessIssue]
+            not torch._utils.is_compiling() and capturable  # pyright: ignore[reportAttributeAccessIssue]
         ):  # pyright: ignore[reportAttributeAccessIssue]
             device = _get_capturable_supported_devices()
             assert param.device.type == step_t.device.type
-            assert (
-                param.device.type in device
-            ), f"If capturable=True, params, state_steps must be on: {device}."
+            assert param.device.type in device, f"If capturable=True, params, state_steps must be on: {device}."
 
         step_t += 1
         step = step_t if capturable or differentiable else _get_value(step_t)
@@ -587,8 +579,10 @@ def _single_tensor_qhadamw(  # noqa: PLR0913
         exp_avg_sq.mul_(beta2).addcmul_(grad, grad, value=1 - beta2)
 
         if capturable or differentiable:
-            bias_correction1 = 1.0 - beta1**step
-            bias_correction2 = 1.0 - beta2**step
+            beta1_tensor = torch.tensor(beta1, dtype=step.dtype, device=step.device)
+            beta2_tensor = torch.tensor(beta2, dtype=step.dtype, device=step.device)
+            bias_correction1 = 1.0 - torch.pow(beta1_tensor, step)
+            bias_correction2 = 1.0 - torch.pow(beta2_tensor, step)
         else:
             step_val = float(step)
             bias_correction1 = 1.0 - beta1**step_val
@@ -648,8 +642,7 @@ def _multi_tensor_qhadamw(  # noqa: C901, PLR0913, PLR0912, PLR0915
         )
 
     if (
-        not torch._utils.is_compiling()
-        and capturable  # pyright: ignore[reportAttributeAccessIssue]
+        not torch._utils.is_compiling() and capturable  # pyright: ignore[reportAttributeAccessIssue]
     ):
         device = _get_capturable_supported_devices(
             supports_xla=False,
@@ -664,10 +657,14 @@ def _multi_tensor_qhadamw(  # noqa: C901, PLR0913, PLR0912, PLR0915
     assert found_inf is None
 
     tensor_lists: list[list[Tensor | None]] = cast(
-        "list[list[Tensor | None]]", [params, grads, exp_avgs, exp_avg_sqs, state_steps]
+        "list[list[Tensor | None]]",
+        [params, grads, exp_avgs, exp_avg_sqs, state_steps],
     )
     if amsgrad:
-        tensor_lists.insert(4, cast("list[Tensor | None]", max_exp_avg_sqs))
+        tensor_lists.insert(
+            len(tensor_lists) - 1,
+            cast("list[Tensor | None]", max_exp_avg_sqs),
+        )
 
     grouped_tensors = Optimizer._group_tensors_by_device_and_dtype(
         tensor_lists,
@@ -745,11 +742,7 @@ def _multi_tensor_qhadamw(  # noqa: C901, PLR0913, PLR0912, PLR0915
         if weight_decay != 0 and decouple:
             decay_factor = _compute_decay_factor(lr, initial_lr)
 
-            weight_decay_term = (
-                decay_factor * weight_decay
-                if capturable
-                else _get_value(decay_factor) * weight_decay
-            )
+            weight_decay_term = decay_factor * weight_decay if capturable else _get_value(decay_factor) * weight_decay
             torch._foreach_mul_(device_params, 1.0 - weight_decay_term)
 
         torch._foreach_mul_(device_exp_avgs, beta1)
@@ -765,8 +758,10 @@ def _multi_tensor_qhadamw(  # noqa: C901, PLR0913, PLR0912, PLR0915
         step = device_state_steps[0]
 
         if capturable:
-            bias_correction1 = 1.0 - torch.pow(beta1, step)
-            bias_correction2 = 1.0 - torch.pow(beta2, step)
+            beta1_tensor = torch.tensor(beta1, dtype=step.dtype, device=step.device)
+            beta2_tensor = torch.tensor(beta2, dtype=step.dtype, device=step.device)
+            bias_correction1 = 1.0 - torch.pow(beta1_tensor, step)
+            bias_correction2 = 1.0 - torch.pow(beta2_tensor, step)
             bc2_sqrt = torch.sqrt(bias_correction2)
         else:
             step_val = float(_get_value(step))
@@ -882,22 +877,16 @@ def qhadamw(  # noqa: PLR0913
     if foreach is None:
         foreach = False
 
-    if (
-        foreach and torch.jit.is_scripting()
-    ):  # pyright: ignore[reportPrivateImportUsage]
+    if foreach and torch.jit.is_scripting():  # pyright: ignore[reportPrivateImportUsage]
         msg = "torch.jit.script not supported with foreach optimizers"
         raise RuntimeError(msg)
     if fused and torch.jit.is_scripting():  # pyright: ignore[reportPrivateImportUsage]
         msg = "torch.jit.script not supported with fused optimizers"
         raise RuntimeError(msg)
 
-    if (
-        fused and not torch.jit.is_scripting()
-    ):  # pyright: ignore[reportPrivateImportUsage]
+    if fused and not torch.jit.is_scripting():  # pyright: ignore[reportPrivateImportUsage]
         func = _fused_qhadamw
-    elif (
-        foreach and not torch.jit.is_scripting()
-    ):  # pyright: ignore[reportPrivateImportUsage]
+    elif foreach and not torch.jit.is_scripting():  # pyright: ignore[reportPrivateImportUsage]
         func = _multi_tensor_qhadamw
     else:
         func = _single_tensor_qhadamw

@@ -91,17 +91,17 @@ class ADOPT(Optimizer):
                 optim_state["exp_avg_sq"],
             )
         ),
-        "zero_count/moment2": (
-            lambda _param, optim_state, _step_tensor: optim_state["exp_avg_sq"]
-            .eq(0)
-            .sum(dtype=torch.float32)
-        ),
-        "min/moment2": lambda _param, optim_state, _step_tensor: torch.min(
-            optim_state["exp_avg_sq"],
-        ),
-        "max/moment2": lambda _param, optim_state, _step_tensor: torch.max(
-            optim_state["exp_avg_sq"],
-        ),
+        # "zero_count/moment2": (
+        #     lambda _param, optim_state, _step_tensor: optim_state["exp_avg_sq"]
+        #     .eq(0)
+        #     .sum(dtype=torch.float32)
+        # ),
+        # "min/moment2": lambda _param, optim_state, _step_tensor: torch.min(
+        #     optim_state["exp_avg_sq"],
+        # ),
+        # "max/moment2": lambda _param, optim_state, _step_tensor: torch.max(
+        #     optim_state["exp_avg_sq"],
+        # ),
         "l2_norm/param": (
             lambda param, _optim_state, _step_tensor: torch.linalg.vector_norm(
                 param.data,
@@ -120,9 +120,7 @@ class ADOPT(Optimizer):
         lr: float | Tensor = 1e-3,
         betas: tuple[float, float] = (0.9, 0.9999),
         eps: float = 1e-6,
-        clip_lambda: (
-            Callable[[Number | Tensor | Any], float] | None
-        ) = _default_clip_lambda,
+        clip_lambda: (Callable[[Number | Tensor | Any], float] | None) = _default_clip_lambda,
         weight_decay: float = 0.0,
         *,
         decouple: bool = False,
@@ -260,11 +258,7 @@ class ADOPT(Optimizer):
                     msg,
                 )
 
-            if (
-                group["foreach"]
-                and isinstance(group["lr"], Tensor)
-                and not group["capturable"]
-            ):
+            if group["foreach"] and isinstance(group["lr"], Tensor) and not group["capturable"]:
                 msg = "Tensor lr not supported for capturable=False and foreach=True"
                 raise RuntimeError(
                     msg,
@@ -397,9 +391,7 @@ class ADOPT(Optimizer):
         return optimizer_metrics
 
     @staticmethod
-    def pre_reduce_metrics(
-        optimizer_metrics: dict[str, torch.Tensor]
-    ) -> dict[str, torch.Tensor]:
+    def pre_reduce_metrics(optimizer_metrics: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
         """Preprocess metrics to reduce across ranks correctly.
 
         Args:
@@ -441,6 +433,15 @@ class ADOPT(Optimizer):
 
         if param in self.state:
             param_optim_state = self.state[param]
+            step_state = param_optim_state["step"]
+            if "max/optimizer_step" not in optimizer_metrics:
+                if isinstance(step_state, torch.Tensor):
+                    step_tensor = step_state.detach().clone()
+                    if step_tensor.device != param.device:
+                        step_tensor = step_tensor.to(param.device)
+                else:
+                    step_tensor = torch.tensor(float(step_state), device=param.device)
+                optimizer_metrics["max/optimizer_step"] = step_tensor
             step = param_optim_state["step"].item()
 
             # Compute ADOPT update (normed gradient with clipping, no quasi-hyperbolic)
@@ -459,12 +460,8 @@ class ADOPT(Optimizer):
             # Apply weight decay adjustment if decoupled
             if weight_decay != 0 and decouple:
                 decay_factor = _compute_decay_factor(lr, initial_lr)
-                scaling_factor = (decay_factor * weight_decay) / (
-                    1 - decay_factor * weight_decay
-                )
-                step_tensor = (
-                    step_tensor * (1 + scaling_factor) + param * scaling_factor
-                )
+                scaling_factor = (decay_factor * weight_decay) / (1 - decay_factor * weight_decay)
+                step_tensor = step_tensor * (1 + scaling_factor) + param * scaling_factor
 
             for metric in self.metric_functions:
                 optimizer_metrics[f"{metric}/{name}"] = self.metric_functions[metric](
@@ -515,15 +512,15 @@ def _single_tensor_adopt(  # noqa: PLR0913
 
         if not torch._utils.is_compiling() and capturable:  # type: ignore[attr-defined]
             capturable_supported_devices = _get_capturable_supported_devices()
-            assert (
-                param.device.type == exp_avg.device.type
-            ), f"param and exp_avg must be on same device type, got {param.device.type} and {exp_avg.device.type}"
-            assert (
-                param.device.type == exp_avg_sq.device.type
-            ), f"param and exp_avg_sq must be on same device type, got {param.device.type} and {exp_avg_sq.device.type}"
-            assert (
-                param.device.type in capturable_supported_devices
-            ), f"If capturable=True, params must be on supported devices: {capturable_supported_devices}, got {param.device.type}"
+            assert param.device.type == exp_avg.device.type, (
+                f"param and exp_avg must be on same device type, got {param.device.type} and {exp_avg.device.type}"
+            )
+            assert param.device.type == exp_avg_sq.device.type, (
+                f"param and exp_avg_sq must be on same device type, got {param.device.type} and {exp_avg_sq.device.type}"
+            )
+            assert param.device.type in capturable_supported_devices, (
+                f"If capturable=True, params must be on supported devices: {capturable_supported_devices}, got {param.device.type}"
+            )
 
         step = step_t if capturable or differentiable else step_t.item()
 

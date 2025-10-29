@@ -9,7 +9,7 @@ Below is an example validation config:
 
 ```toml
 [validation]
-enable = true
+enable = false
 dataset = "c4_validation"
 freq = 500
 steps = -1 # consumes the entire validation set

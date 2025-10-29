@@ -67,9 +67,7 @@ class DatasetFactoryConfig:
     kwargs: dict[str, Any]
 
 
-def _select_dataset_config(
-    dataset_cfg: Mapping[str, Any] | None, split: str
-) -> dict[str, Any]:
+def _select_dataset_config(dataset_cfg: Mapping[str, Any] | None, split: str) -> dict[str, Any]:
     """Extract configuration for the requested split.
 
     Args:
@@ -123,11 +121,7 @@ def _normalize_mosaic_dataloader_config(
     persistent_workers = cfg.persistent_workers
     drop_last = cfg.drop_last if cfg.drop_last is not None else default_drop_last
 
-    batch_size = (
-        job_config.validation.local_batch_size
-        if split == "val"
-        else job_config.training.local_batch_size
-    )
+    batch_size = job_config.validation.local_batch_size if split == "val" else job_config.training.local_batch_size
 
     runtime = MosaicRuntimeConfig(
         num_workers=num_workers,
@@ -185,6 +179,7 @@ def create_streaming_dataset(
     batch_size: int,
     split: str,
     isolate: bool,
+    shared_memory_namespace: str | None,
 ) -> IterableDataset:
     """Instantiate the streaming dataset for the resolved stream subset.
 
@@ -199,6 +194,9 @@ def create_streaming_dataset(
             process after temporarily clearing torch.distributed environment
             variables. This keeps StreamingDataset unaware of the global
             process group so grouped sampling behaves like independent runs.
+        shared_memory_namespace: Optional suffix that namespaces shared-memory
+            identifiers when ``isolate`` is ``True`` so each replica can
+            register independent resources without collisions.
 
     Returns:
         A :class:`StatefulStreamingTextDataset` configured for the rank's subset.
@@ -212,6 +210,7 @@ def create_streaming_dataset(
             serialized_streams=serialized_streams,
             tokenizer=hf_tokenizer,
             batch_size=batch_size,
+            shared_memory_namespace=shared_memory_namespace,
         )
 
     return StatefulStreamingTextDataset(
@@ -230,6 +229,7 @@ def build_dataset_for_rank(  # noqa: PLR0913
     dp_world_size: int,
     tokenizer: BaseTokenizer,
     split: str,
+    shared_memory_namespace: str | None = None,
 ) -> tuple[IterableDataset, StreamAssignment]:
     """Create a dataset for the current rank from normalized configuration.
 
@@ -266,6 +266,7 @@ def build_dataset_for_rank(  # noqa: PLR0913
         batch_size=normalized.runtime.batch_size,
         split=split,
         isolate=should_isolate,
+        shared_memory_namespace=shared_memory_namespace,
     )
     return dataset, assignment
 

@@ -9,8 +9,10 @@
 from __future__ import annotations
 
 import os
+import zlib
 from contextlib import contextmanager, suppress
 from copy import deepcopy
+from contextvars import ContextVar
 from dataclasses import dataclass
 from typing import Any, TYPE_CHECKING
 
@@ -139,6 +141,9 @@ def _patch_torch_dist_barrier() -> Any:
 
 
 _PREFIX_PATCHED = False
+_SHM_NAMESPACE: ContextVar[str | None] = ContextVar(
+    "torchtitan_shm_namespace", default=None
+)
 
 
 def _patch_streaming_prefix_once() -> None:
@@ -163,10 +168,23 @@ def _patch_streaming_prefix_once() -> None:
     SHM_TO_CLEAN = streaming_prefix.SHM_TO_CLEAN
     LOCALS = streaming_prefix.LOCALS
 
+    def _namespace_offset(namespace: str | None) -> int:
+        if not namespace:
+            return 0
+        try:
+            numeric = int(namespace)
+        except (TypeError, ValueError):
+            numeric = zlib.crc32(namespace.encode("utf-8")) & 0xFFFFF
+        else:
+            numeric = abs(numeric) & 0xFFFFF
+        return numeric << 20
+
     def get_shm_prefix_no_barrier(streams_local, streams_remote, world, retry=100):
         _check_self(streams_local)
 
-        prefix_int = max(
+        namespace = _SHM_NAMESPACE.get()
+
+        base_prefix_int = max(
             [
                 _check_and_find_retrying(
                     streams_local, streams_remote, shm_name=shm_name, retry=retry
@@ -174,6 +192,7 @@ def _patch_streaming_prefix_once() -> None:
                 for shm_name in SHM_TO_CLEAN
             ]
         )
+        prefix_int = base_prefix_int + _namespace_offset(namespace)
 
         shm = None
         if world.is_local_leader:
@@ -286,8 +305,16 @@ class StatefulStreamingTextDataset(StreamingTextDataset):
 
 def _with_streaming_patch(fn):
     def wrapper(self, *args, **kwargs):
-        with _patch_streaming_distributed(), _patch_torch_dist_barrier():
-            return fn(self, *args, **kwargs)
+        namespace = getattr(self, "_shared_memory_namespace", None)
+        token = None
+        if namespace:
+            token = _SHM_NAMESPACE.set(namespace)
+        try:
+            with _patch_streaming_distributed(), _patch_torch_dist_barrier():
+                return fn(self, *args, **kwargs)
+        finally:
+            if token is not None:
+                _SHM_NAMESPACE.reset(token)
 
     return wrapper
 
@@ -295,10 +322,23 @@ def _with_streaming_patch(fn):
 class BarrierFreeStreamingTextDataset(StatefulStreamingTextDataset):
     """StatefulStreamingTextDataset variant that disables streaming barriers."""
 
-    def __init__(self, *args: Any, **kwargs: Any) -> None:
+    def __init__(
+        self,
+        *args: Any,
+        shared_memory_namespace: str | None = None,
+        **kwargs: Any,
+    ) -> None:
+        self._shared_memory_namespace = shared_memory_namespace
         _patch_streaming_prefix_once()
-        with _patch_streaming_distributed(), _patch_torch_dist_barrier():
-            super().__init__(*args, **kwargs)
+        token = None
+        if shared_memory_namespace:
+            token = _SHM_NAMESPACE.set(shared_memory_namespace)
+        try:
+            with _patch_streaming_distributed(), _patch_torch_dist_barrier():
+                super().__init__(*args, **kwargs)
+        finally:
+            if token is not None:
+                _SHM_NAMESPACE.reset(token)
 
     @_with_streaming_patch
     def __iter__(self):
@@ -329,6 +369,7 @@ class IsolatedStreamingTextDataset(IterableDataset):
         serialized_streams: list[dict[str, Any]],
         tokenizer: Any,
         batch_size: int,
+        shared_memory_namespace: str | None,
     ) -> None:
         self._dataset_kwargs = dict(dataset_kwargs)
         self._serialized_streams = list(serialized_streams)
@@ -336,6 +377,7 @@ class IsolatedStreamingTextDataset(IterableDataset):
         self.batch_size = batch_size
         self._dataset: StatefulStreamingTextDataset | None = None
         self._num_samples_yielded = 0
+        self._shared_memory_namespace = shared_memory_namespace
 
     def _ensure_dataset(self) -> StatefulStreamingTextDataset:
         if self._dataset is None:
@@ -351,6 +393,7 @@ class IsolatedStreamingTextDataset(IterableDataset):
                     streams=streams,
                     batch_size=self.batch_size,
                     **self._dataset_kwargs,
+                    shared_memory_namespace=self._shared_memory_namespace,
                 )
         return self._dataset
 

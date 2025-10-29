@@ -322,6 +322,15 @@ class AggMoAdopt(QHADOPT):
 
         if param in self.state:
             param_optim_state = self.state[param]
+            step_state = param_optim_state["step"]
+            if "max/optimizer_step" not in optimizer_metrics:
+                if isinstance(step_state, torch.Tensor):
+                    step_tensor = step_state.detach().clone()
+                    if step_tensor.device != param.device:
+                        step_tensor = step_tensor.to(param.device)
+                else:
+                    step_tensor = torch.tensor(float(step_state), device=param.device)
+                optimizer_metrics["max/optimizer_step"] = step_tensor
             step = param_optim_state["step"].item()
             denom = torch.clamp(param_optim_state["exp_avg_sq"].sqrt(), eps)
 

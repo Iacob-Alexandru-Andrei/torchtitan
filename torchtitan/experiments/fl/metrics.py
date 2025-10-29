@@ -98,11 +98,7 @@ class PureUnigramCrossEntropy(Metric):
             msg = "unigram_probabilities must include at least one positive value."
             raise ValueError(msg)
 
-        prob_dtype = (
-            unigram_probabilities.dtype
-            if unigram_probabilities.is_floating_point()
-            else torch.float32
-        )
+        prob_dtype = unigram_probabilities.dtype if unigram_probabilities.is_floating_point() else torch.float32
         self.ignore_index = ignore_index
         # Store as buffer so it moves with the metric across devices.
         self.register_buffer(
@@ -161,9 +157,7 @@ class PureUnigramCrossEntropy(Metric):
 class UnigramMetricHandle:
     """Handle returned when registering a unigram metric with a manager."""
 
-    def __init__(
-        self, manager: UnigramMetricManager, metric: PureUnigramCrossEntropy
-    ) -> None:
+    def __init__(self, manager: UnigramMetricManager, metric: PureUnigramCrossEntropy) -> None:
         self._manager = manager
         self.metric = metric
         self._active = True
@@ -197,9 +191,7 @@ class UnigramMetricManager:
     def __init__(self) -> None:
         self._metrics: list[PureUnigramCrossEntropy] = []
 
-    def register(
-        self, metric: PureUnigramCrossEntropy, group_key: str | None = None
-    ) -> UnigramMetricHandle:
+    def register(self, metric: PureUnigramCrossEntropy, group_key: str | None = None) -> UnigramMetricHandle:
         """Register a metric and return a handle that can be closed to unregister it."""
         del group_key  # group key is currently informational only
         self._metrics.append(metric)
@@ -320,9 +312,7 @@ class ActivationMonitor(Callback):
         enabled_metrics: set[str] | None = None,
     ) -> None:
         self.interval = interval
-        self.ignore_module_types = (
-            tuple(ignore_module_types) if ignore_module_types is not None else None
-        )
+        self.ignore_module_types = tuple(ignore_module_types) if ignore_module_types is not None else None
         self.gradient_accumulation_steps = max(1, gradient_accumulation_steps)
 
         # Default enabled metrics - only the essential ones
@@ -423,9 +413,7 @@ class ActivationMonitor(Callback):
             return
 
         self._module_names = {module: name for name, module in model.named_modules()}
-        self._pre_handle = model.register_forward_pre_hook(
-            self._forward_pre_hook, with_kwargs=True
-        )
+        self._pre_handle = model.register_forward_pre_hook(self._forward_pre_hook, with_kwargs=True)
         model.apply(self._register_forward_hook)
         self._registered = True
 
@@ -453,9 +441,7 @@ class ActivationMonitor(Callback):
         module_name = self._module_names.get(module, "")
         if self.ignore_module_types is not None:
             lowered_name = module_name.lower()
-            if any(
-                ignore.lower() in lowered_name for ignore in self.ignore_module_types
-            ):
+            if any(ignore.lower() in lowered_name for ignore in self.ignore_module_types):
                 return
 
         self._recursively_add_metrics("_input", inputs)
@@ -497,9 +483,7 @@ class ActivationMonitor(Callback):
             if self._is_metric_enabled(l2_key):
                 current_l2 = self._metrics.get(l2_key, 0.0)
                 if isinstance(current_l2, float):
-                    self._metrics[l2_key] = current_l2 + float(
-                        torch.sum(tensor**2).item()
-                    )
+                    self._metrics[l2_key] = current_l2 + float(torch.sum(tensor**2).item())
 
             avg_key = f"activations/average/full_model{suffix}"
             # Check if any average metrics are enabled (max, min, or median)
@@ -628,9 +612,7 @@ class ActivationMonitor(Callback):
                 if self._is_metric_enabled(min_metric_key):
                     prepared[min_metric_key] = float(tensor_values.min().item())
 
-                median_metric_key = (
-                    f"activations/{metric_name}/median/full_model{suffix}"
-                )
+                median_metric_key = f"activations/{metric_name}/median/full_model{suffix}"
                 if self._is_metric_enabled(median_metric_key):
                     prepared[median_metric_key] = values
 
@@ -659,9 +641,7 @@ class ActivationMonitor(Callback):
                     sorted_values = sorted(value)
                     n = len(sorted_values)
                     if n % 2 == 0:
-                        reduced[key] = (
-                            sorted_values[n // 2 - 1] + sorted_values[n // 2]
-                        ) / 2
+                        reduced[key] = (sorted_values[n // 2 - 1] + sorted_values[n // 2]) / 2
                     else:
                         reduced[key] = sorted_values[n // 2]
                 else:
@@ -814,9 +794,7 @@ class OptimizerMonitor(Callback):
                 optimizer_metrics = pre_reduce_metrics(optimizer_metrics)
 
             # Reduce metrics across all ranks using TorchTitan's distributed utilities
-            optimizer_metrics = self._reduce_metrics_across_ranks(
-                optimizer_metrics, mesh
-            )
+            optimizer_metrics = self._reduce_metrics_across_ranks(optimizer_metrics, mesh)
 
         # Dynamically aggregate all metric names found in optimizer_metrics
         agg_type_values = {agg_type.value for agg_type in AggregationType}
@@ -891,15 +869,10 @@ class OptimizerMonitor(Callback):
 
         # If only_global is set, remove all non-global metrics
         if self.only_global:
-            optimizer_metrics = {
-                k: v for k, v in optimizer_metrics.items() if k.endswith("/global")
-            }
+            optimizer_metrics = {k: v for k, v in optimizer_metrics.items() if k.endswith("/global")}
 
         # Convert any remaining tensors to floats (shouldn't be any after reduction, but just in case)
-        optimizer_metrics = {
-            k: v.item() if isinstance(v, torch.Tensor) else v
-            for k, v in optimizer_metrics.items()
-        }
+        optimizer_metrics = {k: v.item() if isinstance(v, torch.Tensor) else v for k, v in optimizer_metrics.items()}
         logger.log(optimizer_metrics, step)
 
 
@@ -956,15 +929,11 @@ class BetasMonitor(Callback):
             return False
         return context.step % self.interval == 0
 
-    def _collect_metrics(
-        self, optimizers: Sequence[torch.optim.Optimizer]
-    ) -> Iterator[tuple[str, float]]:
+    def _collect_metrics(self, optimizers: Sequence[torch.optim.Optimizer]) -> Iterator[tuple[str, float]]:
         for optimizer, name, group_idx, group in self._iter_param_groups(optimizers):
             betas = group.get("betas")
             if betas is not None:
-                for beta_idx, beta_value in enumerate(
-                    self._iter_values(betas), start=1
-                ):
+                for beta_idx, beta_value in enumerate(self._iter_values(betas), start=1):
                     yield (
                         f"beta{beta_idx}-{name}/group{group_idx}",
                         self._as_float(beta_value),
@@ -1035,17 +1004,9 @@ class VSMonitor(Callback):
                 vs = group.get("vs")
                 if vs is None:
                     continue
-                v_values = (
-                    list(vs)
-                    if isinstance(vs, Sequence) and not isinstance(vs, (str, bytes))
-                    else [vs]
-                )
+                v_values = list(vs) if isinstance(vs, Sequence) and not isinstance(vs, (str, bytes)) else [vs]
                 for v_idx, v_value in enumerate(v_values):
-                    v_scalar = (
-                        float(v_value.detach().item())
-                        if isinstance(v_value, torch.Tensor)
-                        else float(v_value)
-                    )
+                    v_scalar = float(v_value.detach().item()) if isinstance(v_value, torch.Tensor) else float(v_value)
                     metrics[f"v{v_idx}-{name}/group{idx}"] = v_scalar
 
         if metrics:
@@ -1058,16 +1019,8 @@ class HyperparameterSwitchCallback(Callback):
     def __init__(self, params: HyperparameterSwitchParams) -> None:
         self.enabled = params.enabled and bool(params.steps)
         self.steps = {int(step) for step in params.steps if step >= 0}
-        self.new_vs = (
-            tuple(float(v) for v in params.new_vs)
-            if params.new_vs is not None
-            else None
-        )
-        self.new_betas = (
-            tuple(float(b) for b in params.new_betas)
-            if params.new_betas is not None
-            else None
-        )
+        self.new_vs = tuple(float(v) for v in params.new_vs) if params.new_vs is not None else None
+        self.new_betas = tuple(float(b) for b in params.new_betas) if params.new_betas is not None else None
         self.reset_momenta = tuple(params.reset_momenta)
         self.log_metrics = params.log_metrics
         self._applied_steps: set[int] = set()
@@ -1081,7 +1034,7 @@ class HyperparameterSwitchCallback(Callback):
         if optimizers is None:
             return
 
-        self._apply_switches(optimizers)
+        self._apply_switches(optimizers, context.step)
         self._log_switch_metrics(context)
         self._applied_steps.add(context.step)
 
@@ -1093,17 +1046,18 @@ class HyperparameterSwitchCallback(Callback):
             return False
         return step not in self._applied_steps
 
-    def _apply_switches(self, optimizers: Sequence[Optimizer]) -> None:
+    def _apply_switches(self, optimizers: Sequence[Optimizer], step: int) -> None:
         """Mutate optimizer hyperparameters according to the configured switches."""
         for optimizer in optimizers:
             if self.new_vs is not None:
                 self._update_group_values(optimizer.param_groups, "vs", self.new_vs)
             if self.new_betas is not None:
-                self._update_group_values(
-                    optimizer.param_groups, "betas", self.new_betas
-                )
+                self._update_group_values(optimizer.param_groups, "betas", self.new_betas)
             if self.reset_momenta:
-                self._reset_momenta(optimizer.state)
+                self._reset_momenta(optimizer.state, step)
+                mark_dirty = getattr(optimizer, "mark_state_dirty", None)
+                if callable(mark_dirty):
+                    mark_dirty()
 
     def _log_switch_metrics(self, context: CallbackStepContext) -> None:
         """Emit logging payload summarizing the applied hyperparameter switches."""
@@ -1120,31 +1074,25 @@ class HyperparameterSwitchCallback(Callback):
         if payload:
             context.logger.log(payload, context.step)
 
-    def _update_group_values(
-        self, param_groups: list[dict[str, Any]], key: str, values: tuple[float, ...]
-    ) -> None:
+    def _update_group_values(self, param_groups: list[dict[str, Any]], key: str, values: tuple[float, ...]) -> None:
         for group in param_groups:
             if key not in group:
                 continue
             current_value = group[key]
             if isinstance(current_value, torch.Tensor):
-                target = torch.tensor(
-                    values, device=current_value.device, dtype=current_value.dtype
-                )
+                target = torch.tensor(values, device=current_value.device, dtype=current_value.dtype)
                 if current_value.shape == target.shape:
                     current_value.copy_(target)
                 else:
                     group[key] = target
-            elif isinstance(current_value, Sequence) and not isinstance(
-                current_value, (str, bytes)
-            ):
+            elif isinstance(current_value, Sequence) and not isinstance(current_value, (str, bytes)):
                 group[key] = tuple(values)
             elif isinstance(current_value, (float, int)):
                 group[key] = float(values[0])
             else:
                 group[key] = tuple(values)
 
-    def _reset_momenta(self, optimizer_state: dict[Any, dict[str, Any]]) -> None:
+    def _reset_momenta(self, optimizer_state: dict[Any, dict[str, Any]], step: int) -> None:
         for state in optimizer_state.values():
             for name in self.reset_momenta:
                 if name not in state:
@@ -1199,20 +1147,14 @@ class FLMetricsProcessor(MetricsProcessor):
 
         self._callbacks_setup_done = False
 
-    def _build_callbacks_from_config(
-        self, metrics_config: MetricsConfig
-    ) -> list[Callback]:
+    def _build_callbacks_from_config(self, metrics_config: MetricsConfig) -> list[Callback]:
         callbacks: list[Callback] = []
 
-        self.optimizer_monitor = self._init_optimizer_monitor(
-            metrics_config.optimizer_monitor
-        )
+        self.optimizer_monitor = self._init_optimizer_monitor(metrics_config.optimizer_monitor)
         if self.optimizer_monitor is not None:
             callbacks.append(self.optimizer_monitor)
 
-        self.activation_monitor = self._init_activation_monitor(
-            metrics_config.activation_monitor
-        )
+        self.activation_monitor = self._init_activation_monitor(metrics_config.activation_monitor)
         if self.activation_monitor is not None:
             callbacks.append(self.activation_monitor)
 
@@ -1228,38 +1170,24 @@ class FLMetricsProcessor(MetricsProcessor):
         if self.vs_monitor is not None:
             callbacks.append(self.vs_monitor)
 
-        self.hyperparameter_switch = self._init_hyperparameter_switch(
-            metrics_config.hyperparameter_switch
-        )
+        self.hyperparameter_switch = self._init_hyperparameter_switch(metrics_config.hyperparameter_switch)
         if self.hyperparameter_switch is not None:
             callbacks.append(self.hyperparameter_switch)
 
         return callbacks
 
     def _assign_known_callbacks(self, callbacks: Sequence[Callback]) -> None:
-        self.optimizer_monitor = next(
-            (cb for cb in callbacks if isinstance(cb, OptimizerMonitor)), None
-        )
-        self.activation_monitor = next(
-            (cb for cb in callbacks if isinstance(cb, ActivationMonitor)), None
-        )
-        self.lr_monitor = next(
-            (cb for cb in callbacks if isinstance(cb, LRMonitor)), None
-        )
-        self.betas_monitor = next(
-            (cb for cb in callbacks if isinstance(cb, BetasMonitor)), None
-        )
-        self.vs_monitor = next(
-            (cb for cb in callbacks if isinstance(cb, VSMonitor)), None
-        )
+        self.optimizer_monitor = next((cb for cb in callbacks if isinstance(cb, OptimizerMonitor)), None)
+        self.activation_monitor = next((cb for cb in callbacks if isinstance(cb, ActivationMonitor)), None)
+        self.lr_monitor = next((cb for cb in callbacks if isinstance(cb, LRMonitor)), None)
+        self.betas_monitor = next((cb for cb in callbacks if isinstance(cb, BetasMonitor)), None)
+        self.vs_monitor = next((cb for cb in callbacks if isinstance(cb, VSMonitor)), None)
         self.hyperparameter_switch = next(
             (cb for cb in callbacks if isinstance(cb, HyperparameterSwitchCallback)),
             None,
         )
 
-    def _init_optimizer_monitor(
-        self, optimizer_config: OptimizerMonitorConfig
-    ) -> OptimizerMonitor | None:
+    def _init_optimizer_monitor(self, optimizer_config: OptimizerMonitorConfig) -> OptimizerMonitor | None:
         if optimizer_config.interval <= 0:
             return None
         return OptimizerMonitor(
@@ -1268,20 +1196,14 @@ class FLMetricsProcessor(MetricsProcessor):
             log_optimizer_metrics=optimizer_config.log_metrics,
         )
 
-    def _init_activation_monitor(
-        self, activation_config: ActivationMonitorConfig
-    ) -> ActivationMonitor | None:
-        activation_enabled = activation_config.enabled or (
-            activation_config.interval > 0
-        )
+    def _init_activation_monitor(self, activation_config: ActivationMonitorConfig) -> ActivationMonitor | None:
+        activation_enabled = activation_config.enabled or (activation_config.interval > 0)
         if not activation_enabled:
             return None
         return ActivationMonitor(
             interval=activation_config.interval,
             ignore_module_types=(
-                activation_config.ignore_module_types
-                if activation_config.ignore_module_types
-                else ()
+                activation_config.ignore_module_types if activation_config.ignore_module_types else ()
             ),
             gradient_accumulation_steps=activation_config.gradient_accumulation_steps,
             enabled_metrics=activation_config.enabled_metrics,
@@ -1295,9 +1217,7 @@ class FLMetricsProcessor(MetricsProcessor):
             enabled=lr_config.enabled,
         )
 
-    def _init_betas_monitor(
-        self, betas_config: BetasMonitorConfig
-    ) -> BetasMonitor | None:
+    def _init_betas_monitor(self, betas_config: BetasMonitorConfig) -> BetasMonitor | None:
         if not (betas_config.enabled and betas_config.interval > 0):
             return None
         return BetasMonitor(
@@ -1321,16 +1241,8 @@ class FLMetricsProcessor(MetricsProcessor):
         params = HyperparameterSwitchParams(
             enabled=hyper_switch_config.enabled,
             steps=tuple(int(step) for step in hyper_switch_config.steps),
-            new_vs=(
-                tuple(hyper_switch_config.new_vs)
-                if hyper_switch_config.new_vs is not None
-                else None
-            ),
-            new_betas=(
-                tuple(hyper_switch_config.new_betas)
-                if hyper_switch_config.new_betas is not None
-                else None
-            ),
+            new_vs=(tuple(hyper_switch_config.new_vs) if hyper_switch_config.new_vs is not None else None),
+            new_betas=(tuple(hyper_switch_config.new_betas) if hyper_switch_config.new_betas is not None else None),
             reset_momenta=tuple(hyper_switch_config.reset_momenta),
             log_metrics=hyper_switch_config.log_metrics,
         )
@@ -1353,9 +1265,7 @@ class FLMetricsProcessor(MetricsProcessor):
             return True
         return base_decision
 
-    def _build_unigram_payload(
-        self, mesh: DeviceMesh | None
-    ) -> tuple[dict[str, float], dict[str, float]]:
+    def _build_unigram_payload(self, mesh: DeviceMesh | None) -> tuple[dict[str, float], dict[str, float]]:
         local_loss, local_items = self.unigram_metrics.collect(reset=False)
 
         device = torch.device("cpu")
@@ -1363,12 +1273,8 @@ class FLMetricsProcessor(MetricsProcessor):
             with contextlib.suppress(StopIteration):
                 device = next(self.model_parts[0].parameters()).device
 
-        loss_tensor = torch.tensor(
-            float(local_loss), device=device, dtype=torch.float64
-        )
-        items_tensor = torch.tensor(
-            float(local_items), device=device, dtype=torch.float64
-        )
+        loss_tensor = torch.tensor(float(local_loss), device=device, dtype=torch.float64)
+        items_tensor = torch.tensor(float(local_items), device=device, dtype=torch.float64)
 
         if mesh is not None:
             reduced_loss = dist_utils.dist_sum(loss_tensor, mesh)
@@ -1467,14 +1373,8 @@ class FLMetricsProcessor(MetricsProcessor):
             extra_metrics: Any additional metrics to log.
 
         """
-        mesh = (
-            self.parallel_dims.world_mesh["dp_cp"]
-            if self.parallel_dims.dp_cp_enabled
-            else None
-        )
-        local_unigram_payload, global_unigram_payload = self._build_unigram_payload(
-            mesh
-        )
+        mesh = self.parallel_dims.world_mesh["dp_cp"] if self.parallel_dims.dp_cp_enabled else None
+        local_unigram_payload, global_unigram_payload = self._build_unigram_payload(mesh)
         if local_unigram_payload:
             self.logger.log(local_unigram_payload, step)
         combined_metrics = dict(extra_metrics) if extra_metrics else {}
@@ -1492,17 +1392,11 @@ class FLMetricsProcessor(MetricsProcessor):
         self._ensure_callbacks_setup()
         self._run_step_callbacks(step, mesh)
 
-    def log_validation(self, loss: float, step: int) -> None:
+    def log_validation(self, loss: float, step: int, local_loss: float | None) -> None:
         """Log validation metrics and run validation-specific callbacks."""
-        super().log_validation(loss, step)
-        mesh = (
-            self.parallel_dims.world_mesh["dp_cp"]
-            if self.parallel_dims.dp_cp_enabled
-            else None
-        )
-        local_unigram_payload, global_unigram_payload = self._build_unigram_payload(
-            mesh
-        )
+        super().log_validation(loss, step, local_loss=local_loss)
+        mesh = self.parallel_dims.world_mesh["dp_cp"] if self.parallel_dims.dp_cp_enabled else None
+        local_unigram_payload, global_unigram_payload = self._build_unigram_payload(mesh)
         if local_unigram_payload:
             self.logger.log(local_unigram_payload, step)
         if global_unigram_payload:

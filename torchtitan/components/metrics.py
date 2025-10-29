@@ -43,9 +43,7 @@ class DeviceMemoryMonitor:
         self.device = torch.device(device)  # device object
         self.device_name = device_module.get_device_name(self.device)
         self.device_index = device_module.current_device()
-        self.device_capacity = device_module.get_device_properties(
-            self.device
-        ).total_memory
+        self.device_capacity = device_module.get_device_properties(self.device).total_memory
         self.device_capacity_gib = self._to_gib(self.device_capacity)
 
         device_module.reset_peak_memory_stats()
@@ -75,9 +73,7 @@ class DeviceMemoryMonitor:
         num_ooms = device_info.get("num_ooms", -1)
 
         if num_retries > 0:
-            logger.warning(
-                f"{num_retries} {device_type.upper()} memory allocation retries."
-            )
+            logger.warning(f"{num_retries} {device_type.upper()} memory allocation retries.")
         if num_ooms > 0:
             logger.warning(f"{num_ooms} {device_type.upper()} OOM errors thrown.")
 
@@ -153,10 +149,7 @@ class WandBLogger(BaseLogger):
         logger.info("WandB logging enabled")
 
     def log(self, metrics: dict[str, Any], step: int) -> None:
-        wandb_metrics = {
-            (k if self.tag is None else f"{self.tag}/{k}"): v
-            for k, v in metrics.items()
-        }
+        wandb_metrics = {(k if self.tag is None else f"{self.tag}/{k}"): v for k, v in metrics.items()}
         self.wandb.log(wandb_metrics, step=step)
 
     def close(self) -> None:
@@ -186,9 +179,7 @@ class LoggerContainer(BaseLogger):
             logger_instance.close()
 
 
-def ensure_pp_loss_visible(
-    parallel_dims: ParallelDims, job_config: JobConfig, color: Color
-) -> None:
+def ensure_pp_loss_visible(parallel_dims: ParallelDims, job_config: JobConfig, color: Color) -> None:
     """
     Ensures that the loss is visible on the console for pipeline-parallel training.
 
@@ -246,9 +237,7 @@ def _get_metrics_rank(
     return (world_size // pp_size) * (pp_size - 1)
 
 
-def _build_metric_logger(
-    job_config: JobConfig, parallel_dims: ParallelDims, tag: str | None = None
-) -> BaseLogger:
+def _build_metric_logger(job_config: JobConfig, parallel_dims: ParallelDims, tag: str | None = None) -> BaseLogger:
     """
     Build an appropriate metric logger based on configuration.
     """
@@ -261,9 +250,7 @@ def _build_metric_logger(
     )
 
     # Check if any logging backend is enabled
-    has_logging_enabled = (
-        metrics_config.enable_tensorboard or metrics_config.enable_wandb
-    )
+    has_logging_enabled = metrics_config.enable_tensorboard or metrics_config.enable_wandb
 
     # Determine if this rank should log
     should_log = has_logging_enabled
@@ -271,9 +258,7 @@ def _build_metric_logger(
         metrics_rank = _get_metrics_rank(parallel_dims, job_config)
         should_log = torch.distributed.get_rank() == metrics_rank
 
-    logger.debug(
-        f"Logging decision: has_logging_enabled={has_logging_enabled}, should_log={should_log}"
-    )
+    logger.debug(f"Logging decision: has_logging_enabled={has_logging_enabled}, should_log={should_log}")
 
     if not should_log:
         logger.debug("Returning BaseLogger due to should_log=False")
@@ -281,9 +266,7 @@ def _build_metric_logger(
 
     # Setup logging directory
     dump_dir = job_config.job.dump_folder
-    base_log_dir = os.path.join(
-        dump_dir, metrics_config.save_tb_folder, datetime.now().strftime("%Y%m%d-%H%M")
-    )
+    base_log_dir = os.path.join(dump_dir, metrics_config.save_tb_folder, datetime.now().strftime("%Y%m%d-%H%M"))
 
     if job_config.fault_tolerance.enable:
         base_log_dir = os.path.join(
@@ -292,9 +275,7 @@ def _build_metric_logger(
         )
 
     if metrics_config.save_for_all_ranks:
-        base_log_dir = os.path.join(
-            base_log_dir, f"rank_{torch.distributed.get_rank()}"
-        )
+        base_log_dir = os.path.join(base_log_dir, f"rank_{torch.distributed.get_rank()}")
 
     # Create logger container
     logger_container = LoggerContainer()
@@ -362,15 +343,9 @@ class MetricsProcessor:
         self.job_config = job_config
         self.device_memory_monitor = build_device_memory_monitor()
         # used for colorful printing
-        self.color = (
-            utils.NoColor()
-            if job_config.metrics.disable_color_printing
-            else utils.Color()
-        )
+        self.color = utils.NoColor() if job_config.metrics.disable_color_printing else utils.Color()
 
-        self.gpu_peak_flops = utils.get_peak_flops(
-            self.device_memory_monitor.device_name
-        )
+        self.gpu_peak_flops = utils.get_peak_flops(self.device_memory_monitor.device_name)
         self.ntokens_since_last_log = 0
         self.data_loading_times = []
         self.time_last_log = time.perf_counter()
@@ -398,9 +373,7 @@ class MetricsProcessor:
         time_delta = time.perf_counter() - self.time_last_log
 
         # tokens per second per device, abbreviated as tps
-        tps = self.ntokens_since_last_log / (
-            time_delta * self.parallel_dims.non_data_parallel_size
-        )
+        tps = self.ntokens_since_last_log / (time_delta * self.parallel_dims.non_data_parallel_size)
         # model FLOPS utilization
         # For its definition and calculation, please refer to the PaLM paper:
         # https://arxiv.org/abs/2204.02311
@@ -453,15 +426,13 @@ class MetricsProcessor:
         self.time_last_log = time.perf_counter()
         self.device_memory_monitor.reset_peak_stats()
 
-    def log_validation(self, loss: float, step: int):
+    def log_validation(self, loss: float, step: int, local_loss: float | None = None):
         time_delta = time.perf_counter() - self.time_last_log
 
         device_mem_stats = self.device_memory_monitor.get_peak_stats()
 
         # tokens per second per device, abbreviated as tps
-        tps = self.ntokens_since_last_log / (
-            time_delta * self.parallel_dims.non_data_parallel_size
-        )
+        tps = self.ntokens_since_last_log / (time_delta * self.parallel_dims.non_data_parallel_size)
 
         metrics = {
             "validation_metrics/loss": loss,
@@ -471,6 +442,9 @@ class MetricsProcessor:
             "validation_metrics/memory/max_reserved(GiB)": device_mem_stats.max_reserved_gib,
             "validation_metrics/memory/max_reserved(%)": device_mem_stats.max_reserved_pct,
         }
+        if local_loss is not None:
+            metrics["validation_metrics/local_loss"] = local_loss
+
         self.logger.log(metrics, step)
 
         color = self.color

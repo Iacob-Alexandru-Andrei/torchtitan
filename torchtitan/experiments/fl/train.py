@@ -265,6 +265,7 @@ def main() -> None:  # noqa: C901, PLR0912, PLR0915
             job_config.s3_checkpoint.remote_checkpoint_folder = f"torchtitan/{run_uuid}"
         # Update dump folder to include run_uuid
         job_config.job.dump_folder = f"./outputs/{run_uuid}"
+        job_config.run_uuid = run_uuid
         logger.info(f"Using RUN_UUID: {run_uuid}")
 
     # Apply RESUME_FROM_RUN_STEP from environment if provided
@@ -289,7 +290,16 @@ def main() -> None:  # noqa: C901, PLR0912, PLR0915
             ft_manager = getattr(checkpointer, "ft_manager", None)
             ft_mode = bool(getattr(ft_manager, "enabled", False))
             if ft_mode:
-                checkpointer.enable = False
+                if job_config.checkpoint.enable:
+                    checkpointer.load_only = False
+                    logger.info(
+                        "TorchFT enabled; persistent checkpoints remain active per configuration."
+                    )
+                else:
+                    checkpointer.load_only = True
+                    logger.info(
+                        "TorchFT enabled; persistent checkpoints disabled (load-only mode)."
+                    )
 
             if ft_mode:
                 is_checkpoint_writer = True
@@ -322,9 +332,10 @@ def main() -> None:  # noqa: C901, PLR0912, PLR0915
                 logger.info(
                     "[S3 DEBUG] Creating S3 manager as checkpoint writer (with install=True)"
                 )
+                enable_uploads = not getattr(checkpointer, "load_only", False)
                 s3_manager = wrapper_factory(
                     checkpointer,
-                    enable_uploads=True,
+                    enable_uploads=enable_uploads,
                 )
                 s3_manager.attach_to_trainer(trainer)
                 download_manager = s3_manager
@@ -399,7 +410,13 @@ def main() -> None:  # noqa: C901, PLR0912, PLR0915
 
                     suffix = f"{replica_suffix}-rank{local_rank}"
 
-                    original_name = wandb.run.name or "torchtitan"
+                    base_run_name = (
+                        wandb.run.name or job_config.run_uuid or "torchtitan"
+                    )
+                    if job_config.run_uuid is None:
+                        job_config.run_uuid = base_run_name
+                    wandb.run.group = job_config.run_uuid
+                    original_name = base_run_name
                     if f"-worker{global_worker_id}" in original_name:
                         new_name = original_name
                     else:
@@ -435,12 +452,17 @@ def main() -> None:  # noqa: C901, PLR0912, PLR0915
                 f"prefix={job_config.s3_checkpoint.prefix}"
             )
 
-            if s3_checkpointing_active:
+            if s3_checkpointing_active and download_manager is None:
                 if is_checkpoint_writer:
                     logger.info(
                         "[S3 DEBUG] Creating S3 manager as checkpoint writer (with install=True)"
                     )
-                    s3_manager = setup_s3_checkpointing(checkpointer, job_config)
+                    install_uploads = not getattr(checkpointer, "load_only", False)
+                    s3_manager = setup_s3_checkpointing(
+                        checkpointer,
+                        job_config,
+                        install=install_uploads,
+                    )
                     if s3_manager is not None:
                         trainer.checkpointer = s3_manager  # type: ignore[assignment]
                         download_manager = s3_manager
@@ -519,7 +541,13 @@ def main() -> None:  # noqa: C901, PLR0912, PLR0915
 
                         suffix = f"{replica_suffix}-rank{local_rank}"
 
-                        original_name = wandb.run.name or "torchtitan"
+                        base_run_name = (
+                            wandb.run.name or job_config.run_uuid or "torchtitan"
+                        )
+                        if job_config.run_uuid is None:
+                            job_config.run_uuid = base_run_name
+                        wandb.run.group = job_config.run_uuid
+                        original_name = base_run_name
                         if f"-worker{global_worker_id}" in original_name:
                             new_name = original_name
                         else:

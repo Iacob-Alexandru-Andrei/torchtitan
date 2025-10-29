@@ -99,10 +99,7 @@ class Validator(BaseValidator):
         num_steps = 0
 
         for input_dict, labels in self.validation_dataloader:
-            if (
-                self.job_config.validation.steps != -1
-                and num_steps >= self.job_config.validation.steps
-            ):
+            if self.job_config.validation.steps != -1 and num_steps >= self.job_config.validation.steps:
                 break
 
             self.metrics_processor.ntokens_since_last_log += labels.numel()
@@ -129,9 +126,7 @@ class Validator(BaseValidator):
                 assert self.pp_has_last_stage is not None
                 # Pipeline Parallel forward inside eval() call
                 with self.validation_context(optional_context_parallel_ctx):
-                    targets, losses = (
-                        (labels, []) if self.pp_has_last_stage else (None, None)
-                    )
+                    targets, losses = (labels, []) if self.pp_has_last_stage else (None, None)
                     if self.pp_has_first_stage:
                         self.pp_schedule.eval(
                             inputs,
@@ -140,9 +135,7 @@ class Validator(BaseValidator):
                             input_batch=inputs,
                         )
                     else:
-                        self.pp_schedule.eval(
-                            target=targets, losses=losses, input_batch=inputs
-                        )
+                        self.pp_schedule.eval(target=targets, losses=losses, input_batch=inputs)
 
                 # accumulate losses across pipeline microbatches
                 # TODO: PP+FSDP unexpectedly puts the loss back to the CPU
@@ -168,14 +161,14 @@ class Validator(BaseValidator):
         # Compute average loss
         loss = torch.sum(torch.stack(accumulated_losses))
         loss /= num_steps
+
+        local_loss = loss.item()
         if parallel_dims.dp_cp_enabled:
-            global_avg_loss = dist_utils.dist_mean(
-                loss, parallel_dims.world_mesh["dp_cp"]
-            )
+            global_avg_loss = dist_utils.dist_mean(loss, parallel_dims.world_mesh["dp_cp"])
         else:
             global_avg_loss = loss.item()
 
-        self.metrics_processor.log_validation(loss=global_avg_loss, step=step)
+        self.metrics_processor.log_validation(loss=global_avg_loss, step=step, local_loss=local_loss)
 
         # Set model back to train mode
         for model in model_parts:

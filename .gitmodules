@@ -1,3 +1,6 @@
 [submodule "nanoGPT-photon"]
 	path = nanoGPT-photon
 	url = git@github.com:Iacob-Alexandru-Andrei/nanoGPT-photon.git
+[submodule "light_eval_photon"]
+	path = light_eval_photon
+	url = git@github.com:Iacob-Alexandru-Andrei/light_eval_photon.git
