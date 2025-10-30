@@ -139,7 +139,7 @@ enable = true
 dataset = "c4_validation"
 local_batch_size = 16
 freq = 2048
-steps = 4096
+steps = 512
 
 [unigram_metric]
 enable = true
