@@ -41,7 +41,7 @@ export WANDB_TEAM="camlsys"
 
 # Create unified RUN_UUID for all naming (WandB, S3, dump folder)
 TIMESTAMP=$(date +"%Y%m%d-%H%M%S")
-export RUN_UUID="${RUN_UUID:-1B-baseline-${TIMESTAMP}}"
+export RUN_UUID="${RUN_UUID:-1B-adamw-${TIMESTAMP}}"
 export WANDB_RUN_NAME="${RUN_UUID}"
 export TORCHTITAN_WANDB_BASE_RUN_NAME="${RUN_UUID}"
 export TORCHTITAN_FORCE_WANDB_WORKER_SUFFIX="${TORCHTITAN_FORCE_WANDB_WORKER_SUFFIX:-1}"
