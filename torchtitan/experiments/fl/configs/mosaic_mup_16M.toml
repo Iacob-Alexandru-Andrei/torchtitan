@@ -27,9 +27,9 @@ hf_assets_path = "./tests/assets/tokenizer"
 
 
 [optimizer]
-name = "DecoupledAdamW"
-lr = 1e-4
-eps = 1e-8
+name = "ADOPT"
+lr = 0.0
+eps = 1e-6
 weight_decay = 0.0
 # betas = [0.9,0.95]
 # implementation = "foreach"
