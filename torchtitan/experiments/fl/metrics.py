@@ -135,12 +135,11 @@ class PureUnigramCrossEntropy(Metric):
             return
 
         # Use the unigram probabilities corresponding to the valid targets.
-        unigram_probs = self.unigram_probabilities
-        if unigram_probs.device != target.device:
-            unigram_probs = unigram_probs.to(target.device)
+        if self.unigram_probabilities.device != target.device:
+            self.unigram_probabilities = self.unigram_probabilities.to(target.device)
 
         target_in_vocab = target_filtered[in_vocab_mask]
-        selected_probs = unigram_probs[target_in_vocab]
+        selected_probs = self.unigram_probabilities[target_in_vocab]
         eps = torch.finfo(selected_probs.dtype).tiny
         losses = -torch.log(selected_probs.clamp_min(eps))
 

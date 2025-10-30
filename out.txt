@@ -1,127 +1,1 @@
-INFO:eval_light.torchtitan_checkpoints:Downloading TorchTitan manifest: s3://checkpoints//torchtitan/16M-baseline-20251029-095728/step-2048/s3_manifest.json
-INFO:botocore.credentials:Found credentials in shared credentials file: ~/.aws/credentials
-Downloading torchtitan/16M-baseline-202510...3_manifest.json:   0%|          | 0.00/77.0 [00:00<?, ?iB/s]Downloading torchtitan/16M-baseline-202510...3_manifest.json: 100%|██████████| 77.0/77.0 [00:00<00:00, 1.41MiB/s]
-Downloading torchtitan/16M-baseline-202510...-2048/.metadata:   0%|          | 0.00/390k [00:00<?, ?iB/s]Downloading torchtitan/16M-baseline-202510...-2048/.metadata:  33%|███▎      | 128k/390k [00:00<00:00, 54.3MiB/s]
-Downloading torchtitan/16M-baseline-202510...48/__0_0.distcp:   0%|          | 0.00/62.1M [00:00<?, ?iB/s]Downloading torchtitan/16M-baseline-202510...48/__0_0.distcp:   0%|          | 262k/62.1M [00:00<00:19, 3.16MiB/s]
-Downloading torchtitan/16M-baseline-202510...48/__1_0.distcp:   0%|          | 0.00/62.4M [00:00<?, ?iB/s]Downloading torchtitan/16M-baseline-202510...48/__1_0.distcp:   0%|          | 262k/62.4M [00:00<00:19, 3.16MiB/s]
-Downloading torchtitan/16M-baseline-202510...48/__2_0.distcp:   0%|          | 0.00/62.4M [00:00<?, ?iB/s]
-Downloading torchtitan/16M-baseline-202510...48/__2_0.distcp:   0%|          | 0.00/62.4M [00:00<?, ?iB/s][ADownloading torchtitan/16M-baseline-202510...48/__2_0.distcp:   0%|          | 262k/62.4M [00:00<00:01, 40.8MiB/s]
-Downloading torchtitan/16M-baseline-202510...48/__2_0.distcp:   0%|          | 262k/62.4M [00:00<00:19, 3.15MiB/s]
-Downloading torchtitan/16M-baseline-202510...48/__3_0.distcp:   0%|          | 0.00/62.4M [00:00<?, ?iB/s]Downloading torchtitan/16M-baseline-202510...48/__3_0.distcp:   0%|          | 262k/62.4M [00:00<00:19, 3.12MiB/s]
-INFO:eval_light.torchtitan_checkpoints:Finished downloading checkpoint step 2048 into /tmp/lighteval_photon.XWYR3a/distcp/step-2048 (5 files).
-INFO:torchtitan.experiments.fl.models.llama3_mup.model.mup_model:MuP Transformer configuration: enabled=True, width_multiplier=1.000000, input_alpha=1.000000, output_alpha=1.000000, completep_depth_alpha_enabled=True, depth_multiplier=1.000000, depth_alpha_exp=1.000000, eps_scaling_enabled=False, disable_attention_scaling=True, disable_hidden_lr_scaling=False
-INFO:torchtitan.experiments.fl.models.llama3_mup.model.mup_model:MuP init configuration: init_std=0.020000, emb_init_std=0.02, output_mult=None, use_embedding_norm=True, use_peri_norm=True, tie_word_embeddings=True
-INFO:torchtitan.experiments.fl.models.llama3_mup.model.mup_model:MuP Transformer architecture options: use_torch_layernorm=True, use_simple_silu_ffn=False
-INFO:torchtitan.experiments.fl.models.llama3_mup.model.mup_model:MuP QK head normalization enabled: head_dim=64, norm_type=LPLayerNorm
-INFO:torchtitan.experiments.fl.models.llama3_mup.model.mup_model:MuP attention scaling skipped (config_opt_out): head_dim=64
-INFO:torchtitan.experiments.fl.models.llama3_mup.model.mup_model:Initialized MuP TransformerBlock(layer=0) residual_scaling=1.000000, use_peri_norm=True, completep_depth_alpha_enabled=True, norm_type=LPLayerNorm, simple_silu_ffn=False
-INFO:torchtitan.experiments.fl.models.llama3_mup.model.mup_model:MuP QK head normalization enabled: head_dim=64, norm_type=LPLayerNorm
-INFO:torchtitan.experiments.fl.models.llama3_mup.model.mup_model:MuP attention scaling skipped (config_opt_out): head_dim=64
-INFO:torchtitan.experiments.fl.models.llama3_mup.model.mup_model:Initialized MuP TransformerBlock(layer=1) residual_scaling=1.000000, use_peri_norm=True, completep_depth_alpha_enabled=True, norm_type=LPLayerNorm, simple_silu_ffn=False
-INFO:torchtitan.experiments.fl.models.llama3_mup.model.mup_model:MuP QK head normalization enabled: head_dim=64, norm_type=LPLayerNorm
-INFO:torchtitan.experiments.fl.models.llama3_mup.model.mup_model:MuP attention scaling skipped (config_opt_out): head_dim=64
-INFO:torchtitan.experiments.fl.models.llama3_mup.model.mup_model:Initialized MuP TransformerBlock(layer=2) residual_scaling=1.000000, use_peri_norm=True, completep_depth_alpha_enabled=True, norm_type=LPLayerNorm, simple_silu_ffn=False
-INFO:torchtitan.experiments.fl.models.llama3_mup.model.mup_model:MuP QK head normalization enabled: head_dim=64, norm_type=LPLayerNorm
-INFO:torchtitan.experiments.fl.models.llama3_mup.model.mup_model:MuP attention scaling skipped (config_opt_out): head_dim=64
-INFO:torchtitan.experiments.fl.models.llama3_mup.model.mup_model:Initialized MuP TransformerBlock(layer=3) residual_scaling=1.000000, use_peri_norm=True, completep_depth_alpha_enabled=True, norm_type=LPLayerNorm, simple_silu_ffn=False
-/nfs-share/aai30/projects/torchtitan/.venv/lib/python3.12/site-packages/torch/distributed/checkpoint/utils.py:483: UserWarning: torch.distributed is disabled, unavailable or uninitialized, assuming the intent is to load in a single process.
-  return func(*args, **kwargs)
-/nfs-share/aai30/projects/torchtitan/.venv/lib/python3.12/site-packages/torch/distributed/checkpoint/utils.py:483: UserWarning: torch.distributed is disabled, unavailable or uninitialized, assuming the intent is to save in a single process.
-  return func(*args, **kwargs)
-/nfs-share/aai30/projects/torchtitan/.venv/lib/python3.12/site-packages/torch/distributed/checkpoint/filesystem.py:133: UserWarning: TypedStorage is deprecated. It will be removed in the future and UntypedStorage will be the only storage class. This should only matter to you if you are using storages directly.  To access UntypedStorage directly, use tensor.untyped_storage() instead of tensor.storage()
-  if tensor.storage().size() != tensor.numel():
-INFO:eval_light.torchtitan_checkpoints:TorchTitan checkpoint at /tmp/lighteval_photon.XWYR3a/distcp/step-2048 converted to HF format in /tmp/lighteval_photon.XWYR3a/hf_model.
-Using Hugging Face checkpoint at: /tmp/lighteval_photon.XWYR3a/hf_model
-Resolved checkpoint step: 2048
-LightEval output will be written to: /nfs-share/aai30/projects/torchtitan/evals
-INFO 10-29 21:20:08 [__init__.py:248] No platform detected, vLLM is running on UnspecifiedPlatform
-WARNING 10-29 21:20:09 [_custom_ops.py:22] Failed to import from vllm._C with ImportError('libcuda.so.1: cannot open shared object file: No such file or directory')
-/nfs-share/aai30/projects/torchtitan/.venv/lib/python3.12/site-packages/accelerate/state.py:268: UserWarning: OMP_NUM_THREADS/MKL_NUM_THREADS unset, we set it at 32 to improve oob performance.
-  warnings.warn(
-[Gloo] Rank 0 is connected to 0 peer ranks. Expected number of connected peer ranks is : 0
-[rank0]: Traceback (most recent call last):
-[rank0]:   File "<frozen runpy>", line 198, in _run_module_as_main
-[rank0]:   File "<frozen runpy>", line 88, in _run_code
-[rank0]:   File "/nfs-share/aai30/projects/torchtitan/light_eval_photon/eval_light/eval_mosaic.py", line 25, in <module>
-[rank0]:     from lighteval.main_accelerate import main as main_accelerate
-[rank0]:   File "/nfs-share/aai30/projects/torchtitan/.venv/lib/python3.12/site-packages/lighteval/main_accelerate.py", line 26, in <module>
-[rank0]:     from lighteval.logging.evaluation_tracker import EvaluationTracker
-[rank0]:   File "/nfs-share/aai30/projects/torchtitan/.venv/lib/python3.12/site-packages/lighteval/logging/evaluation_tracker.py", line 41, in <module>
-[rank0]:     from lighteval.logging.info_loggers import (
-[rank0]:   File "/nfs-share/aai30/projects/torchtitan/.venv/lib/python3.12/site-packages/lighteval/logging/info_loggers.py", line 34, in <module>
-[rank0]:     from lighteval.metrics import MetricCategory
-[rank0]:   File "/nfs-share/aai30/projects/torchtitan/.venv/lib/python3.12/site-packages/lighteval/metrics/__init__.py", line 25, in <module>
-[rank0]:     from lighteval.metrics.metrics import Metric, MetricCategory
-[rank0]:   File "/nfs-share/aai30/projects/torchtitan/.venv/lib/python3.12/site-packages/lighteval/metrics/metrics.py", line 35, in <module>
-[rank0]:     from lighteval.metrics.metrics_sample import (
-[rank0]:   File "/nfs-share/aai30/projects/torchtitan/.venv/lib/python3.12/site-packages/lighteval/metrics/metrics_sample.py", line 42, in <module>
-[rank0]:     from lighteval.metrics.imports.data_stats_metric import DataStatsMetric
-[rank0]:   File "/nfs-share/aai30/projects/torchtitan/.venv/lib/python3.12/site-packages/lighteval/metrics/imports/data_stats_metric.py", line 30, in <module>
-[rank0]:     import spacy
-[rank0]:   File "/nfs-share/aai30/projects/torchtitan/.venv/lib/python3.12/site-packages/spacy/__init__.py", line 13, in <module>
-[rank0]:     from . import pipeline  # noqa: F401
-[rank0]:     ^^^^^^^^^^^^^^^^^^^^^^
-[rank0]:   File "/nfs-share/aai30/projects/torchtitan/.venv/lib/python3.12/site-packages/spacy/pipeline/__init__.py", line 1, in <module>
-[rank0]:     from .attributeruler import AttributeRuler
-[rank0]:   File "/nfs-share/aai30/projects/torchtitan/.venv/lib/python3.12/site-packages/spacy/pipeline/attributeruler.py", line 8, in <module>
-[rank0]:     from ..language import Language
-[rank0]:   File "/nfs-share/aai30/projects/torchtitan/.venv/lib/python3.12/site-packages/spacy/language.py", line 46, in <module>
-[rank0]:     from .pipe_analysis import analyze_pipes, print_pipe_analysis, validate_attrs
-[rank0]:   File "/nfs-share/aai30/projects/torchtitan/.venv/lib/python3.12/site-packages/spacy/pipe_analysis.py", line 6, in <module>
-[rank0]:     from .tokens import Doc, Span, Token
-[rank0]:   File "/nfs-share/aai30/projects/torchtitan/.venv/lib/python3.12/site-packages/spacy/tokens/__init__.py", line 1, in <module>
-[rank0]:     from ._serialize import DocBin
-[rank0]:   File "/nfs-share/aai30/projects/torchtitan/.venv/lib/python3.12/site-packages/spacy/tokens/_serialize.py", line 14, in <module>
-[rank0]:     from ..vocab import Vocab
-[rank0]:   File "spacy/vocab.pyx", line 1, in init spacy.vocab
-[rank0]:   File "spacy/tokens/doc.pyx", line 49, in init spacy.tokens.doc
-[rank0]:   File "/nfs-share/aai30/projects/torchtitan/.venv/lib/python3.12/site-packages/spacy/schemas.py", line 195, in <module>
-[rank0]:     class TokenPatternString(BaseModel):
-[rank0]:   File "/nfs-share/aai30/projects/torchtitan/.venv/lib/python3.12/site-packages/pydantic/v1/main.py", line 292, in __new__
-[rank0]:     cls.__try_update_forward_refs__()
-[rank0]:   File "/nfs-share/aai30/projects/torchtitan/.venv/lib/python3.12/site-packages/pydantic/v1/main.py", line 813, in __try_update_forward_refs__
-[rank0]:     update_model_forward_refs(cls, cls.__fields__.values(), cls.__config__.json_encoders, localns, (NameError,))
-[rank0]:   File "/nfs-share/aai30/projects/torchtitan/.venv/lib/python3.12/site-packages/pydantic/v1/typing.py", line 566, in update_model_forward_refs
-[rank0]:     update_field_forward_refs(f, globalns=globalns, localns=localns)
-[rank0]:   File "/nfs-share/aai30/projects/torchtitan/.venv/lib/python3.12/site-packages/pydantic/v1/typing.py", line 541, in update_field_forward_refs
-[rank0]:     update_field_forward_refs(sub_f, globalns=globalns, localns=localns)
-[rank0]:   File "/nfs-share/aai30/projects/torchtitan/.venv/lib/python3.12/site-packages/pydantic/v1/typing.py", line 532, in update_field_forward_refs
-[rank0]:     field.type_ = evaluate_forwardref(field.type_, globalns, localns or None)
-[rank0]:                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-[rank0]:   File "/nfs-share/aai30/projects/torchtitan/.venv/lib/python3.12/site-packages/pydantic/v1/typing.py", line 75, in evaluate_forwardref
-[rank0]:     return cast(Any, type_)._evaluate(globalns, localns, type_params=(), recursive_guard=set())
-[rank0]:            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-[rank0]: TypeError: ForwardRef._evaluate() got an unexpected keyword argument 'type_params'
-E1029 21:20:15.064000 3170923 .venv/lib/python3.12/site-packages/torch/distributed/elastic/multiprocessing/api.py:974] failed (exitcode: 1) local_rank: 0 (pid: 3170999) of binary: /nfs-share/aai30/projects/torchtitan/.venv/bin/python3
-Traceback (most recent call last):
-  File "/nfs-share/aai30/projects/torchtitan/.venv/bin/torchrun", line 10, in <module>
-    sys.exit(main())
-             ^^^^^^
-  File "/nfs-share/aai30/projects/torchtitan/.venv/lib/python3.12/site-packages/torch/distributed/elastic/multiprocessing/errors/__init__.py", line 362, in wrapper
-    return f(*args, **kwargs)
-           ^^^^^^^^^^^^^^^^^^
-  File "/nfs-share/aai30/projects/torchtitan/.venv/lib/python3.12/site-packages/torch/distributed/run.py", line 977, in main
-    run(args)
-  File "/nfs-share/aai30/projects/torchtitan/.venv/lib/python3.12/site-packages/torch/distributed/run.py", line 968, in run
-    elastic_launch(
-  File "/nfs-share/aai30/projects/torchtitan/.venv/lib/python3.12/site-packages/torch/distributed/launcher/api.py", line 165, in __call__
-    return launch_agent(self._config, self._entrypoint, list(args))
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/nfs-share/aai30/projects/torchtitan/.venv/lib/python3.12/site-packages/torch/distributed/launcher/api.py", line 312, in launch_agent
-    raise ChildFailedError(
-torch.distributed.elastic.multiprocessing.errors.ChildFailedError: 
-============================================================
-eval_light.eval_mosaic FAILED
-------------------------------------------------------------
-Failures:
-  <NO_OTHER_FAILURES>
-------------------------------------------------------------
-Root Cause (first observed failure):
-[0]:
-  time      : 2025-10-29_21:20:15
-  host      : taranaki.cl.cam.ac.uk
-  rank      : 0 (local_rank: 0)
-  exitcode  : 1 (pid: 3170999)
-  error_file: <N/A>
-  traceback : To enable traceback see: https://pytorch.org/docs/stable/elastic/errors.html
-============================================================
+bash: scripts/run_torchtitan_lighteval.sh: No such file or directory

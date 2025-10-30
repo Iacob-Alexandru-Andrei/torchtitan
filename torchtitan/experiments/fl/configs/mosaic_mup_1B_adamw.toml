@@ -69,14 +69,14 @@ decay_ratio = 0.0  # lr scheduler decay ratio, 80% of the train steps
 decay_type = "sqrt"
 min_lr_factor = 0.0
 switch_step = 2048
-switch_scale = 4.0
+switch_scale = 1.0
 
 [fl_metrics.hyperparameter_switch]
-enabled = true
+enabled = false
 steps = [2048]
-new_vs = [0.98]
-new_betas = [0.999,0.999]
-reset_momenta = ["exp_avg"]
+new_vs = [1.0]
+new_betas = [0.9,0.999]
+# reset_momenta = ["exp_avg"]
 
 [training]
 local_batch_size = 16
