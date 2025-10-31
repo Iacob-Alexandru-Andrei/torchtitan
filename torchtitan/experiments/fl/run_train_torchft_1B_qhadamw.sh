@@ -19,8 +19,9 @@
 if [[ -n "${SLURM_SUBMIT_DIR:-}" ]]; then
     REPO_ROOT="$(cd "${SLURM_SUBMIT_DIR}" && pwd -P)"
 else
-    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
-    REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd -P)"
+    # When not submitted via sbatch, keep the repository root as the directory
+    # where the script was launched from (the current working directory).
+    REPO_ROOT="$(pwd -P)"
 fi
 cd "${REPO_ROOT}"
 export REPO_ROOT
@@ -32,12 +33,13 @@ set -ex
 
 export S3_ENDPOINT_URL='http://taranaki.cl.cam.ac.uk:9000'
 
-# Ensure Python can import the torchtitan package when started via sbatch.
-if [[ -z "${PYTHONPATH:-}" ]]; then
-    export PYTHONPATH="${REPO_ROOT}"
-else
-    export PYTHONPATH="${REPO_ROOT}:${PYTHONPATH}"
-fi
+# # Ensure Python can import the torchtitan package when started via sbatch.
+# if [[ -z "${PYTHONPATH:-}" ]]; then
+#     export PYTHONPATH="${REPO_ROOT}"
+# else
+#     export PYTHONPATH="${REPO_ROOT}:${PYTHONPATH}"
+# fi
+echo "PYTHONPATH=${PYTHONPATH:-}"
 
 # Configuration
 NGPU=${1:-"4"}  # Number of GPUs / replicas (default: 2)
@@ -165,6 +167,7 @@ for ((replica_id=0; replica_id<NGPU; replica_id++)); do
             --fault_tolerance.min_replica_size "${MIN_REPLICAS}"
     ) > "${log_file}" 2>&1 &
     REPLICA_PIDS[$replica_id]=$!
+    sleep 1
 done
 
 echo "Lighthouse PID: ${LIGHTHOUSE_PID}"

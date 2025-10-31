@@ -68,12 +68,12 @@ warmup_steps = 2048  # lr scheduler warm up, normally 20% of the train steps
 decay_ratio = 0.0  # lr scheduler decay ratio, 80% of the train steps
 decay_type = "sqrt"
 min_lr_factor = 0.0
-switch_step = 2048
+switch_step = 2049
 switch_scale = 4.0
 
 [fl_metrics.hyperparameter_switch]
-enabled = true
-steps = [2048]
+enabled = false
+steps = [2049]
 new_vs = [0.98]
 new_betas = [0.999,0.999]
 reset_momenta = ["exp_avg"]
@@ -99,7 +99,7 @@ context_parallel_degree = 1
 [checkpoint]
 enable = true
 folder = "checkpoints"
-interval = 2048
+interval = 512
 last_save_model_only = false
 export_dtype = "float32"
 async_mode = "async_with_pinned_mem"  # ["disabled", "async", "async_with_pinned_mem"]
@@ -109,6 +109,7 @@ enable = true
 bucket = "checkpoints"
 prefix = ""  # Root of bucket
 download_on_start = true
+resume_from_run_step = "adamw-1B-20251030-151539/step-2048"
 # run_uuid and remote_checkpoint_folder will be set via RUN_UUID environment variable
 
 [activation_checkpoint]
@@ -139,7 +140,7 @@ enable = true
 dataset = "c4_validation"
 local_batch_size = 16
 freq = 2048
-steps = 512
+steps = 512 
 
 [unigram_metric]
 enable = true
