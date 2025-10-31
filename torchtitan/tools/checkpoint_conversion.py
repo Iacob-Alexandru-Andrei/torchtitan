@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import shutil
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -17,7 +18,9 @@ from typing import Any
 
 import torch
 import torch.distributed.checkpoint as dcp
+import torch.nn as nn
 from composer.loggers import RemoteUploaderDownloader
+from composer.utils.file_helpers import list_remote_objects
 from torch.distributed.checkpoint import HuggingFaceStorageWriter
 from transformers import AutoTokenizer, LlamaConfig
 
@@ -65,6 +68,74 @@ def _remote_key(relative_path: Path, remote_root: str | None) -> str:
     if root:
         return root
     return relative_key
+
+
+def _build_listing_uri(bucket: str, prefix: str, remote_key: str) -> str:
+    bucket = bucket.strip("/")
+    prefix = prefix.strip("/")
+    remote_key = remote_key.strip("/")
+    components = [part for part in (prefix, remote_key) if part]
+    uri = f"s3://{bucket}"
+    if components:
+        uri = f"{uri}/{'/'.join(components)}"
+    if not uri.endswith("/"):
+        uri += "/"
+    return uri
+
+
+def _listing_prefix(prefix: str, remote_key: str) -> str:
+    prefix = prefix.strip("/")
+    remote_key = remote_key.strip("/")
+    components = [part for part in (prefix, remote_key) if part]
+    if not components:
+        return ""
+    return "/".join(components).rstrip("/") + "/"
+
+
+def _enumerate_remote_step_files(
+    location: S3CheckpointLocation,
+    candidate_relatives: list[Path],
+) -> tuple[list[str], Path] | tuple[None, None]:
+    for relative_base in candidate_relatives:
+        remote_key = _remote_key(relative_base, location.normalised_remote_root())
+        listing_uri = _build_listing_uri(location.bucket, location.prefix or "", remote_key)
+        logger.info(
+            "Manifest %s not found; enumerating checkpoint files via %s",
+            MANIFEST_FILENAME,
+            listing_uri,
+        )
+        try:
+            object_keys = list_remote_objects(listing_uri)
+        except Exception as err:  # noqa: BLE001
+            logger.warning(
+                "Failed to list remote objects at %s (%s); trying alternate layout.",
+                listing_uri,
+                err,
+            )
+            continue
+
+        listing_prefix = _listing_prefix(location.prefix or "", remote_key)
+        entries: list[str] = []
+        for key in object_keys:
+            candidate = key
+            if listing_prefix:
+                if not key.startswith(listing_prefix):
+                    continue
+                candidate = key[len(listing_prefix) :]
+            candidate = candidate.strip("/")
+            if not candidate:
+                continue
+            entries.append(candidate)
+
+        if entries:
+            deduped_entries = sorted(set(entries))
+            logger.info(
+                "Identified %d file(s) for checkpoint step using manifestless discovery.",
+                len(deduped_entries),
+            )
+            return deduped_entries, relative_base
+        logger.warning("No checkpoint files found when listing %s; trying alternate layout.", listing_uri)
+    return None, None
 
 
 def _read_latest_step(
@@ -138,17 +209,40 @@ def download_dist_cp_checkpoint(
         location.prefix,
         _remote_key(relative_base / MANIFEST_FILENAME, location.normalised_remote_root()),
     )
-    download_file_from_s3(
-        remote,
-        _remote_key(relative_base / MANIFEST_FILENAME, location.normalised_remote_root()),
-        manifest_path,
-    )
-
+    manifest_entries: list[str] | None = None
     try:
+        download_file_from_s3(
+            remote,
+            _remote_key(relative_base / MANIFEST_FILENAME, location.normalised_remote_root()),
+            manifest_path,
+        )
         manifest_entries = json.loads(manifest_path.read_text())
+    except FileNotFoundError:
+        logger.info(
+            "Manifest %s not found on S3 for step %s; falling back to manifestless download.",
+            MANIFEST_FILENAME,
+            step,
+        )
+        manifest_path.unlink(missing_ok=True)
     except json.JSONDecodeError as exc:
         msg = f"Invalid manifest file downloaded for step {step}: {manifest_path}"
         raise RuntimeError(msg) from exc
+
+    if manifest_entries is None:
+        fallback_entries, fallback_relative = _enumerate_remote_step_files(
+            location,
+            [relative_base],
+        )
+        if fallback_entries is None or fallback_relative is None:
+            msg = (
+                f"Checkpoint manifest missing and no files could be discovered for step {step}. "
+                "Ensure the remote checkpoint path is correct."
+            )
+            raise FileNotFoundError(msg)
+        manifest_entries = fallback_entries
+        if fallback_relative != relative_base:
+            relative_base = fallback_relative
+        manifest_path.write_text(json.dumps(manifest_entries))
 
     for relative in manifest_entries:
         relative_path = Path(relative)
@@ -271,29 +365,68 @@ def _write_hf_config(
     *,
     tokenizer_name: str | None,
     tokenizer_obj: Any | None,
+    model_name: str,
 ) -> None:
-    """Create a ``LlamaConfig`` that mirrors the TorchTitan model settings."""
+    """Create a HuggingFace config mirroring the TorchTitan model settings."""
     intermediate_size = _compute_intermediate_size(model_args)
     num_kv_heads = (
         model_args.n_kv_heads if getattr(model_args, "n_kv_heads", None) else model_args.n_heads
     )
 
-    config = LlamaConfig(
-        vocab_size=model_args.vocab_size,
-        hidden_size=model_args.dim,
-        intermediate_size=intermediate_size,
-        num_hidden_layers=model_args.n_layers,
-        num_attention_heads=model_args.n_heads,
-        num_key_value_heads=num_kv_heads,
-        rms_norm_eps=model_args.norm_eps,
-        hidden_act="silu",
-        rope_theta=model_args.rope_theta,
-        max_position_embeddings=getattr(model_args, "max_seq_len", 2048),
-        initializer_range=0.02,
-        tie_word_embeddings=getattr(model_args, "tie_word_embeddings", True),
-        torch_dtype="bfloat16",
-    )
-    config.architectures = ["LlamaForCausalLM"]
+    if "mup" in model_name:
+        # log
+        logger.info("Using MuP configuration for huggingface model '%s'", model_name)
+        from light_eval_photon.eval_light.patched_llama3 import Llama3MuPConfig
+
+        config = Llama3MuPConfig(
+            vocab_size=model_args.vocab_size,
+            hidden_size=model_args.dim,
+            intermediate_size=intermediate_size,
+            num_hidden_layers=model_args.n_layers,
+            num_attention_heads=model_args.n_heads,
+            num_key_value_heads=num_kv_heads,
+            rms_norm_eps=model_args.norm_eps,
+            hidden_act="silu",
+            rope_theta=model_args.rope_theta,
+            max_position_embeddings=getattr(model_args, "max_seq_len", 2048),
+            initializer_range=0.02,
+            tie_word_embeddings=getattr(model_args, "tie_word_embeddings", True),
+            torch_dtype="bfloat16",
+            use_embedding_norm=getattr(model_args, "use_embedding_norm", True),
+            use_peri_norm=getattr(model_args, "use_peri_norm", True),
+            use_torch_layernorm=getattr(model_args, "use_torch_layernorm", True),
+            use_simple_silu_ffn=getattr(model_args, "use_simple_silu_ffn", False),
+            qk_norm=getattr(model_args, "qk_norm", True),
+            qk_norm_bias=getattr(model_args, "qk_norm_bias", False),
+            qk_norm_elementwise_affine=getattr(model_args, "qk_norm_elementwise_affine", True),
+            torch_layernorm_bias=getattr(model_args, "torch_layernorm_bias", False),
+            torch_layernorm_elementwise_affine=getattr(model_args, "torch_layernorm_elementwise_affine", True),
+            use_flex_attn=False,
+            attn_mask_type="causal",
+            multiple_of=getattr(model_args, "multiple_of", 256),
+            ffn_dim_multiplier=getattr(model_args, "ffn_dim_multiplier", None),
+            mup_config=getattr(model_args, "mup_config", {}),
+            init_config=getattr(model_args, "init_config", {}),
+        )
+        config.architectures = ["Llama3MuPForCausalLM"]
+    else:
+        config = LlamaConfig(
+            vocab_size=model_args.vocab_size,
+            hidden_size=model_args.dim,
+            intermediate_size=intermediate_size,
+            num_hidden_layers=model_args.n_layers,
+            num_attention_heads=model_args.n_heads,
+            num_key_value_heads=num_kv_heads,
+            rms_norm_eps=model_args.norm_eps,
+            hidden_act="silu",
+            rope_theta=model_args.rope_theta,
+            max_position_embeddings=getattr(model_args, "max_seq_len", 2048),
+            initializer_range=0.02,
+            tie_word_embeddings=getattr(model_args, "tie_word_embeddings", True),
+            torch_dtype="bfloat16",
+        )
+        config.architectures = ["LlamaForCausalLM"]
+
     if tokenizer_name:
         config.tokenizer_name = tokenizer_name
 
@@ -310,6 +443,144 @@ def _write_hf_config(
     config_path = output_dir / "config.json"
     config.save_pretrained(output_dir)
     logger.info("Wrote Hugging Face config to %s", config_path)
+
+
+@torch.inference_mode()
+def _format_param_count(num_params: int) -> str:
+    if num_params >= 1_000_000:
+        return f"{num_params:,} ({num_params / 1_000_000:.3f}M)"
+    if num_params >= 1_000:
+        return f"{num_params:,} ({num_params / 1_000:.3f}K)"
+    return f"{num_params:,}"
+
+
+@torch.inference_mode()
+def _log_model_structure(model: nn.Module) -> None:
+    """Emit a parameter breakdown and module tree for the constructed model."""
+
+    def _count_params(module: nn.Module | None) -> int:
+        if module is None:
+            return 0
+        return sum(param.numel() for param in module.parameters())
+
+    total_params = sum(param.numel() for param in model.parameters())
+    components = {
+        "tok_embeddings": _count_params(getattr(model, "tok_embeddings", None)),
+        "layers": _count_params(getattr(model, "layers", None)),
+        "norm": _count_params(getattr(model, "norm", None)),
+        "embedding_norm": _count_params(getattr(model, "embedding_norm", None)),
+    }
+
+    logger.info("Model parameter breakdown:")
+    logger.info("part0: total=%s", _format_param_count(total_params))
+    for name, count in components.items():
+        logger.info("  - %s: %s", name, _format_param_count(count))
+
+    for line in repr(model).splitlines():
+        logger.info("%s", line)
+
+
+def _verify_native_state_dict_layers(
+    state_dict: Mapping[str, Any],
+    expected_layers: int,
+) -> None:
+    """Ensure every transformer block received tensors from the checkpoint."""
+    if expected_layers <= 0:
+        logger.info(
+            "Skipping transformer layer verification; expected_layers=%s",
+            expected_layers,
+        )
+        return
+
+    layer_counts = {str(idx): 0 for idx in range(expected_layers)}
+
+    for key in state_dict.keys():
+        parts = key.split(".")
+        if len(parts) >= 2 and parts[0] == "layers" and parts[1].isdigit():
+            layer_id = parts[1]
+            if layer_id in layer_counts:
+                layer_counts[layer_id] += 1
+
+    missing = [layer_id for layer_id, count in layer_counts.items() if count == 0]
+    if missing:
+        msg = (
+            "Checkpoint load omitted parameters for layer(s): "
+            f"{', '.join(sorted(missing))}"
+        )
+        logger.error(msg)
+        raise RuntimeError(msg)
+
+    logger.info("Verified state dict tensors present for all %d transformer layers.", expected_layers)
+
+
+@torch.inference_mode()
+def _log_hf_state_dict_summary(
+    hf_state_dict: Mapping[str, torch.Tensor],
+    expected_layers: int,
+) -> None:
+    """Log parameter counts and per-layer coverage for the HuggingFace state dict."""
+
+    def _is_tensor(obj: Any) -> bool:
+        return isinstance(obj, torch.Tensor)
+
+    total_params = 0
+    embed_params = 0
+    layers_params = 0
+    norm_params = 0
+    embedding_norm_params = 0
+    lm_head_params = 0
+
+    layer_param_totals = {str(i): 0 for i in range(expected_layers)} if expected_layers > 0 else {}
+    layer_tensor_counts = {str(i): 0 for i in range(expected_layers)} if expected_layers > 0 else {}
+
+    for key, value in hf_state_dict.items():
+        if not _is_tensor(value):
+            continue
+        numel = value.numel()
+        total_params += numel
+
+        if key.startswith("model.embed_tokens."):
+            embed_params += numel
+        elif key.startswith("model.layers."):
+            layers_params += numel
+            match = re.match(r"model\.layers\.(\d+)\.", key)
+            if match:
+                layer_id = match.group(1)
+                if layer_id in layer_param_totals:
+                    layer_param_totals[layer_id] += numel
+                    layer_tensor_counts[layer_id] += 1
+        elif key.startswith("model.norm."):
+            norm_params += numel
+        elif key.startswith("model.embedding_norm."):
+            embedding_norm_params += numel
+        elif key.startswith("lm_head."):
+            lm_head_params += numel
+
+    logger.info("HF state dict parameter breakdown:")
+    logger.info("  total=%s", _format_param_count(total_params))
+    logger.info("  embed_tokens=%s", _format_param_count(embed_params))
+    logger.info("  layers=%s", _format_param_count(layers_params))
+    logger.info("  norm=%s", _format_param_count(norm_params))
+    logger.info("  embedding_norm=%s", _format_param_count(embedding_norm_params))
+    logger.info("  lm_head=%s", _format_param_count(lm_head_params))
+
+    if layer_param_totals:
+        missing_layers = [layer_id for layer_id, total in layer_param_totals.items() if total == 0]
+        for layer_id in sorted(layer_param_totals, key=lambda x: int(x)):
+            logger.info(
+                "    layer %s: params=%s tensors=%d",
+                layer_id,
+                _format_param_count(layer_param_totals[layer_id]),
+                layer_tensor_counts[layer_id],
+            )
+        if missing_layers:
+            msg = (
+                "HF state dict is missing parameters for layer(s): "
+                f"{', '.join(sorted(missing_layers))}"
+            )
+            logger.error(msg)
+            raise RuntimeError(msg)
+        logger.info("Verified HF tensors present for all %d transformer layers.", expected_layers)
 
 
 @torch.inference_mode()
@@ -334,6 +605,7 @@ def convert_dist_cp_to_hf(
 
     with torch.device("cpu"):
         model = train_spec.model_cls(model_args)
+    _log_model_structure(model)
     model = ModelWrapper(model)
 
     sd_adapter = train_spec.state_dict_adapter(model_args, hf_assets_path)
@@ -343,8 +615,10 @@ def convert_dist_cp_to_hf(
 
     state_dict = model._get_state_dict()
     dcp.load(state_dict, checkpoint_id=str(checkpoint_dir))
+    _verify_native_state_dict_layers(state_dict, getattr(model_args, "n_layers", 0))
 
     hf_state_dict = sd_adapter.to_hf(state_dict)
+    _log_hf_state_dict_summary(hf_state_dict, getattr(model_args, "n_layers", 0))
 
     tied_embed = hf_state_dict.get("model.embed_tokens.weight")
     tied_head = hf_state_dict.get("lm_head.weight")
@@ -380,6 +654,7 @@ def convert_dist_cp_to_hf(
         model_args,
         tokenizer_name=effective_tokenizer,
         tokenizer_obj=tokenizer_obj,
+        model_name=model_name,
     )
     return output_dir
 

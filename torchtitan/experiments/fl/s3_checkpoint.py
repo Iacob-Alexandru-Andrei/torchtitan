@@ -16,6 +16,7 @@ from typing import Any, TYPE_CHECKING
 
 from composer.loggers import RemoteUploaderDownloader
 from composer.loggers.remote_uploader_downloader import _upload_worker
+from composer.utils.file_helpers import list_remote_objects
 
 from torchtitan.tools.logging import logger
 
@@ -379,6 +380,78 @@ class S3CheckpointWrapper:
             return f"{root}/{relative_key}"
         return relative_key
 
+    def _remote_listing_uri(self, remote_key: str) -> str:
+        """Build a fully-qualified S3 URI for listing remote objects."""
+        bucket = self.config.bucket.strip("/")
+        prefix = (self.config.prefix or "").strip("/")
+        remote_key = remote_key.strip("/")
+        path_components = [part for part in (prefix, remote_key) if part]
+        uri = f"s3://{bucket}"
+        if path_components:
+            uri = f"{uri}/{'/'.join(path_components)}"
+        if not uri.endswith("/"):
+            uri += "/"
+        return uri
+
+    def _remote_listing_prefix(self, remote_key: str) -> str:
+        """Compute the prefix used when listing remote objects."""
+        prefix = (self.config.prefix or "").strip("/")
+        remote_key = remote_key.strip("/")
+        path_components = [part for part in (prefix, remote_key) if part]
+        if not path_components:
+            return ""
+        return "/".join(path_components).rstrip("/") + "/"
+
+    def _enumerate_remote_step_files(
+        self,
+        remote_root: str,
+        candidate_relatives: list[Path],
+    ) -> tuple[list[str], Path] | tuple[None, None]:
+        """Enumerate checkpoint files directly from S3 when the manifest is missing."""
+        for relative_base in candidate_relatives:
+            remote_key = self._remote_key(relative_base, remote_root=remote_root)
+            listing_uri = self._remote_listing_uri(remote_key)
+            logger.info(
+                "Manifest %s not found; enumerating checkpoint files via %s",
+                MANIFEST_FILENAME,
+                listing_uri,
+            )
+            try:
+                object_keys = list_remote_objects(listing_uri)
+            except Exception as err:  # noqa: BLE001
+                logger.warning(
+                    "Failed to list remote objects at %s (%s); trying alternate layout.",
+                    listing_uri,
+                    err,
+                )
+                continue
+
+            listing_prefix = self._remote_listing_prefix(remote_key)
+            entries: list[str] = []
+            for key in object_keys:
+                candidate = key
+                if listing_prefix:
+                    if not key.startswith(listing_prefix):
+                        continue
+                    candidate = key[len(listing_prefix) :]
+                candidate = candidate.strip("/")
+                if not candidate:
+                    continue
+                entries.append(candidate)
+
+            if entries:
+                deduped_entries = sorted(set(entries))
+                logger.info(
+                    "Identified %d file(s) for checkpoint step using manifestless discovery.",
+                    len(deduped_entries),
+                )
+                return deduped_entries, relative_base
+            logger.warning(
+                "No checkpoint files found when listing %s; trying alternate layout.",
+                listing_uri,
+            )
+        return None, None
+
     def save(self, curr_step: int, *, last_step: bool = False) -> None:
         """Save checkpoint and queue for S3 upload.
 
@@ -620,8 +693,23 @@ class S3CheckpointWrapper:
                 manifest_path.unlink(missing_ok=True)
 
         if manifest_entries is None or chosen_relative_base is None:
-            assert last_error is not None
-            raise last_error
+            logger.info(
+                "Manifest %s could not be retrieved from S3; attempting manifestless download for step %s.",
+                MANIFEST_FILENAME,
+                step,
+            )
+            fallback_entries, fallback_relative = self._enumerate_remote_step_files(remote_path, candidate_relatives)
+            if fallback_entries is None or fallback_relative is None:
+                if last_error is not None:
+                    raise last_error
+                msg = (
+                    f"Unable to locate checkpoint files for step {step} using manifestless discovery. "
+                    "Ensure the remote path contains uploaded checkpoint artifacts."
+                )
+                raise FileNotFoundError(msg)
+            manifest_entries = fallback_entries
+            chosen_relative_base = fallback_relative
+            manifest_path.write_text(json.dumps(manifest_entries))
 
         logger.info("Manifest contains %d files to download", len(manifest_entries))
 

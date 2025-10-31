@@ -6,8 +6,9 @@
 
 """State dict adapter bridging MuP LLaMA3 checkpoints and TorchTitan."""
 
-import re
 from typing import Any
+
+import torch
 
 from torchtitan.models.llama3.model.state_dict_adapter import Llama3StateDictAdapter
 from .mup_args import TransformerModelArgs
@@ -49,8 +50,8 @@ class Llama3MuPStateDictAdapter(Llama3StateDictAdapter):
     - post_attn_norm.weight (peri-normalization after attention)
     - post_ffn_norm.weight (peri-normalization after FFN)
 
-    These are ignored during HF->TorchTitan conversion (mapped to None)
-    since they don't exist in standard HuggingFace Llama3 checkpoints.
+    These tensors are preserved in both directions so exporting to HuggingFace
+    keeps the MuP-specific behavior intact.
     """
 
     def __init__(
@@ -61,34 +62,39 @@ class Llama3MuPStateDictAdapter(Llama3StateDictAdapter):
         # Initialize base adapter with standard Llama3 mappings
         super().__init__(model_args, hf_assets_path)
 
-        # Extend the mapping with MuP-specific layers
-        # These are TorchTitan-only features, so we map them to None for HF conversion
-        self.from_hf_map.update(
-            {
-                # MuP extension: optional embedding normalization
-                "embedding_norm.weight": None,  # Not in HF format
-                # MuP extension: peri-normalization (per-layer)
-                "model.layers.{}.post_attn_norm.weight": None,  # Not in HF format
-                "model.layers.{}.post_ffn_norm.weight": None,  # Not in HF format
-            }
-        )
-
-        self._mup_only_patterns = (
-            re.compile(r"layers\.\d+\.post_attn_norm\.weight"),
-            re.compile(r"layers\.\d+\.post_ffn_norm\.weight"),
-            re.compile(r"layers\.\d+\.attention\.q_norm\.weight"),
-            re.compile(r"layers\.\d+\.attention\.k_norm\.weight"),
-        )
-
     def to_hf(self, state_dict: dict[str, Any]) -> dict[str, Any]:
-        """Drop MuP-only tensors before delegating to the base adapter."""
+        """Convert the MuP state dict to a format that already matches the LightEval model naming."""
+        hf_state: dict[str, Any] = {}
+        tied_embed = state_dict.get("tok_embeddings.weight")
 
-        def _is_mup_only(key: str) -> bool:
-            if key == "embedding_norm.weight":
-                return True
-            return any(pattern.fullmatch(key) for pattern in self._mup_only_patterns)
+        for key, value in state_dict.items():
+            if key.startswith("model."):
+                hf_key = key
+            elif key == "output.weight":
+                hf_key = "model.output.weight"
+            else:
+                hf_key = f"model.{key}"
+            tensor = value
 
-        filtered_state_dict = {
-            k: v for k, v in state_dict.items() if not _is_mup_only(k)
-        }
-        return super().to_hf(filtered_state_dict)
+            if hf_key == "model.output.weight" and isinstance(value, torch.Tensor):
+                # Avoid shared storage when weights are tied.
+                if isinstance(tied_embed, torch.Tensor) and tied_embed.data_ptr() == value.data_ptr():
+                    tensor = value.clone()
+                lm_head_tensor = tensor.clone() if isinstance(tensor, torch.Tensor) else tensor
+                hf_state.setdefault("lm_head.weight", lm_head_tensor)
+
+            hf_state[hf_key] = tensor
+
+        return hf_state
+
+    def from_hf(self, hf_state_dict: dict[str, Any]) -> dict[str, Any]:
+        """Load from the MuP-aware HuggingFace layout by removing the leading `model.` prefix."""
+        state_dict: dict[str, Any] = {}
+        for key, value in hf_state_dict.items():
+            if key.startswith("model."):
+                native_key = key[len("model.") :]
+                state_dict[native_key] = value
+            elif key.startswith("lm_head."):
+                native_key = f"output.{key[len('lm_head.'):]}"
+                state_dict.setdefault(native_key, value)
+        return state_dict
