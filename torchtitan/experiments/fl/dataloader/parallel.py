@@ -195,11 +195,52 @@ def _patch_streaming_prefix_once() -> None:
         prefix_int = base_prefix_int + _namespace_offset(namespace)
 
         shm = None
-        if world.is_local_leader:
+        attempts = 0
+        while shm is None:
             name = _get_path(prefix_int, LOCALS)
             data = _pack_locals(streams_local, prefix_int)
-            shm = SharedMemory(name, True, len(data))
-            shm.buf[: len(data)] = data
+            if world.is_local_leader:
+                try:
+                    shm = SharedMemory(name, True, len(data))
+                except FileExistsError:
+                    try:
+                        existing = SharedMemory(name, False)
+                    except FileNotFoundError:
+                        existing = None
+                    if existing is not None:
+                        their_locals, their_prefix_int = _unpack_locals(
+                            bytes(existing.buf)
+                        )
+                        if (
+                            streams_local == their_locals
+                            and prefix_int == their_prefix_int
+                        ):
+                            shm = existing
+                            break
+                        existing.close()
+                    attempts += 1
+                    if attempts > retry:
+                        msg = (
+                            "Exceeded maximum SharedMemory reuse attempts while "
+                            "searching for an available namespace prefix."
+                        )
+                        raise RuntimeError(msg) from None
+                    prefix_int += 1
+                    continue
+                shm.buf[: len(data)] = data
+            else:
+                try:
+                    shm = SharedMemory(name, False)
+                except FileNotFoundError:
+                    attempts += 1
+                    if attempts > retry:
+                        msg = (
+                            "Failed to resolve shared memory registered by the "
+                            "local leader after multiple retries."
+                        )
+                        raise RuntimeError(msg) from None
+                    prefix_int += 1
+                    continue
 
         if not world.is_local_leader:
             name = _get_path(prefix_int, LOCALS)
