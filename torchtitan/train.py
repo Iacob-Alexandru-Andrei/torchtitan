@@ -33,6 +33,7 @@ from torchtitan.tools.profiling import (
     maybe_enable_memory_snapshot,
     maybe_enable_profiling,
 )
+from torchtitan.experiments.fl.callbacks import CallbackStepContext
 
 
 class Trainer(torch.distributed.checkpoint.stateful.Stateful):
@@ -724,19 +725,29 @@ class Trainer(torch.distributed.checkpoint.stateful.Stateful):
         if not switch_cb or not getattr(switch_cb, "enabled", False):
             return
 
-        optimizer_groups = getattr(self.optimizers, "param_groups", None)
-        if not optimizer_groups:
-            return
+        ensure_callbacks = getattr(self.metrics_processor, "_ensure_callbacks_setup", None)
+        if callable(ensure_callbacks):
+            ensure_callbacks()
+
+        mesh = None
+        if getattr(self.parallel_dims, "dp_cp_enabled", False):
+            mesh = self.parallel_dims.world_mesh["dp_cp"]
 
         for switch_step in sorted(getattr(switch_cb, "steps", ())):
             if switch_step > self.step:
-                logger.info(f"Skipping applying switch for step {switch_step}, current step {self.step}")
                 continue
 
-            if switch_cb.new_betas is not None:
-                switch_cb._update_group_values(optimizer_groups, "betas", switch_cb.new_betas)
-            if switch_cb.new_vs is not None:
-                switch_cb._update_group_values(optimizer_groups, "vs", switch_cb.new_vs)
+            switch_cb._applied_steps.discard(switch_step)
+
+            context = CallbackStepContext(
+                step=switch_step,
+                model_parts=self.model_parts,
+                optimizers=self.optimizers,
+                logger=self.metrics_processor.logger,
+                mesh=mesh,
+            )
+
+            switch_cb.on_step_end(context)
 
             switch_cb._applied_steps.add(switch_step)
 
