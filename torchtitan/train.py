@@ -729,7 +729,8 @@ class Trainer(torch.distributed.checkpoint.stateful.Stateful):
             return
 
         for switch_step in sorted(getattr(switch_cb, "steps", ())):
-            if switch_step > self.step or switch_step in switch_cb._applied_steps:
+            if switch_step > self.step:
+                logger.info(f"Skipping applying switch for step {switch_step}, current step {self.step}")
                 continue
 
             if switch_cb.new_betas is not None:
