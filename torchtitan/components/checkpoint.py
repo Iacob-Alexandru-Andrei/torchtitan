@@ -537,63 +537,79 @@ class CheckpointManager:
             bool: Whether the checkpoint was loaded successfully.
         """
 
-        if self.ft_manager:
-            self._ft_load()
-
-        if not self.enable:
-            return False
-
+        target_step: int | None = None
         model_only = False
         from_hf = False
-        if not os.path.exists(self.folder):
-            model_only = self.initial_load_model_only
-            from_hf = self.initial_load_in_hf
-            if from_hf:
-                assert (
-                    model_only
-                ), "Only model can be loaded when loading from HF's safetensors checkpoint."
-            if self.initial_load_path:
-                checkpoint_id = self.initial_load_path
-                if not os.path.isdir(checkpoint_id):
-                    raise ValueError(
-                        "checkpoint.initial_load_path is specified but the path is not valid."
-                    )
-                if from_hf:
-                    logger.info(
-                        f"loading from HF safetensors from --checkpoint.initial_load_path: {self.initial_load_path}"
-                    )
-            elif from_hf:
-                checkpoint_id = self.sd_adapter.hf_assets_path
-                if not os.path.isdir(checkpoint_id):
-                    raise ValueError(
-                        "model.hf_assets_path is being used to load HF weights but the path is not valid. \
-                        Either make sure hf_assets_path is correct or provide a valid checkpoint.initial_load_path"
-                    )
-                logger.info(
-                    f"loading HF safetensors from --model.hf_assets_path: {self.sd_adapter.hf_assets_path}"
-                )
-            else:
-                return False
-        else:
-            if self.initial_load_path:
-                logger.warning(
-                    "checkpoint.initial_load_path is provided but the checkpoint.folder exists. "
-                    f"Checkpointer will use the checkpoints from the checkpoint.folder {self.folder}."
-                )
-            if self.initial_load_in_hf:
-                logger.warning(
-                    "checkpoint.initial_load_in_hf is True but the checkpoint.folder exists. "
-                    "Checkpointer will not load from HF safetensors"
-                )
-            step = self._find_load_step() if step == -1 else step
-            if step == -1:
-                return False
-            model_only = step == 0
-            checkpoint_id = self._create_checkpoint_id(step)
+        checkpoint_id: str | None = None
+        should_return_false = False
 
+        if self.enable:
+            if not os.path.exists(self.folder):
+                model_only = self.initial_load_model_only
+                from_hf = self.initial_load_in_hf
+                if from_hf:
+                    assert (
+                        model_only
+                    ), "Only model can be loaded when loading from HF's safetensors checkpoint."
+                if self.initial_load_path:
+                    checkpoint_id = self.initial_load_path
+                    if not os.path.isdir(checkpoint_id):
+                        raise ValueError(
+                            "checkpoint.initial_load_path is specified but the path is not valid."
+                        )
+                    if from_hf:
+                        logger.info(
+                            f"loading from HF safetensors from --checkpoint.initial_load_path: {self.initial_load_path}"
+                        )
+                elif from_hf:
+                    checkpoint_id = self.sd_adapter.hf_assets_path
+                    if not os.path.isdir(checkpoint_id):
+                        raise ValueError(
+                            "model.hf_assets_path is being used to load HF weights but the path is not valid. \
+                        Either make sure hf_assets_path is correct or provide a valid checkpoint.initial_load_path"
+                        )
+                    logger.info(
+                        f"loading HF safetensors from --model.hf_assets_path: {self.sd_adapter.hf_assets_path}"
+                    )
+                else:
+                    should_return_false = True
+            else:
+                if self.initial_load_path:
+                    logger.warning(
+                        "checkpoint.initial_load_path is provided but the checkpoint.folder exists. "
+                        f"Checkpointer will use the checkpoints from the checkpoint.folder {self.folder}."
+                    )
+                if self.initial_load_in_hf:
+                    logger.warning(
+                        "checkpoint.initial_load_in_hf is True but the checkpoint.folder exists. "
+                        "Checkpointer will not load from HF safetensors"
+                    )
+                step = self._find_load_step() if step == -1 else step
+                if step == -1:
+                    should_return_false = True
+                else:
+                    target_step = step
+                    model_only = step == 0
+                    checkpoint_id = self._create_checkpoint_id(step)
+
+                    if not os.path.isdir(checkpoint_id):
+                        raise FileNotFoundError(
+                            f"--checkpoint.load_step={step} but checkpoint {checkpoint_id} is not found."
+                        )
+
+        if self.ft_manager:
+            self._ft_load(target_step)
+
+        if not self.enable or should_return_false:
+            return False
+
+        assert checkpoint_id is not None
+
+        if not os.path.exists(self.folder):
+            # checkpoint_id points to the requested initial load path; ensure it exists
             if not os.path.isdir(checkpoint_id):
                 raise FileNotFoundError(
-                    f"--checkpoint.load_step={step} but checkpoint {checkpoint_id} is not found."
+                    f"checkpoint initial load path {checkpoint_id} is not found."
                 )
 
         logger.info(f"Loading the checkpoint from {checkpoint_id}.")
@@ -622,12 +638,13 @@ class CheckpointManager:
             self.staging_future.result()
             self.staging = False
 
-    def _find_load_step(self, folder: str = "") -> int:
+    def _find_load_step(self, folder: str = "", *, max_step: int | None = None) -> int:
         """Find the step to load the checkpoint for.
 
         Args:
             folder (str, optional): The folder to find the checkpoint for. If ``folder``
             is "", then ``self.folder`` will be used.
+            max_step (int, optional): Upper bound for the checkpoint step to consider.
 
         Returns:
             int: The step to load the checkpoint for.
@@ -641,14 +658,19 @@ class CheckpointManager:
 
         for filename in os.listdir(folder):
             match = re.search(pattern, filename)
+            if not match:
+                continue
+            step_value = int(match.group(1))
+            if max_step is not None and step_value > max_step:
+                continue
             dcp_metadata_probe = os.path.join(folder, filename, ".metadata")
             safetensors_metadata_probe = os.path.join(
                 folder, filename, "model.safetensors.index.json"
             )
-            if match and os.path.isfile(dcp_metadata_probe):
-                step_counts.append(int(match.group(1)))
-            elif match and os.path.isfile(safetensors_metadata_probe):
-                step_counts.append(int(match.group(1)))
+            if os.path.isfile(dcp_metadata_probe) or os.path.isfile(
+                safetensors_metadata_probe
+            ):
+                step_counts.append(step_value)
         if not step_counts:
             return -1
         return max(step_counts)
@@ -669,10 +691,22 @@ class CheckpointManager:
         )
         logger.info(f"Staging ft checkpoint took {time.monotonic() - begin} secs.")
 
-    def _ft_load(self) -> None:
+    def _ft_load(self, target_step: int | None = None) -> None:
         self.ft_dataloader_loaded = False
-        step = self._find_load_step(folder=self._ft_folder())
+        if target_step is None:
+            step = self._find_load_step(folder=self._ft_folder())
+        else:
+            step = self._find_load_step(
+                folder=self._ft_folder(), max_step=target_step
+            )
+            if step == -1:
+                logger.warning(
+                    "FT checkpoint matching step %s not found; falling back to latest available.",
+                    target_step,
+                )
+                step = self._find_load_step(folder=self._ft_folder())
         if step == -1:
+            logger.info("No FT checkpoint found to load.")
             return
 
         begin = time.monotonic()

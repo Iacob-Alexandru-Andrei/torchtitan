@@ -108,7 +108,9 @@ class _DummyCheckpointer:
             raise RuntimeError("TorchFT is not enabled for this dummy checkpointer")
         return str(self._ft_path)
 
-    def _find_load_step(self, folder: str = "") -> int:  # noqa: ARG002
+    def _find_load_step(
+        self, folder: str = "", *, max_step: int | None = None
+    ) -> int:  # noqa: ARG002
         return -1
 
 

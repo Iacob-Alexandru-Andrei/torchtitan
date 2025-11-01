@@ -1059,6 +1059,22 @@ class HyperparameterSwitchCallback(Callback):
         self.reset_momenta = tuple(params.reset_momenta)
         self.log_metrics = params.log_metrics
         self._applied_steps: set[int] = set()
+        self._pre_step_handle = None
+
+    def setup(self, context: CallbackSetupContext) -> None:  # type: ignore[override]
+        if not self.enabled:
+            return
+        optimizers = context.optimizers
+        if optimizers is None:
+            return
+        self._apply_if_past_switch(optimizers)
+        register_hook = getattr(optimizers, "register_step_pre_hook", None)
+        if callable(register_hook):
+            if self._pre_step_handle is not None:
+                self._pre_step_handle.remove()
+            def _pre_hook(opt, *args, **kwargs):
+                self._apply_if_past_switch(opt)
+            self._pre_step_handle = register_hook(_pre_hook)
 
     def on_step_end(self, context: CallbackStepContext) -> None:
         """Apply configured hyperparameter switches when their step is reached."""
@@ -1080,6 +1096,30 @@ class HyperparameterSwitchCallback(Callback):
         if step not in self.steps:
             return False
         return step not in self._applied_steps
+
+    def _apply_if_past_switch(self, optimizer: Optimizer) -> None:
+        """Apply switch values immediately when optimizer state indicates past steps."""
+        if not self.enabled or not self.steps:
+            return
+        step_count = getattr(optimizer, "_step_count", None)
+        if step_count is None:
+            return
+        try:
+            completed_steps = int(step_count)
+        except (TypeError, ValueError):
+            return
+        if completed_steps < 0:
+            return
+        for switch_step in sorted(self.steps):
+            if switch_step in self._applied_steps:
+                continue
+            if completed_steps < switch_step:
+                continue
+            if self.new_vs is not None:
+                self._update_group_values(optimizer.param_groups, "vs", self.new_vs)
+            if self.new_betas is not None:
+                self._update_group_values(optimizer.param_groups, "betas", self.new_betas)
+            self._applied_steps.add(switch_step)
 
     def _apply_switches(self, optimizers: Sequence[Optimizer], step: int) -> None:
         """Mutate optimizer hyperparameters according to the configured switches."""
@@ -1144,9 +1184,32 @@ class HyperparameterSwitchCallback(Callback):
             for inner in value:
                 self._zero_state_value(inner)
 
+    def close(self) -> None:
+        if self._pre_step_handle is not None:
+            self._pre_step_handle.remove()
+            self._pre_step_handle = None
+
 
 class FLMetricsProcessor(MetricsProcessor):
     """Extension of MetricsProcessor that wires the FL callback stack."""
+
+    @property
+    def optimizers(self):  # type: ignore[override]
+        return getattr(self, "_optimizers_ref", None)
+
+    @optimizers.setter
+    def optimizers(self, value):  # type: ignore[override]
+        object.__setattr__(self, "_optimizers_ref", value)
+        self._maybe_setup_callbacks_early()
+
+    @property
+    def model_parts(self):  # type: ignore[override]
+        return getattr(self, "_model_parts_ref", None)
+
+    @model_parts.setter
+    def model_parts(self, value):  # type: ignore[override]
+        object.__setattr__(self, "_model_parts_ref", value)
+        self._maybe_setup_callbacks_early()
 
     def __init__(  # noqa: PLR0913 - initializer wires multiple optional dependencies
         self,
@@ -1181,6 +1244,7 @@ class FLMetricsProcessor(MetricsProcessor):
             self._assign_known_callbacks(self.callbacks)
 
         self._callbacks_setup_done = False
+        self._maybe_setup_callbacks_early()
 
     def _build_callbacks_from_config(self, metrics_config: MetricsConfig) -> list[Callback]:
         callbacks: list[Callback] = []
@@ -1221,6 +1285,18 @@ class FLMetricsProcessor(MetricsProcessor):
             (cb for cb in callbacks if isinstance(cb, HyperparameterSwitchCallback)),
             None,
         )
+
+    def _maybe_setup_callbacks_early(self) -> None:
+        if not hasattr(self, "_callbacks_setup_done") or self._callbacks_setup_done:
+            return
+        if not hasattr(self, "callbacks") or not self.callbacks:
+            return
+        if self.optimizers is None:
+            return
+        model_parts = self.model_parts
+        if not model_parts:
+            return
+        self._ensure_callbacks_setup()
 
     def _init_optimizer_monitor(self, optimizer_config: OptimizerMonitorConfig) -> OptimizerMonitor | None:
         if optimizer_config.interval <= 0:
