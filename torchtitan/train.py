@@ -723,6 +723,7 @@ class Trainer(torch.distributed.checkpoint.stateful.Stateful):
         """Ensure resumed runs use post-switch optimizer hyperparameters immediately."""
         switch_cb = getattr(self.metrics_processor, "hyperparameter_switch", None)
         if not switch_cb or not getattr(switch_cb, "enabled", False):
+            logger.info("No hyperparameter switch callback present on resume.")
             return
 
         ensure_callbacks = getattr(self.metrics_processor, "_ensure_callbacks_setup", None)
@@ -733,11 +734,22 @@ class Trainer(torch.distributed.checkpoint.stateful.Stateful):
         if getattr(self.parallel_dims, "dp_cp_enabled", False):
             mesh = self.parallel_dims.world_mesh["dp_cp"]
 
+        logger.info(
+            "Evaluating pending hyperparameter switches on resume: current step=%s, configured steps=%s",
+            self.step,
+            sorted(getattr(switch_cb, "steps", ())),
+        )
+
         for switch_step in sorted(getattr(switch_cb, "steps", ())):
             if switch_step > self.step:
                 continue
 
             switch_cb._applied_steps.discard(switch_step)
+
+            logger.info(
+                "Forcing hyperparameter switch callback for configured step %s during resume",
+                switch_step,
+            )
 
             context = CallbackStepContext(
                 step=switch_step,

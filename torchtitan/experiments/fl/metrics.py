@@ -31,6 +31,7 @@ from torchtitan.experiments.fl.callbacks import (
     CallbackStepContext,
     CallbackValidationContext,
 )
+from torchtitan.tools.logging import logger
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -1071,6 +1072,7 @@ class HyperparameterSwitchCallback(Callback):
 
         self._apply_switches(optimizers, context.step)
         self._log_switch_metrics(context)
+        logger.info("Hyperparameter switch callback applied at step %s", context.step)
         self._applied_steps.add(context.step)
 
     def _should_apply(self, step: int) -> bool:
