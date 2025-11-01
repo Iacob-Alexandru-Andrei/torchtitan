@@ -633,6 +633,7 @@ class Trainer(torch.distributed.checkpoint.stateful.Stateful):
         logger.info(
             f"[RESUME DEBUG] After checkpoint load: loaded={loaded}, self.step = {self.step}"
         )
+        self._apply_pending_hyperparameter_switches_on_resume()
         logger.info(f"Training starts at step {self.step + 1}")
 
         leaf_folder = (
@@ -716,6 +717,31 @@ class Trainer(torch.distributed.checkpoint.stateful.Stateful):
 
     def should_continue_training(self) -> bool:
         return self.step < self.job_config.training.steps
+
+    def _apply_pending_hyperparameter_switches_on_resume(self) -> None:
+        """Ensure resumed runs use post-switch optimizer hyperparameters immediately."""
+        switch_cb = getattr(self.metrics_processor, "hyperparameter_switch", None)
+        if not switch_cb or not getattr(switch_cb, "enabled", False):
+            return
+
+        optimizer_groups = getattr(self.optimizers, "param_groups", None)
+        if not optimizer_groups:
+            return
+
+        for switch_step in sorted(getattr(switch_cb, "steps", ())):
+            if switch_step > self.step or switch_step in switch_cb._applied_steps:
+                continue
+
+            if switch_cb.new_betas is not None:
+                switch_cb._update_group_values(optimizer_groups, "betas", switch_cb.new_betas)
+            if switch_cb.new_vs is not None:
+                switch_cb._update_group_values(optimizer_groups, "vs", switch_cb.new_vs)
+
+            switch_cb._applied_steps.add(switch_step)
+
+            logger.info(
+                f"Applied pending hyperparameter switch at step {switch_step} on resume"
+            )
 
     def state_dict(self) -> dict[str, Any]:
         return {"step": self.step, "ntokens_seen": self.ntokens_seen}
