@@ -98,8 +98,9 @@ context_parallel_degree = 1
 
 [checkpoint]
 enable = true
+keep_latest_k = 20
 folder = "checkpoints"
-interval = 512
+interval = 1024
 last_save_model_only = false
 export_dtype = "float32"
 async_mode = "async_with_pinned_mem"  # ["disabled", "async", "async_with_pinned_mem"]
@@ -127,7 +128,7 @@ filter_fqns = ["output"]
 [fault_tolerance]
 enable = false
 process_group = "gloo"
-process_group_timeout_ms = 10000
+process_group_timeout_ms = 999999
 replica_id = 0
 group_size = 2
 min_replica_size = 2

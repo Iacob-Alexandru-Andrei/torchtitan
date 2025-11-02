@@ -27,20 +27,20 @@ hf_assets_path = "./tests/assets/tokenizer"
 
 
 [optimizer]
-name = "QHADOPT"
+name = "QHAdamW"
 vs = [1.0]
 lr = 0.001
-eps = 1e-6
+eps = 1e-8
 weight_decay = 0.0
-betas = [0.95,0.999]
+betas = [0.9,0.999]
 implementation = "for-loop"
 
-# [optimizer.desloc]
-# enabled = false
-# param_sync_every = 32
-# optimizer_sync_every = [32,32]
-# backup_device = "cpu"
-# pin_memory = true
+[optimizer.desloc]
+enabled = false
+param_sync_every = 32
+optimizer_sync_every = [32,32]
+backup_device = "cpu"
+pin_memory = true
 
 [fl_metrics.optimizer_monitor]
 interval = 16
@@ -75,14 +75,14 @@ switch_scale = 1.0
 enabled = false
 steps = [2048]
 new_vs = [1.0]
-new_betas = [0.95,0.999]
+new_betas = [0.9,0.999]
 # reset_momenta = ["exp_avg"]
 
 [training]
 local_batch_size = 16
 global_batch_size = 1024
 seq_len = 2048
-max_norm = 1.0  # grad norm clipping
+max_norm = 0.1  # grad norm clipping
 steps = 38912
 dataset = "c4_test"  # supported datasets: c4_test (2K), c4 (177M)
 
@@ -110,6 +110,7 @@ enable = true
 bucket = "checkpoints"
 prefix = ""  # Root of bucket
 download_on_start = true
+resume_from_run_step = "adamw-1B-20251030-151539/step-2048"
 # run_uuid and remote_checkpoint_folder will be set via RUN_UUID environment variable
 
 [activation_checkpoint]
@@ -126,11 +127,11 @@ precompute_float8_dynamic_scale_for_fsdp = false
 filter_fqns = ["output"]
 
 [fault_tolerance]
-enable = false
-process_group = "gloo"
+enable = true
+process_group = "nccl"
 process_group_timeout_ms = 999999
 replica_id = 0
-group_size = 2
+group_size = 4
 min_replica_size = 2
 sync_steps = 32
 semi_sync_method = "desloc"  # Options: "diloco", "local_sgd", or comment out for async quorum
@@ -140,7 +141,7 @@ enable = true
 dataset = "c4_validation"
 local_batch_size = 16
 freq = 2048
-steps = 512 
+steps = 512
 
 [unigram_metric]
 enable = true

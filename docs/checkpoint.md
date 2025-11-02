@@ -9,6 +9,7 @@ In your `torchtitan` training config, ensure that under `[checkpoint]`, `enable`
 ```
 [checkpoint]
 enable = true
+keep_latest_k = 20
 folder = "checkpoint"
 interval = 500
 ```
@@ -17,6 +18,7 @@ By setting `last_save_model_only` to `True`, the checkpoint will only contain th
 ```
 [checkpoint]
 enable = true
+keep_latest_k = 20
 last_save_model_only = true
 ```
 
@@ -25,6 +27,7 @@ The default model states are in `float32`. You can choose to export the checkpoi
 ```
 [checkpoint]
 enable = true
+keep_latest_k = 20
 last_save_model_only = true
 export_dtype = "bfloat16"
 ```
@@ -35,6 +38,7 @@ This parameter takes a list of string that should be excluded from loading.
 ```
 [checkpoint]
 enable = true
+keep_latest_k = 20
 exclude_from_loading = ["data_loader", "lr_scheduler"]
 ```
 When used in command line, the parameter should be a comma-separated list of strings. For example: `--checkpoint.exclude_from_loading data_loader,lr_scheduler`.
@@ -43,6 +47,7 @@ When used in command line, the parameter should be a comma-separated list of str
 ```
 [checkpoint]
 enable = true
+keep_latest_k = 20
 folder = "checkpoint"
 interval = 10
 load_step = 5
@@ -87,6 +92,7 @@ This guide will walk you through the steps required to convert a checkpoint from
 ```
 [checkpoint]
 enable = true
+keep_latest_k = 20
 folder = "checkpoint"
 interval = 10
 last_save_model_only = true
