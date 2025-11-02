@@ -36,7 +36,7 @@ betas = [0.9,0.999]
 implementation = "for-loop"
 
 [optimizer.desloc]
-enabled = false
+enabled = true
 param_sync_every = 32
 optimizer_sync_every = [32,32]
 backup_device = "cpu"
