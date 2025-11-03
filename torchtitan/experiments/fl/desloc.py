@@ -257,7 +257,7 @@ class _ParameterFragment(_BaseFragment):
                 backup = self._original_parameters[name]
                 backup.copy_(reference.to(backup.device, dtype=backup.dtype))
             self._reference_pending.clear()
-            self._reference_synced = False
+            self._reference_synced = True
 
         if self._outer_optimizer is None:
             with torch.no_grad():
