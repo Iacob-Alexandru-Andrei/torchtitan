@@ -147,6 +147,10 @@ class _BaseFragment:
     def perform_sync(self) -> None:
         raise NotImplementedError
 
+    def initial_sync(self) -> None:
+        """Hook for the first synchronization (defaults to perform_sync)."""
+        self.perform_sync()
+
     def save_state(self) -> None:
         raise NotImplementedError
 
@@ -346,6 +350,19 @@ class _OuterOptimizingParameterFragment(_ParameterFragment):
 
         work_items.extend(super().prepare_sync())
         return work_items
+
+    def initial_sync(self) -> None:
+        with torch.no_grad():
+            if self._pending_reference_sync is not None:
+                for _work, name, reduced in self._pending_reference_sync:
+                    self._original_parameters[name].copy_(
+                        reduced.to(self._original_parameters[name].device)
+                    )
+                self._pending_reference_sync = None
+                self._reference_synchronized = True
+
+        super().perform_sync()
+        self._sync_entries.clear()
 
     def perform_sync(self) -> None:
         ref_norm_sq = 0.0
@@ -686,14 +703,17 @@ class DesLocController:
 
         if not self._initial_sync_done:
             ready_fragments = list(self._fragments)
-            self._initial_sync_done = True
+            initial_sync = True
         else:
             ready_fragments = [fragment for fragment in self._fragments if fragment.tick()]
+            initial_sync = False
 
         if ready_fragments:
-            self._sync(ready_fragments)
+            committed = self._sync(ready_fragments, initial=initial_sync)
+            if initial_sync and committed:
+                self._initial_sync_done = True
 
-    def _sync(self, fragments: list[_BaseFragment]) -> None:
+    def _sync(self, fragments: list[_BaseFragment], *, initial: bool) -> bool:
         self._manager.disallow_state_dict_read()
         try:
             try:
@@ -711,12 +731,13 @@ class DesLocController:
                 for fragment in fragments:
                     fragment.restore_state()
                     fragment.reset()
-                return
+                return False
 
             self._prepare_sync(fragments)
-            self._perform_sync(fragments)
+            committed = self._perform_sync(fragments, initial=initial)
             for fragment in fragments:
                 fragment.reset()
+            return committed
         finally:
             self._manager.allow_state_dict_read()
 
@@ -725,7 +746,7 @@ class DesLocController:
         for fragment in fragments:
             self._allreduce_work.extend(fragment.prepare_sync())
 
-    def _perform_sync(self, fragments: list[_BaseFragment]) -> None:
+    def _perform_sync(self, fragments: list[_BaseFragment], *, initial: bool) -> bool:
         for work in self._allreduce_work:
             work.wait()
 
@@ -733,11 +754,16 @@ class DesLocController:
 
         if commit_allowed:
             for fragment in fragments:
-                fragment.perform_sync()
+                if initial:
+                    fragment.initial_sync()
+                else:
+                    fragment.perform_sync()
                 fragment.save_state()
+            return True
         else:
             for fragment in fragments:
                 fragment.restore_state()
+            return False
 
 
 class DesLocFTOptimizersContainer(FTOptimizersContainer):
