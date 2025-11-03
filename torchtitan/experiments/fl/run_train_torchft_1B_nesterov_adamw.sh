@@ -42,7 +42,7 @@ export S3_ENDPOINT_URL='http://taranaki.cl.cam.ac.uk:9000'
 echo "PYTHONPATH=${PYTHONPATH:-}"
 
 # Configuration
-NGPU=${1:-"3"}  # Number of GPUs / replicas (default: 2)
+NGPU=${1:-"4"}  # Number of GPUs / replicas (default: 2)
 CONFIG_FILE=${2:-"./torchtitan/experiments/fl/configs/mosaic_mup_1B_adamw_nesterov_torchft.toml"}
 TRAIN_FILE=${TRAIN_FILE:-"torchtitan.experiments.fl.train"}
 
