@@ -80,7 +80,7 @@ class DES_LOC_OUTER(Optimizer):
     def step(self, closure=None):
         return self._inner.step(closure)
 
-    def zero_grad(self, set_to_none: bool = True) -> None:
+    def zero_grad(self, set_to_none: bool = False) -> None:
         self._inner.zero_grad(set_to_none=set_to_none)
 
     def state_dict(self) -> dict[str, Any]:

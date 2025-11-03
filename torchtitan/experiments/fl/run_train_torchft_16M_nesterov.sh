@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH -c 8
 #SBATCH -w ngongotaha
-#SBATCH --gres=gpu:3
+#SBATCH --gres=gpu:4
 #SBATCH --job-name=tune_lr_torchft
 #SBATCH --tasks-per-node=1
 #SBATCH --output=%x-%j.out
@@ -45,17 +45,17 @@ else
 fi
 
 # Configuration
-NGPU=${1:-"3"}  # Number of GPUs / replicas (default: 2)
+NGPU=${1:-"4"}  # Number of GPUs / replicas (default: 2)
 CONFIG_FILE=${2:-"./torchtitan/experiments/fl/configs/mosaic_mup_16M_torchft_nesterov.toml"}
 TRAIN_FILE=${TRAIN_FILE:-"torchtitan.experiments.fl.train"}
 
 # TorchFT lighthouse configuration
 LIGHTHOUSE_HOST="localhost"
-LIGHTHOUSE_PORT="29511"
+LIGHTHOUSE_PORT="29512"
 LIGHTHOUSE_URL="http://${LIGHTHOUSE_HOST}:${LIGHTHOUSE_PORT}"
 
 # Lighthouse settings
-MIN_REPLICAS=${MIN_REPLICAS:-3}  # Minimum replicas required to start training
+MIN_REPLICAS=${MIN_REPLICAS:-4}  # Minimum replicas required to start training
 QUORUM_TICK_MS=${QUORUM_TICK_MS:-100}  # Quorum tick interval in milliseconds
 
 # Print current working directory
@@ -156,7 +156,7 @@ for ((replica_id=0; replica_id<NGPU; replica_id++)); do
         cd "${REPO_ROOT}"
         export CUDA_VISIBLE_DEVICES="${gpu_id}"
         export PYTORCH_ALLOC_CONF="expandable_segments:True"
-        rdzv_port=$((29605 + replica_id))
+        rdzv_port=$((29610 + replica_id))
         uv run --no-sync torchrun \
             --nproc_per_node=1 \
             --rdzv_backend c10d \

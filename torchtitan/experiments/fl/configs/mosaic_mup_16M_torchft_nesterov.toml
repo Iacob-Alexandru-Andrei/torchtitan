@@ -41,6 +41,7 @@ param_sync_every = 32
 optimizer_sync_every = [32,32]
 backup_device = "cpu"
 pin_memory = true
+log_outer_metrics = true
 
 # DES-LOC outer optimizer drives server parameter updates.
 # Adjust lr/momentum here to tune the global update strength.
@@ -49,7 +50,7 @@ target = "SGD"
 
 [optimizer.desloc.outer_optimizer.kwargs]
 lr = 1.0          
-momentum = 0.7    
+momentum = 0.7   
 nesterov = true
 
 [fl_metrics.optimizer_monitor]

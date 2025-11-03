@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH -c 8
 #SBATCH -w ngongotaha
-#SBATCH --gres=gpu:4
+#SBATCH --gres=gpu:3
 #SBATCH --job-name=tune_lr_torchft
 #SBATCH --tasks-per-node=1
 #SBATCH --output=%x-%j.out
@@ -42,7 +42,7 @@ export S3_ENDPOINT_URL='http://taranaki.cl.cam.ac.uk:9000'
 echo "PYTHONPATH=${PYTHONPATH:-}"
 
 # Configuration
-NGPU=${1:-"4"}  # Number of GPUs / replicas (default: 2)
+NGPU=${1:-"3"}  # Number of GPUs / replicas (default: 2)
 CONFIG_FILE=${2:-"./torchtitan/experiments/fl/configs/mosaic_mup_1B_adamw_nesterov_torchft.toml"}
 TRAIN_FILE=${TRAIN_FILE:-"torchtitan.experiments.fl.train"}
 
@@ -52,7 +52,7 @@ LIGHTHOUSE_PORT="29510"
 LIGHTHOUSE_URL="http://${LIGHTHOUSE_HOST}:${LIGHTHOUSE_PORT}"
 
 # Lighthouse settings
-MIN_REPLICAS=${MIN_REPLICAS:-4}  # Minimum replicas required to start training
+MIN_REPLICAS=${MIN_REPLICAS:-3}  # Minimum replicas required to start training
 QUORUM_TICK_MS=${QUORUM_TICK_MS:-100}  # Quorum tick interval in milliseconds
 
 # Print current working directory

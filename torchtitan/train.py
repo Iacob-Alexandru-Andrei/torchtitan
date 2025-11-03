@@ -304,6 +304,17 @@ class Trainer(torch.distributed.checkpoint.stateful.Stateful):
         # Initialize trainer states that will be saved in checkpoint.
         # These attributes must be initialized before checkpoint loading.
         self.step = 0
+        set_desloc_logger = getattr(
+            self.optimizers, "set_desloc_metrics_logger", None
+        )
+        if callable(set_desloc_logger):
+
+            def _log_desloc_metrics(metrics: dict[str, float]) -> None:
+                if not metrics:
+                    return
+                self.metrics_processor.logger.log(metrics, self.step)
+
+            set_desloc_logger(_log_desloc_metrics)
         self.ntokens_seen = 0
 
         self.checkpointer = CheckpointManager(

@@ -41,13 +41,14 @@ param_sync_every = 32
 optimizer_sync_every = [32,32]
 backup_device = "cpu"
 pin_memory = true
+log_outer_metrics = true
 
 [optimizer.desloc.outer_optimizer]
 target = "SGD"
 
 [optimizer.desloc.outer_optimizer.kwargs]
 lr = 1.0          
-momentum = 0.7    
+momentum = 0.9    
 nesterov = true
 
 [fl_metrics.optimizer_monitor]
