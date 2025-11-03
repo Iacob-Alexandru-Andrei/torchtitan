@@ -225,6 +225,9 @@ class _ParameterFragment(_BaseFragment):
                 _copy_into_tensor(param.data, self._original_parameters[name])
 
     def prepare_sync(self) -> list[Any]:
+        if self._outer_optimizer is not None and not self._reference_synced:
+            # Ensure backups reflect the current model weights (e.g. after checkpoint load).
+            self.save_state()
         self._averaged_parameters.clear()
         work_items: list[Any] = []
         for name, param in self._model.named_parameters():
@@ -254,7 +257,7 @@ class _ParameterFragment(_BaseFragment):
                 backup = self._original_parameters[name]
                 backup.copy_(reference.to(backup.device, dtype=backup.dtype))
             self._reference_pending.clear()
-            self._reference_synced = True
+            self._reference_synced = False
 
         if self._outer_optimizer is None:
             with torch.no_grad():
@@ -321,9 +324,15 @@ class _ParameterFragment(_BaseFragment):
 
     def register_state_dict_fn(self) -> None:
         def load_fn(state_dict: dict[str, torch.Tensor]) -> None:
-            for name, tensor in state_dict.items():
-                if name in self._original_parameters:
-                    self._original_parameters[name].copy_(tensor)
+            if state_dict:
+                for name, tensor in state_dict.items():
+                    if name in self._original_parameters:
+                        self._original_parameters[name].copy_(tensor)
+            else:
+                # Older checkpoints might not have stored the DES-LOC state; fall back to fresh capture.
+                self.save_state()
+            self._reference_synced = False
+            self._reference_pending.clear()
 
         def save_fn() -> dict[str, torch.Tensor]:
             return self._original_parameters

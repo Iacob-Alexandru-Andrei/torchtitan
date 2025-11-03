@@ -50,7 +50,7 @@ target = "SGD"
 
 [optimizer.desloc.outer_optimizer.kwargs]
 lr = 1.0          
-momentum = 0.7   
+momentum = 0.5   
 nesterov = true
 
 [fl_metrics.optimizer_monitor]
