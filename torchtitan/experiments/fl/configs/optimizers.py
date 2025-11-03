@@ -7,12 +7,15 @@
 
 from __future__ import annotations
 
+import importlib
 from dataclasses import dataclass, field
-from typing import cast, Literal
+from typing import Any, cast, Literal
 
 import torch
 
 from torchtitan.config import Optimizer as BaseOptimizer
+
+from torch.optim import Optimizer
 
 # Default values from BaseOptimizer
 _MIN_BETAS_LENGTH = 2
@@ -46,6 +49,9 @@ class DesLocConfig:
     quorum_timeout_seconds: int = 60
     """Timeout (seconds) to wait for TorchFT quorum formation during DES-LOC sync."""
 
+    outer_optimizer: "DesLocOuterOptimizerConfig | None" = None
+    """Optional optimizer to apply averaged pseudo-gradients to global parameters."""
+
     def resolved_backup_device(self) -> torch.device | None:
         """Convert the configured ``backup_device`` into a ``torch.device``."""
         device = self.backup_device
@@ -68,6 +74,36 @@ class DesLocConfig:
         if isinstance(spec, list):
             return [int(v) for v in spec]
         return int(spec)
+
+    def normalized_outer_optimizer(self) -> "DesLocOuterOptimizerConfig | None":
+        """Return a normalized outer optimizer configuration if provided."""
+        outer = self.outer_optimizer
+        if outer is None:
+            return None
+        if isinstance(outer, DesLocOuterOptimizerConfig):
+            if outer.target is None:
+                if outer.kwargs:
+                    msg = "desloc.outer_optimizer.kwargs requires a target optimizer."
+                    raise ValueError(msg)
+                return None
+            return outer
+        if isinstance(outer, dict):
+            target = outer.get("target")
+            kwargs = outer.get("kwargs", {})
+            if target is None:
+                if kwargs:
+                    msg = "desloc.outer_optimizer.kwargs requires a target optimizer."
+                    raise ValueError(msg)
+                return None
+            if not isinstance(kwargs, dict):
+                msg = "desloc.outer_optimizer.kwargs must be a mapping."
+                raise TypeError(msg)
+            return DesLocOuterOptimizerConfig(target=target, kwargs=dict(kwargs))
+        msg = (
+            "desloc.outer_optimizer must be a DesLocOuterOptimizerConfig, mapping, or None; "
+            f"received {type(outer)!r}."
+        )
+        raise TypeError(msg)
 
 
 @dataclass
@@ -135,3 +171,45 @@ class MosaicOptimizerConfig(BaseOptimizer):
 
         # Construct betas: (beta1, beta1, ..., beta2) with num_moments beta1s
         return tuple([self.beta1] * num_moments + [self.beta2])
+
+
+@dataclass(frozen=True)
+class DesLocOuterOptimizerConfig:
+    """Serializable configuration for DES-LOC's outer optimizer selection."""
+
+    target: str | type[Optimizer] | None = None
+    kwargs: dict[str, object] = field(default_factory=dict)
+
+    def resolve_optimizer_cls(self) -> type[Optimizer]:
+        """Materialize the configured optimizer class."""
+        target = self.target
+        if target is None:
+            msg = "desloc.outer_optimizer.target must be configured before use."
+            raise ValueError(msg)
+        if isinstance(target, type):
+            if not issubclass(target, Optimizer):
+                msg = f"Configured outer optimizer class {target!r} is not an Optimizer."
+                raise TypeError(msg)
+            return target
+
+        if not isinstance(target, str):
+            msg = (
+                "desloc.outer_optimizer.target must be a string or Optimizer subclass; "
+                f"received {type(target)!r}."
+            )
+            raise TypeError(msg)
+
+        module_path, _, attr = target.rpartition(".")
+        if module_path:
+            module = importlib.import_module(module_path)
+            optimizer_cls = getattr(module, attr, None)
+        else:
+            optimizer_cls = getattr(torch.optim, attr, None)
+
+        if optimizer_cls is None or not issubclass(optimizer_cls, Optimizer):
+            msg = (
+                f"Failed to resolve DES-LOC outer optimizer '{target}'. Ensure it refers "
+                "to a torch.optim.Optimizer subclass."
+            )
+            raise ValueError(msg)
+        return optimizer_cls

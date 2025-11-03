@@ -10,10 +10,11 @@ from __future__ import annotations
 import logging
 import sys
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, field, replace
 from datetime import timedelta
 from types import ModuleType
 from typing import Any, TYPE_CHECKING
+import math
 
 import torch
 from torch import nn
@@ -37,7 +38,10 @@ if TYPE_CHECKING:
     from torch.optim import Optimizer
 
     from torchtitan.components.ft.manager import FTManager
-    from torchtitan.experiments.fl.configs.optimizers import DesLocConfig
+    from torchtitan.experiments.fl.configs.optimizers import (
+        DesLocConfig,
+        DesLocOuterOptimizerConfig,
+    )
 
 logger = logging.getLogger(__name__)
 
@@ -80,6 +84,7 @@ class DesLocControllerConfig:
     pin_memory: bool
     name_prefix: str
     quorum_timeout_seconds: int
+    outer_optimizer: "DesLocOuterOptimizerConfig | None" = None
 
 
 @dataclass(frozen=True)
@@ -93,6 +98,7 @@ class DesLocFTOptimizersConfig:
     desloc_config: DesLocConfig
     use_ft_optimizer: bool = True
     param_groups: list[dict[str, Any]] | None = None
+    outer_optimizer: "DesLocOuterOptimizerConfig | None" = None
 
 
 def _extract_local_tensor(tensor: torch.Tensor) -> torch.Tensor:
@@ -161,9 +167,19 @@ class _ParameterFragment(_BaseFragment):
 
         self._original_parameters: dict[str, torch.Tensor] = {}
         self._averaged_parameters: list[torch.Tensor] = []
+        self._await_snapshot_completion = False
+        self._snapshot_events: dict[str, torch.cuda.Event | None] = {}
 
         self._init_backup_storage()
         self.save_state()
+
+    @property
+    def name_prefix(self) -> str:
+        return self._name_prefix
+
+    @property
+    def backup_device(self) -> torch.device | None:
+        return self._backup_device
 
     def _init_backup_storage(self) -> None:
         for name, param in self._model.named_parameters():
@@ -185,9 +201,39 @@ class _ParameterFragment(_BaseFragment):
     def save_state(self) -> None:
         with torch.no_grad():
             for name, param in self._model.named_parameters():
-                self._original_parameters[name].copy_(
-                    _extract_local_tensor(param.data), non_blocking=True
+                local_tensor = _extract_local_tensor(param.data)
+                async_copy = (
+                    self._pin_memory
+                    and torch.cuda.is_available()
+                    and isinstance(local_tensor, torch.Tensor)
+                    and local_tensor.device.type == "cuda"
+                    and not self._await_snapshot_completion
                 )
+                self._original_parameters[name].copy_(
+                    local_tensor, non_blocking=async_copy
+                )
+                self._record_snapshot_event(name, param, async_copy)
+
+    def _record_snapshot_event(
+        self, name: str, param: torch.Tensor, async_copy: bool
+    ) -> None:
+        if not self._await_snapshot_completion or not async_copy:
+            self._snapshot_events.pop(name, None)
+            return
+        if param.device.type != "cuda" or not torch.cuda.is_available():
+            self._snapshot_events.pop(name, None)
+            return
+        event = torch.cuda.Event(device=param.device)
+        event.record(torch.cuda.current_stream(param.device))
+        self._snapshot_events[name] = event
+
+    def _wait_for_snapshot_completion(self, name: str) -> None:
+        if not self._await_snapshot_completion:
+            return
+        event = self._snapshot_events.get(name)
+        if event is not None:
+            event.synchronize()
+            self._snapshot_events.pop(name, None)
 
     def restore_state(self) -> None:
         with torch.no_grad():
@@ -224,6 +270,149 @@ class _ParameterFragment(_BaseFragment):
             load_fn,
             save_fn,
         )
+
+
+class _OuterOptimizingParameterFragment(_ParameterFragment):
+    """Parameter synchronizer that applies an outer optimizer to averaged pseudo-gradients."""
+
+    def __init__(
+        self,
+        config: ParameterFragmentConfig,
+        outer_spec: "DesLocOuterOptimizerConfig",
+    ) -> None:
+        self._outer_spec = outer_spec
+        if config.pin_memory:
+            config = replace(config, pin_memory=False)
+        super().__init__(config)
+        optimizer_cls = self._outer_spec.resolve_optimizer_cls()
+        params = [p for p in self._model.parameters() if p.requires_grad]
+        if not params:
+            msg = "DES-LOC outer optimizer requires at least one trainable parameter."
+            raise ValueError(msg)
+        self._outer_optimizer = optimizer_cls(params, **self._outer_spec.kwargs)
+        self._sync_entries: list[tuple[str, nn.Parameter, torch.Tensor]] = []
+        self._await_snapshot_completion = True
+        # Re-capture state with snapshot completion tracking enabled
+        self.save_state()
+        self._sync_stats: dict[str, float] = {}
+        self._reference_synchronized = False
+        self._pending_reference_sync: list[tuple[Any, str, torch.Tensor]] | None = None
+        self._pending_reference_sync: list[tuple[Any, str, torch.Tensor]] | None = None
+
+    @property
+    def outer_optimizer(self) -> Optimizer:
+        return self._outer_optimizer
+
+    def register_state_dict_fn(self) -> None:
+        super().register_state_dict_fn()
+
+        def load_outer(state_dict: dict[str, Any]) -> None:
+            self._outer_optimizer.load_state_dict(state_dict)
+
+        def save_outer() -> dict[str, Any]:
+            return self._outer_optimizer.state_dict()
+
+        self._manager.register_state_dict_fn(
+            f"{self._name_prefix}_outer_optimizer",
+            load_outer,
+            save_outer,
+        )
+
+    def _synchronize_reference_buffers(self) -> None:
+        """Ensure all replicas agree on the captured reference parameters."""
+        # Reference synchronization is performed lazily during the first sync.
+        return
+
+    def prepare_sync(self) -> list[Any]:
+        self._sync_entries.clear()
+        work_items: list[Any] = []
+
+        if not self._reference_synchronized:
+            self._pending_reference_sync = []
+            for name, param in self._model.named_parameters():
+                if not param.requires_grad:
+                    continue
+                self._wait_for_snapshot_completion(name)
+                reference = self._original_parameters[name].to(
+                    device=param.device,
+                    dtype=param.dtype,
+                    copy=True,
+                )
+                work = self._manager.allreduce(reference)
+                self._pending_reference_sync.append((work, name, reference))
+                work_items.append(work)
+        else:
+            self._pending_reference_sync = None
+
+        work_items.extend(super().prepare_sync())
+        return work_items
+
+    def perform_sync(self) -> None:
+        ref_norm_sq = 0.0
+        local_norm_sq = 0.0
+        pseudo_norm_sq = 0.0
+
+        with torch.no_grad():
+            if self._pending_reference_sync is not None:
+                for _work, name, reduced in self._pending_reference_sync:
+                    self._original_parameters[name].copy_(
+                        reduced.to(self._original_parameters[name].device)
+                    )
+                self._pending_reference_sync = None
+                self._reference_synchronized = True
+
+            super(_OuterOptimizingParameterFragment, self).restore_state()
+
+            averaged_iter = iter(self._averaged_parameters)
+            self._sync_entries.clear()
+            for name, param in self._model.named_parameters():
+                avg_param = next(averaged_iter)
+                avg_param = avg_param.to(device=param.device, dtype=param.dtype)
+                reference = self._original_parameters[name].to(
+                    device=avg_param.device, dtype=avg_param.dtype
+                )
+                grad = reference - avg_param
+                ref_norm_sq += reference.pow(2).sum().item()
+                local_norm_sq += avg_param.pow(2).sum().item()
+                pseudo_norm_sq += grad.pow(2).sum().item()
+                if param.requires_grad:
+                    param.grad = grad
+                    self._sync_entries.append((name, param, grad))
+
+        self._outer_optimizer.step()
+        self._outer_optimizer.zero_grad(set_to_none=True)
+
+        with torch.no_grad():
+            for _name, param, grad in self._sync_entries:
+                param.grad = grad
+
+        post_norm_sq = sum(
+            grad.pow(2).sum().item() for _name, _param, grad in self._sync_entries
+        )
+
+        self._sync_stats = {
+            "ref_pre": math.sqrt(ref_norm_sq),
+            "local_pre": math.sqrt(local_norm_sq),
+            "pseudo_pre": math.sqrt(pseudo_norm_sq),
+        }
+
+        logger.debug(
+            (
+                "DES-LOC outer sync stats: ref_norm(pre)=%.6f local_norm(pre)=%.6f "
+                "pseudo_norm(pre)=%.6f pseudo_norm(post)=%.6f"
+            ),
+            self._sync_stats["ref_pre"],
+            self._sync_stats["local_pre"],
+            self._sync_stats["pseudo_pre"],
+            math.sqrt(post_norm_sq),
+        )
+
+        self._sync_entries.clear()
+
+    def restore_state(self) -> None:
+        super().restore_state()
+        self._outer_optimizer.zero_grad(set_to_none=True)
+        self._sync_entries.clear()
 
 
 class _OptimizerStateFragment(_BaseFragment):
@@ -334,12 +523,31 @@ class DesLocController:
             pin_memory=config.pin_memory,
             name_prefix=config.name_prefix,
         )
-        self._param_fragment = _ParameterFragment(param_fragment_cfg)
+        if config.outer_optimizer is not None:
+            self._param_fragment = _OuterOptimizingParameterFragment(
+                param_fragment_cfg, config.outer_optimizer
+            )
+        else:
+            self._param_fragment = _ParameterFragment(param_fragment_cfg)
         self._param_fragment.register_state_dict_fn()
 
         self._fragments: list[_BaseFragment] = [self._param_fragment]
         self._allreduce_work: list[Any] = []
         self._is_opt_init = False
+        self._initial_sync_done = False
+        self._outer_optimizer_state_keys: set[str] = set()
+
+        def _load_initial_flag(state: dict[str, Any]) -> None:
+            self._initial_sync_done = bool(state.get("done", False))
+
+        def _save_initial_flag() -> dict[str, Any]:
+            return {"done": int(self._initial_sync_done)}
+
+        self._manager.register_state_dict_fn(
+            f"{self._name_prefix}_initial_sync",
+            _load_initial_flag,
+            _save_initial_flag,
+        )
 
         self._hook = config.optimizer.register_step_post_hook(self._step_post_hook)
 
@@ -433,6 +641,37 @@ class DesLocController:
             self._fragments.append(fragment)
 
         self._is_opt_init = True
+        self._maybe_init_outer_optimizer_fragments()
+
+    def _maybe_init_outer_optimizer_fragments(self) -> None:
+        if not isinstance(self._param_fragment, _OuterOptimizingParameterFragment):
+            return
+
+        outer_optimizer = self._param_fragment.outer_optimizer
+        discovered_keys: set[str] = set()
+        for state in outer_optimizer.state.values():
+            for key, value in state.items():
+                if isinstance(value, torch.Tensor) and value.numel() > 1:
+                    discovered_keys.add(str(key))
+
+        new_keys = sorted(discovered_keys - self._outer_optimizer_state_keys)
+        if not new_keys:
+            return
+
+        for key in new_keys:
+            fragment_config = OptimizerFragmentConfig(
+                manager=self._manager,
+                model=self._model,
+                optimizer=outer_optimizer,
+                state_key=key,
+                sync_every=self._param_fragment.sync_every,
+                backup_device=self._backup_device,
+                name_prefix=f"{self._param_fragment.name_prefix}_outer_{key}",
+            )
+            fragment = _OptimizerStateFragment(fragment_config)
+            fragment.register_state_dict_fn()
+            self._fragments.append(fragment)
+            self._outer_optimizer_state_keys.add(key)
 
     def _step_post_hook(
         self,
@@ -442,8 +681,14 @@ class DesLocController:
     ) -> None:
         if not self._is_opt_init:
             self._lazy_init_optimizer_fragments()
+        else:
+            self._maybe_init_outer_optimizer_fragments()
 
-        ready_fragments = [fragment for fragment in self._fragments if fragment.tick()]
+        if not self._initial_sync_done:
+            ready_fragments = list(self._fragments)
+            self._initial_sync_done = True
+        else:
+            ready_fragments = [fragment for fragment in self._fragments if fragment.tick()]
 
         if ready_fragments:
             self._sync(ready_fragments)
@@ -515,6 +760,9 @@ class DesLocFTOptimizersContainer(FTOptimizersContainer):
 
         backup_device = desloc_config.resolved_backup_device()
         optimizer_sync = desloc_config.normalized_optimizer_sync()
+        outer_optimizer_spec = (
+            config.outer_optimizer or desloc_config.normalized_outer_optimizer()
+        )
 
         self._desloc_controllers: list[DesLocController] = []
         for idx, (model, optimizer) in enumerate(
@@ -530,6 +778,7 @@ class DesLocFTOptimizersContainer(FTOptimizersContainer):
                 pin_memory=desloc_config.pin_memory,
                 name_prefix=f"desloc_{idx}",
                 quorum_timeout_seconds=desloc_config.quorum_timeout_seconds,
+                outer_optimizer=outer_optimizer_spec,
             )
             controller = DesLocController(controller_config)
             self._desloc_controllers.append(controller)

@@ -10,6 +10,7 @@ from .adopt import ADOPT
 from .aggmo_adamw import AggMoAdamW
 from .aggmo_adopt import AggMoAdopt
 from .decoupled_adamw import DecoupledAdamW
+from .desloc_outer import DES_LOC_OUTER
 from .qhadamw import QHAdamW
 from .qhadopt import QHADOPT
 
@@ -19,5 +20,6 @@ __all__ = [
     "AggMoAdamW",
     "AggMoAdopt",
     "DecoupledAdamW",
+    "DES_LOC_OUTER",
     "QHAdamW",
 ]

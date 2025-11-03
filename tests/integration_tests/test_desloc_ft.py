@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import sys
+from dataclasses import dataclass
 from importlib import util as importlib_util
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
@@ -54,6 +55,15 @@ class _DummyManager:
         self._state_dict_registry[key] = (load_fn, save_fn)
 
 
+@dataclass(frozen=True)
+class _TestOuterOptimizerConfig:
+    target: str
+    kwargs: dict[str, float]
+
+    def resolve_optimizer_cls(self):
+        return getattr(torch.optim, self.target)
+
+
 class _TestDeslocConfig:
     def __init__(
         self,
@@ -64,6 +74,7 @@ class _TestDeslocConfig:
         backup_device="cpu",
         pin_memory: bool = True,
         quorum_timeout_seconds: int = 60,
+        outer_optimizer: _TestOuterOptimizerConfig | None = None,
     ) -> None:
         self.enabled = enabled
         self.param_sync_every = param_sync_every
@@ -71,12 +82,16 @@ class _TestDeslocConfig:
         self.backup_device = backup_device
         self.pin_memory = pin_memory
         self.quorum_timeout_seconds = quorum_timeout_seconds
+        self.outer_optimizer = outer_optimizer
 
     def resolved_backup_device(self) -> torch.device | None:
         return None if self.backup_device is None else torch.device(self.backup_device)
 
     def normalized_optimizer_sync(self):
         return self.optimizer_sync_every
+
+    def normalized_outer_optimizer(self):
+        return self.outer_optimizer
 
 
 def _build_job_config(**overrides):
@@ -90,6 +105,7 @@ def _build_job_config(**overrides):
 
 stub_optimizers = ModuleType("torchtitan.experiments.fl.configs.optimizers")
 stub_optimizers.DesLocConfig = _TestDeslocConfig
+stub_optimizers.DesLocOuterOptimizerConfig = _TestOuterOptimizerConfig
 sys.modules.setdefault("torchtitan.experiments.fl.configs.optimizers", stub_optimizers)
 
 _DESLOC_SPEC = importlib_util.spec_from_file_location(
@@ -180,3 +196,59 @@ def test_configure_desloc_conflicting_method(monkeypatch):
     with pytest.raises(ValueError, match="requires fault_tolerance.semi_sync_method"):
         with configure_desloc(job_config):
             pass
+
+
+def test_desloc_outer_optimizer_applies_pseudogradients(monkeypatch):
+    monkeypatch.setattr("torchtitan.components.optimizer.has_torchft", True, raising=False)
+
+    class _DummyFTOptimizer:
+        def __init__(self, _manager, _container) -> None:  # pragma: no cover - stub
+            return None
+
+        def step(self, *args, **kwargs) -> None:  # pragma: no cover - stub
+            return None
+
+        def zero_grad(self, *args, **kwargs) -> None:  # pragma: no cover - stub
+            return None
+
+    monkeypatch.setattr(
+        "torchtitan.components.optimizer.ft",
+        SimpleNamespace(Optimizer=_DummyFTOptimizer),
+        raising=False,
+    )
+
+    outer_spec = _TestOuterOptimizerConfig(target="SGD", kwargs={"lr": 0.5})
+    desloc_cfg = _TestDeslocConfig(outer_optimizer=outer_spec)
+    dummy_manager = _DummyManager()
+    model = nn.Linear(1, 1, bias=False)
+
+    container = desloc_module.DesLocFTOptimizersContainer(
+        desloc_module.DesLocFTOptimizersConfig(
+            model_parts=[model],
+            optimizer_cls=optim.SGD,
+            optimizer_kwargs={"lr": 0.1},
+            ft_manager=dummy_manager,
+            desloc_config=desloc_cfg,
+            outer_optimizer=outer_spec,
+        )
+    )
+
+    controller = container._desloc_controllers[0]
+    fragment = controller._param_fragment
+    assert isinstance(fragment, desloc_module._OuterOptimizingParameterFragment)
+    assert "desloc_0_outer_optimizer" in dummy_manager._state_dict_registry
+
+    param = next(model.parameters())
+    original = param.detach().clone()
+    param.data.add_(1.0)
+    local_value = param.detach().clone()
+
+    works = fragment.prepare_sync()
+    for work in works:
+        work.wait()
+    fragment.perform_sync()
+    fragment.save_state()
+
+    expected = original + 0.5 * (local_value - original)
+    assert torch.allclose(param.data, expected)
+    assert param.grad is None

@@ -186,6 +186,7 @@ def _build_desloc_container(request: DeslocContainerRequest) -> OptimizersContai
         msg = "DES-LOC is not supported with Pipeline Parallel."
         raise NotImplementedError(msg)
 
+    outer_optimizer = request.desloc_cfg.normalized_outer_optimizer()
     desloc_config = DesLocFTOptimizersConfig(
         model_parts=request.base.model_parts,
         optimizer_cls=request.base.optimizer_cls,
@@ -194,6 +195,7 @@ def _build_desloc_container(request: DeslocContainerRequest) -> OptimizersContai
         desloc_config=request.desloc_cfg,
         use_ft_optimizer=ft_manager.use_async_quorum,
         param_groups=request.base.param_groups,
+        outer_optimizer=outer_optimizer,
     )
     return DesLocFTOptimizersContainer(desloc_config)
 
