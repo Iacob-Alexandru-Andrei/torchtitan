@@ -38,7 +38,7 @@ implementation = "for-loop"
 [optimizer.desloc]
 enabled = true
 param_sync_every = 32
-optimizer_sync_every = [32,32]
+optimizer_sync_every = [999999,999999]  # disable inner optimizer step sync
 backup_device = "cpu"
 pin_memory = true
 log_outer_metrics = true
