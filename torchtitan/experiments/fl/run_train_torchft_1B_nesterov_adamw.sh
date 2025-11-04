@@ -52,7 +52,7 @@ LIGHTHOUSE_PORT="29510"
 LIGHTHOUSE_URL="http://${LIGHTHOUSE_HOST}:${LIGHTHOUSE_PORT}"
 
 # Lighthouse settings
-MIN_REPLICAS=${MIN_REPLICAS:-3}  # Minimum replicas required to start training
+MIN_REPLICAS=${MIN_REPLICAS:-4}  # Minimum replicas required to start training
 QUORUM_TICK_MS=${QUORUM_TICK_MS:-100}  # Quorum tick interval in milliseconds
 
 # Print current working directory

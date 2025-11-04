@@ -81,7 +81,7 @@ switch_step = 2048
 switch_scale = 1.0
 
 [fl_metrics.hyperparameter_switch]
-enabled = false
+enabled = true
 steps = [2049]
 new_vs = [1.0]
 new_betas = [0.9,0.99]
