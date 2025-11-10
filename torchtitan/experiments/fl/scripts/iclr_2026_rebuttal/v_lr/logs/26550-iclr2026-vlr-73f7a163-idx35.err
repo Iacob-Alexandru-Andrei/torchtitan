@@ -84,7 +84,7 @@
 [rank0]:  not torch._utils.is_compiling() and capturable  # pyright: ignore[reportAttributeAccessIssue]
 [rank0]:wandb: updating run metadata
 [rank0]:wandb: uploading output.log; uploading history steps 10202-10239, summary, console lines 20941-31264
-[rank0]:wandb: 
+[rank0]:wandb:
 [rank0]:wandb: Run history:
 [rank0]:wandb:     activations/average/max/full_model_input ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁
 [rank0]:wandb:    activations/average/max/full_model_output ▁▁▁▁▁▁▂▁▁▂▂▂▂▂▂▃▃▃▄▄▅▅▅▆▆▆▆▇▆▇▇▆▇▇▇███▇█
@@ -97,7 +97,7 @@
 [rank0]:wandb:                         beta1-QHAdamW/group0 ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁
 [rank0]:wandb:                         beta1-QHAdamW/group1 ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁
 [rank0]:wandb:                                         +272 ...
-[rank0]:wandb: 
+[rank0]:wandb:
 [rank0]:wandb: Run summary:
 [rank0]:wandb:     activations/average/max/full_model_input 0.18225
 [rank0]:wandb:    activations/average/max/full_model_output 0.03613
@@ -110,7 +110,7 @@
 [rank0]:wandb:                         beta1-QHAdamW/group0 0.999
 [rank0]:wandb:                         beta1-QHAdamW/group1 0.999
 [rank0]:wandb:                                         +272 ...
-[rank0]:wandb: 
+[rank0]:wandb:
 [rank0]:wandb: 🚀 View run iclr2026-vlr-73f7a163-v0p9999-sw1-20251108-155938-idx35-worker0-rep0-rank0 at: https://wandb.ai/camlsys/torchtitan_tune_lr/runs/itvotgao
 [rank0]:wandb: ⭐️ View project at: https://wandb.ai/camlsys/torchtitan_tune_lr
 [rank0]:wandb: Synced 5 W&B file(s), 0 media file(s), 0 artifact file(s) and 0 other file(s)

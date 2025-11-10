@@ -30,7 +30,7 @@ Traceback (most recent call last):
            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
   File "/nfs-share/aai30/projects/torchtitan/.venv/lib/python3.12/site-packages/torch/distributed/launcher/api.py", line 312, in launch_agent
     raise ChildFailedError(
-torch.distributed.elastic.multiprocessing.errors.ChildFailedError: 
+torch.distributed.elastic.multiprocessing.errors.ChildFailedError:
 ============================================================
 torchtitan.experiments.fl.train FAILED
 ------------------------------------------------------------
