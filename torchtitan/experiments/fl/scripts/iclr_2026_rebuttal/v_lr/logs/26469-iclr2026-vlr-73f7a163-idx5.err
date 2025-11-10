@@ -1,0 +1,43 @@
+[rank0]:wandb: Currently logged in as: alexiacob (camlsys) to https://api.wandb.ai. Use `wandb login --relogin` to force relogin
+[rank0]:wandb: setting up run m1a7gol4
+[rank0]:wandb: Tracking run with wandb version 0.22.1
+[rank0]:wandb: Run data is saved locally in ./outputs/iclr2026-vlr-73f7a163-v0p99-sw1-20251108-140736-idx5/tb/20251108-1449/rank_0/wandb/run-20251108_144936-m1a7gol4
+[rank0]:wandb: Run `wandb offline` to turn off syncing.
+[rank0]:wandb: Syncing run iclr2026-vlr-73f7a163-v0p99-sw1-20251108-140736-idx5-worker0-rep0-rank0
+[rank0]:wandb: ⭐️ View project at https://wandb.ai/camlsys/torchtitan_tune_lr
+[rank0]:wandb: 🚀 View run at https://wandb.ai/camlsys/torchtitan_tune_lr/runs/m1a7gol4
+[rank0]:/nfs-share/aai30/projects/torchtitan/torchtitan/experiments/fl/optimizers/qhadamw.py:497: UserWarning: `torch._utils.is_compiling` is deprecated. Use `torch.compiler.is_compiling` instead.
+[rank0]:  not torch._utils.is_compiling() and capturable  # pyright: ignore[reportAttributeAccessIssue]
+[rank0]:wandb: updating run metadata
+[rank0]:wandb: uploading output.log
+[rank0]:wandb: 
+[rank0]:wandb: Run history:
+[rank0]:wandb:     activations/average/max/full_model_input ▁▁▁▁▁▂▂▂▂▂▂▂▂▂▂▃▃▃▃▃▃▄▄▄▄▄▄▅▅▅▅▅▅▅▅▆▇▇▇█
+[rank0]:wandb:    activations/average/max/full_model_output ▁▁▁▁▁▁▁▂▂▂▂▂▃▃▄▄▄▄▄▄▅▅▅▅▅▅▅▅▆▆▆▆▆▇▇▇▇███
+[rank0]:wandb:  activations/average/median/full_model_input ▁▁▁▁▁▄▅▄▅▅▅▆▅▆███▆▇▅▅▆▆▅▇▆▅▃▄▄▆▇▇▇▅▇▆▇▅▇
+[rank0]:wandb: activations/average/median/full_model_output ▅▄▅▅▅▆▅▆▅▆▆▆█▆▆▇▆▆▄▆▃▄▂▄▄▃▂▂▂▅▃▅▅▄▂▂▂▂▄▁
+[rank0]:wandb:         activations/l2_norm/full_model_input ▁▁▁▁▁▂▂▂▂▂▂▂▂▂▂▃▃▃▃▃▄▄▄▄▄▄▅▅▅▅▅▅▆▆▆▇▇▇▇█
+[rank0]:wandb:        activations/l2_norm/full_model_output ▁▃▄▄▄▄▄▄▅▄▄▅▅▅▅▅▅▅▅▅▅▅▆▆▆▆▆▆▆▆▆▆▆▇▇█████
+[rank0]:wandb:             activations/max/full_model_input ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▂▂▂▂▂▃▃▃▃▃▄▄▄▅▅▅▅▅▅▅▆▆▇▇█
+[rank0]:wandb:            activations/max/full_model_output ▁▁▁▁▁▁▁▁▂▂▂▂▂▂▂▃▃▃▃▃▄▄▄▄▄▅▅▅▅▅▆▆▆▆▆▇▇███
+[rank0]:wandb:                         beta1-QHAdamW/group0 ▁▁██████████████████████████████████████
+[rank0]:wandb:                         beta1-QHAdamW/group1 ▁▁▁▁▁███████████████████████████████████
+[rank0]:wandb:                                         +272 ...
+[rank0]:wandb: 
+[rank0]:wandb: Run summary:
+[rank0]:wandb:     activations/average/max/full_model_input 1.44531
+[rank0]:wandb:    activations/average/max/full_model_output 1.44531
+[rank0]:wandb:  activations/average/median/full_model_input 0.00464
+[rank0]:wandb: activations/average/median/full_model_output -0.00262
+[rank0]:wandb:         activations/l2_norm/full_model_input 479013.66195
+[rank0]:wandb:        activations/l2_norm/full_model_output 815387.68003
+[rank0]:wandb:             activations/max/full_model_input 688
+[rank0]:wandb:            activations/max/full_model_output 688
+[rank0]:wandb:                         beta1-QHAdamW/group0 0.999
+[rank0]:wandb:                         beta1-QHAdamW/group1 0.999
+[rank0]:wandb:                                         +272 ...
+[rank0]:wandb: 
+[rank0]:wandb: 🚀 View run iclr2026-vlr-73f7a163-v0p99-sw1-20251108-140736-idx5-worker0-rep0-rank0 at: https://wandb.ai/camlsys/torchtitan_tune_lr/runs/m1a7gol4
+[rank0]:wandb: ⭐️ View project at: https://wandb.ai/camlsys/torchtitan_tune_lr
+[rank0]:wandb: Synced 5 W&B file(s), 0 media file(s), 0 artifact file(s) and 0 other file(s)
+[rank0]:wandb: Find logs at: ./outputs/iclr2026-vlr-73f7a163-v0p99-sw1-20251108-140736-idx5/tb/20251108-1449/rank_0/wandb/run-20251108_144936-m1a7gol4/logs

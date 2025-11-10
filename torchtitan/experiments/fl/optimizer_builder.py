@@ -31,8 +31,13 @@ from torchtitan.experiments.fl.optimizers import (
     AggMoAdamW,
     AggMoAdopt,
     DecoupledAdamW,
+    GaLore,
     QHAdamW,
     QHADOPT,
+    Scion,
+    ScionAggMo,
+    ScionLight,
+    QHScion,
 )
 
 try:  # pragma: no cover - optional dependency for non-MuP models
@@ -82,6 +87,11 @@ _MOSAIC_OPTIMIZER_CLASSES: dict[str, type[Optimizer]] = {
     "DecoupledAdamW": DecoupledAdamW,
     "AggMoAdopt": AggMoAdopt,
     "AggMoAdamW": AggMoAdamW,
+    "Scion": Scion,
+    "ScionLight": ScionLight,
+    "ScionQH": QHScion,
+    "ScionAggMo": ScionAggMo,
+    "GaLore": GaLore,
 }
 
 _ALL_OPTIMIZER_CLASSES: dict[str, type[Optimizer]] = {
@@ -101,11 +111,7 @@ def _resolve_optimizer_class(name: str) -> type[Optimizer]:
 def _normalize_mosaic_optimizer_config(
     optimizer_config: MosaicOptimizerConfig | dict[str, Any],
 ) -> tuple[MosaicOptimizerConfig, dict[str, Any]]:
-    config = (
-        MosaicOptimizerConfig(**optimizer_config)
-        if isinstance(optimizer_config, dict)
-        else optimizer_config
-    )
+    config = MosaicOptimizerConfig(**optimizer_config) if isinstance(optimizer_config, dict) else optimizer_config
 
     if isinstance(config.desloc, dict):
         config.desloc = DesLocConfig(**config.desloc)
@@ -119,13 +125,48 @@ def _normalize_mosaic_optimizer_config(
         extra_kwargs["vs"] = config.vs
     if name in {"DecoupledAdamW", "AggMoAdopt", "AggMoAdamW"}:
         extra_kwargs["decouple"] = config.decouple
+    if name in {"Scion", "ScionLight", "ScionQH", "ScionAggMo"}:
+        extra_kwargs.update(
+            {
+                "norm": config.norm,
+                "norm_kwargs": config.norm_kwargs or {},
+                "scale": config.scale,
+                "unconstrained": config.unconstrained,
+            }
+        )
+        if name in {"Scion", "ScionLight", "ScionQH"}:
+            extra_kwargs["betas"] = (config.beta1,)
+        if name == "ScionQH":
+            v_value = config.scion_v if config.scion_v is not None else config.vs[0]
+            extra_kwargs["v"] = v_value
+        if name == "ScionAggMo":
+            extra_kwargs["betas"] = config.scion_momentums
+            extra_kwargs["weights"] = config.scion_weights
 
     return config, extra_kwargs
 
 
-def _build_optimizer_kwargs(
-    config: MosaicOptimizerConfig, extra_kwargs: dict[str, Any]
-) -> dict[str, Any]:
+def _build_optimizer_kwargs(config: MosaicOptimizerConfig, extra_kwargs: dict[str, Any]) -> dict[str, Any]:
+    if config.name in {"Scion", "ScionLight", "ScionQH", "ScionAggMo"}:
+        kwargs: dict[str, Any] = {"lr": config.lr}
+        kwargs.update(extra_kwargs)
+        return kwargs
+    if config.name == "GaLore":
+        kwargs: dict[str, Any] = {
+            "lr": config.lr,
+            "betas": (config.beta1, config.beta2),
+            "eps": config.eps,
+            "weight_decay": config.weight_decay,
+            "v1": config.galore_v1,
+            "rank": config.galore_rank,
+            "update_proj_gap": config.galore_update_proj_gap,
+            "scale": config.galore_scale,
+            "proj_type": config.galore_proj_type,
+            "dim": config.galore_dim,
+        }
+        kwargs.update(extra_kwargs)
+        return kwargs
+
     optim_implementation = config.implementation
     assert optim_implementation in {"fused", "foreach", "for-loop"}
 
@@ -163,11 +204,7 @@ def _apply_mup_overrides(
             )
             if overrides is None:
                 continue
-            updated_config = (
-                replace(config, **overrides.config_updates)
-                if overrides.config_updates
-                else config
-            )
+            updated_config = replace(config, **overrides.config_updates) if overrides.config_updates else config
             return updated_config, overrides.param_groups
 
     return config, None
@@ -229,32 +266,22 @@ def _build_optimizer_container(
 
     if desloc_cfg.enabled:
         if config.early_step_in_backward:
-            msg = (
-                "DES-LOC does not support optimizers in backward. "
-                "Disable early_step_in_backward."
-            )
+            msg = "DES-LOC does not support optimizers in backward. Disable early_step_in_backward."
             raise NotImplementedError(msg)
 
         ft_manager = request.ft_manager
         if ft_manager is None or not ft_manager.enabled:
-            msg = (
-                "DES-LOC requires TorchFT to be enabled. "
-                "Set fault_tolerance.enable to true."
-            )
+            msg = "DES-LOC requires TorchFT to be enabled. Set fault_tolerance.enable to true."
             raise ValueError(msg)
 
         if isinstance(desloc_cfg, dict):  # pragma: no cover - defensive conversion
             desloc_cfg = DesLocConfig(**desloc_cfg)
             config.desloc = desloc_cfg
 
-        return _build_desloc_container(
-            DeslocContainerRequest(base=request, desloc_cfg=desloc_cfg)
-        )
+        return _build_desloc_container(DeslocContainerRequest(base=request, desloc_cfg=desloc_cfg))
 
     if config.early_step_in_backward:
-        return OptimizersInBackwardContainer(
-            request.model_parts, request.optimizer_cls, request.optimizer_kwargs
-        )
+        return OptimizersInBackwardContainer(request.model_parts, request.optimizer_cls, request.optimizer_kwargs)
 
     ft_manager = request.ft_manager
     if ft_manager and ft_manager.enabled:
@@ -283,9 +310,7 @@ def build_mosaic_optimizers(
     param_groups: list[dict[str, Any]] | None = None,
 ) -> OptimizersContainer:
     """Build optimizers for Mosaic jobs without modifying core TorchTitan components."""
-    normalized_config, extra_kwargs = _normalize_mosaic_optimizer_config(
-        optimizer_config
-    )
+    normalized_config, extra_kwargs = _normalize_mosaic_optimizer_config(optimizer_config)
     normalized_config, param_groups = _apply_mup_overrides(
         model_parts,
         normalized_config,
@@ -297,10 +322,7 @@ def build_mosaic_optimizers(
             msg = "DES-LOC is only supported when optimizer.builder is set to 'mosaic'."
             raise ValueError(msg)
         if normalized_config.name in _MOSAIC_OPTIMIZER_CLASSES:
-            msg = (
-                f"Optimizer {normalized_config.name!r} requires "
-                "optimizer.builder='mosaic'."
-            )
+            msg = f"Optimizer {normalized_config.name!r} requires optimizer.builder='mosaic'."
             raise ValueError(msg)
         return build_optimizers(
             model_parts=model_parts,

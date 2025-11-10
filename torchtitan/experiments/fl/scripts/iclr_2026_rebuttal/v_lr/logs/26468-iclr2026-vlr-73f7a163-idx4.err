@@ -1,0 +1,93 @@
+[rank0]:wandb: Currently logged in as: alexiacob (camlsys) to https://api.wandb.ai. Use `wandb login --relogin` to force relogin
+[rank0]:wandb: setting up run z3xwoqbj
+[rank0]:wandb: Tracking run with wandb version 0.22.1
+[rank0]:wandb: Run data is saved locally in ./outputs/iclr2026-vlr-73f7a163-v0p98-sw16-20251108-140736-idx4/tb/20251108-1408/rank_0/wandb/run-20251108_140823-z3xwoqbj
+[rank0]:wandb: Run `wandb offline` to turn off syncing.
+[rank0]:wandb: Syncing run iclr2026-vlr-73f7a163-v0p98-sw16-20251108-140736-idx4-worker0-rep0-rank0
+[rank0]:wandb: ⭐️ View project at https://wandb.ai/camlsys/torchtitan_tune_lr
+[rank0]:wandb: 🚀 View run at https://wandb.ai/camlsys/torchtitan_tune_lr/runs/z3xwoqbj
+[rank0]:
+[rank0]:Downloading torchtitan/16M-baseline-202510...3_manifest.json:   0%|          | 0.00/77.0 [00:00<?, ?iB/s]
+[rank0]:Downloading torchtitan/16M-baseline-202510...3_manifest.json: 100%|██████████| 77.0/77.0 [00:00<00:00, 284kiB/s]
+[rank0]:
+[rank0]:Downloading torchtitan/16M-baseline-202510...-2048/.metadata:   0%|          | 0.00/390k [00:00<?, ?iB/s]
+[rank0]:Downloading torchtitan/16M-baseline-202510...-2048/.metadata:  33%|███▎      | 128k/390k [00:00<00:00, 18.5MiB/s]
+[rank0]:
+[rank0]:Downloading torchtitan/16M-baseline-202510...48/__0_0.distcp:   0%|          | 0.00/62.1M [00:00<?, ?iB/s][rank0]:
+[rank0]:Downloading torchtitan/16M-baseline-202510...48/__0_0.distcp:   0%|          | 262k/62.1M [00:00<00:22, 2.77MiB/s]
+[rank0]:Downloading torchtitan/16M-baseline-202510...48/__0_0.distcp:   0%|          | 262k/62.1M [00:00<00:22, 2.76MiB/s]
+[rank0]:Downloading torchtitan/16M-baseline-202510...48/__0_0.distcp:   0%|          | 262k/62.1M [00:00<00:22, 2.76MiB/s][rank0]:
+[rank0]:Downloading torchtitan/16M-baseline-202510...48/__0_0.distcp:   0%|          | 262k/62.1M [00:00<00:49, 1.26MiB/s]
+[rank0]:
+[rank0]:Downloading torchtitan/16M-baseline-202510...48/__1_0.distcp:   0%|          | 0.00/62.4M [00:00<?, ?iB/s]
+[rank0]:
+[rank0]:Downloading torchtitan/16M-baseline-202510...48/__1_0.distcp:   0%|          | 0.00/62.4M [00:00<?, ?iB/s][A
+[rank0]:Downloading torchtitan/16M-baseline-202510...48/__1_0.distcp:   0%|          | 262k/62.4M [00:00<00:00, 73.6MiB/s]
+[rank0]:
+[rank0]:Downloading torchtitan/16M-baseline-202510...48/__1_0.distcp:   0%|          | 262k/62.4M [00:00<00:34, 1.79MiB/s]
+[rank0]:
+[rank0]:Downloading torchtitan/16M-baseline-202510...48/__2_0.distcp:   0%|          | 0.00/62.4M [00:00<?, ?iB/s]
+[rank0]:
+[rank0]:Downloading torchtitan/16M-baseline-202510...48/__2_0.distcp:   0%|          | 0.00/62.4M [00:00<?, ?iB/s][A
+[rank0]:Downloading torchtitan/16M-baseline-202510...48/__2_0.distcp:   0%|          | 262k/62.4M [00:00<00:01, 44.6MiB/s]
+[rank0]:
+[rank0]:Downloading torchtitan/16M-baseline-202510...48/__2_0.distcp:   0%|          | 262k/62.4M [00:00<00:33, 1.84MiB/s]
+[rank0]:
+[rank0]:Downloading torchtitan/16M-baseline-202510...48/__3_0.distcp:   0%|          | 0.00/62.4M [00:00<?, ?iB/s][rank0]:
+[rank0]:Downloading torchtitan/16M-baseline-202510...48/__3_0.distcp:   0%|          | 262k/62.4M [00:00<00:32, 1.93MiB/s]
+[rank0]:/nfs-share/aai30/projects/torchtitan/.venv/lib/python3.12/site-packages/torch/distributed/c10d_logger.py:83: UserWarning: barrier(): using the device under current context. You can specify `device_id` in `init_process_group` to mute this warning.
+[rank0]:  return func(*args, **kwargs)
+[rank0]:/nfs-share/aai30/projects/torchtitan/torchtitan/experiments/fl/optimizers/qhadamw.py:497: UserWarning: `torch._utils.is_compiling` is deprecated. Use `torch.compiler.is_compiling` instead.
+[rank0]:  not torch._utils.is_compiling() and capturable  # pyright: ignore[reportAttributeAccessIssue]
+[rank0]:/nfs-share/aai30/projects/torchtitan/torchtitan/experiments/fl/optimizers/qhadamw.py:497: UserWarning: `torch._utils.is_compiling` is deprecated. Use `torch.compiler.is_compiling` instead.
+[rank0]:  not torch._utils.is_compiling() and capturable  # pyright: ignore[reportAttributeAccessIssue]
+[rank0]:[0] 2025-11-08 14:17:21,101 - root - INFO - Initializing dist.ProcessGroup in checkpoint background process
+[rank0]:[0] 2025-11-08 14:17:21,107 - root - INFO - Checkpoint background process is running...
+[rank0]:[0] 2025-11-08 14:17:21,107 - root - INFO - Waiting for checkpoint save request...
+[rank0]:[0] 2025-11-08 14:17:21,238 - root - INFO - Received async checkpoint request with id=./outputs/iclr2026-vlr-73f7a163-v0p98-sw16-20251108-140736-idx4/checkpoints/step-4096
+[rank0]:[0] 2025-11-08 14:17:22,078 - root - INFO - Completed checkpoint save request for checkpoint_id=_CheckpointRequestIdentifier(checkpoint_id='./outputs/iclr2026-vlr-73f7a163-v0p98-sw16-20251108-140736-idx4/checkpoints/step-4096', uuid='f4ded1ee-37ad-45be-ab1d-77eddc07e55c')
+[rank0]:[0] 2025-11-08 14:17:22,078 - root - INFO - Waiting for checkpoint save request...
+[rank0]:[0] 2025-11-08 14:25:27,438 - root - INFO - Received async checkpoint request with id=./outputs/iclr2026-vlr-73f7a163-v0p98-sw16-20251108-140736-idx4/checkpoints/step-6144
+[rank0]:[0] 2025-11-08 14:25:27,995 - root - INFO - Completed checkpoint save request for checkpoint_id=_CheckpointRequestIdentifier(checkpoint_id='./outputs/iclr2026-vlr-73f7a163-v0p98-sw16-20251108-140736-idx4/checkpoints/step-6144', uuid='710b5fc8-5322-4199-bead-0ed9cb4bf34c')
+[rank0]:[0] 2025-11-08 14:25:27,995 - root - INFO - Waiting for checkpoint save request...
+[rank0]:[0] 2025-11-08 14:33:41,293 - root - INFO - Received async checkpoint request with id=./outputs/iclr2026-vlr-73f7a163-v0p98-sw16-20251108-140736-idx4/checkpoints/step-8192
+[rank0]:[0] 2025-11-08 14:33:41,805 - root - INFO - Completed checkpoint save request for checkpoint_id=_CheckpointRequestIdentifier(checkpoint_id='./outputs/iclr2026-vlr-73f7a163-v0p98-sw16-20251108-140736-idx4/checkpoints/step-8192', uuid='3654a768-af23-42be-8825-f49deb059cd2')
+[rank0]:[0] 2025-11-08 14:33:41,805 - root - INFO - Waiting for checkpoint save request...
+[rank0]:[0] 2025-11-08 14:41:57,245 - root - INFO - Received async checkpoint request with id=./outputs/iclr2026-vlr-73f7a163-v0p98-sw16-20251108-140736-idx4/checkpoints/step-10240
+[rank0]:[0] 2025-11-08 14:41:57,751 - root - INFO - Completed checkpoint save request for checkpoint_id=_CheckpointRequestIdentifier(checkpoint_id='./outputs/iclr2026-vlr-73f7a163-v0p98-sw16-20251108-140736-idx4/checkpoints/step-10240', uuid='c4bc9a73-417f-40a8-a0c9-133699d2bb5e')
+[rank0]:[0] 2025-11-08 14:41:57,751 - root - INFO - Waiting for checkpoint save request...
+[rank0]:wandb: updating run metadata
+[rank0]:wandb: uploading output.log
+[rank0]:wandb: uploading history steps 10215-10239, summary, console lines 21001-31294
+[rank0]:wandb: 
+[rank0]:wandb: Run history:
+[rank0]:wandb:     activations/average/max/full_model_input ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▂▄▄▇▅▇▆█
+[rank0]:wandb:    activations/average/max/full_model_output ▁▁▂▃▃▃▃▃▄▄▄▄▄▄▄▄▅▅▅▅▆▅▅▅▆▆▆▆▆▆▆▇▇▇▆▇▇▇▇█
+[rank0]:wandb:  activations/average/median/full_model_input ██▃▃▃▂▂▃▃▂▁▁▂▂▄▄▄▃▁▃▃▃▄▂▂▁▅▅▄▂▃▃▃▃▇▅▄▄▄▄
+[rank0]:wandb: activations/average/median/full_model_output ▁▃▃▃▃▃▄▅▅▅▅▅▄▃▄▅▃▃▃▃▆▃▃▃▄▂▃▃▃▅▆▅▄▅▆▅▅▆▅█
+[rank0]:wandb:         activations/l2_norm/full_model_input ▁▁▁▁▂▂▂▂▂▂▃▃▃▃▃▃▃▄▄▄▄▄▄▄▅▅▅▆▆▆▆▆▇▇▇▇▇▇▇█
+[rank0]:wandb:        activations/l2_norm/full_model_output ▁▂▂▃▃▃▃▃▃▃▃▃▃▃▃▃▃▄▄▄▄▄▄▅▅▅▅▆▆▆▆▇▇▇▇▇████
+[rank0]:wandb:             activations/max/full_model_input ▁▁▁▁▁▁▁▁▂▂▂▂▂▂▂▂▂▂▂▂▃▃▃▃▄▄▅▅▅▅▆▆▆▆▇▇▇▇██
+[rank0]:wandb:            activations/max/full_model_output ▁▁▁▁▁▁▁▁▁▁▂▂▂▂▂▂▂▃▃▃▄▄▄▄▄▄▄▅▅▅▅▅▇▇▇▇▇▇▇█
+[rank0]:wandb:                         beta1-QHAdamW/group0 ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁
+[rank0]:wandb:                         beta1-QHAdamW/group1 ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁
+[rank0]:wandb:                                         +272 ...
+[rank0]:wandb: 
+[rank0]:wandb: Run summary:
+[rank0]:wandb:     activations/average/max/full_model_input 0.21875
+[rank0]:wandb:    activations/average/max/full_model_output 0.21875
+[rank0]:wandb:  activations/average/median/full_model_input 0.00027
+[rank0]:wandb: activations/average/median/full_model_output 0.01031
+[rank0]:wandb:         activations/l2_norm/full_model_input 756447.62606
+[rank0]:wandb:        activations/l2_norm/full_model_output 1134083.73839
+[rank0]:wandb:             activations/max/full_model_input 748
+[rank0]:wandb:            activations/max/full_model_output 748
+[rank0]:wandb:                         beta1-QHAdamW/group0 0.999
+[rank0]:wandb:                         beta1-QHAdamW/group1 0.999
+[rank0]:wandb:                                         +272 ...
+[rank0]:wandb: 
+[rank0]:wandb: 🚀 View run iclr2026-vlr-73f7a163-v0p98-sw16-20251108-140736-idx4-worker0-rep0-rank0 at: https://wandb.ai/camlsys/torchtitan_tune_lr/runs/z3xwoqbj
+[rank0]:wandb: ⭐️ View project at: https://wandb.ai/camlsys/torchtitan_tune_lr
+[rank0]:wandb: Synced 5 W&B file(s), 0 media file(s), 0 artifact file(s) and 0 other file(s)
+[rank0]:wandb: Find logs at: ./outputs/iclr2026-vlr-73f7a163-v0p98-sw16-20251108-140736-idx4/tb/20251108-1408/rank_0/wandb/run-20251108_140823-z3xwoqbj/logs
+[rank0]:[0] 2025-11-08 14:50:23,517 - root - INFO - Checkpoint background process is shutting down...

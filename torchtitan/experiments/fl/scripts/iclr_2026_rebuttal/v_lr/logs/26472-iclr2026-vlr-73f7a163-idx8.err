@@ -1,0 +1,10 @@
+[rank0]:wandb: Currently logged in as: alexiacob (camlsys) to https://api.wandb.ai. Use `wandb login --relogin` to force relogin
+[rank0]:wandb: Tracking run with wandb version 0.22.1
+[rank0]:wandb: Run data is saved locally in ./outputs/iclr2026-vlr-73f7a163-v0p99-sw8-20251108-140736-idx8/tb/20251108-1540/rank_0/wandb/run-20251108_154054-vmi9pa14
+[rank0]:wandb: Run `wandb offline` to turn off syncing.
+[rank0]:wandb: Syncing run iclr2026-vlr-73f7a163-v0p99-sw8-20251108-140736-idx8-worker0-rep0-rank0
+[rank0]:wandb: ⭐️ View project at https://wandb.ai/camlsys/torchtitan_tune_lr
+[rank0]:wandb: 🚀 View run at https://wandb.ai/camlsys/torchtitan_tune_lr/runs/vmi9pa14
+[rank0]:/nfs-share/aai30/projects/torchtitan/torchtitan/experiments/fl/optimizers/qhadamw.py:497: UserWarning: `torch._utils.is_compiling` is deprecated. Use `torch.compiler.is_compiling` instead.
+[rank0]:  not torch._utils.is_compiling() and capturable  # pyright: ignore[reportAttributeAccessIssue]
+slurmstepd: error: *** JOB 26472 ON ruapehu CANCELLED AT 2025-11-08T15:46:10 ***

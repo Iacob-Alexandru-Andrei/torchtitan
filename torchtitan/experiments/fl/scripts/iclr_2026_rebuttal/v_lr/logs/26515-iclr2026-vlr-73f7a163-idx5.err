@@ -1,0 +1,48 @@
+[rank0]:╭─ Value error ────────────────────────────────────────────────────────────────╮
+[rank0]:│ Error parsing --fl-metrics.hyperparameter-switch.new-vs: no type matching    │
+[rank0]:│ {None}|{[FLOAT [FLOAT ...]]} could be instantiated from ['[0.99]'].          │
+[rank0]:│                                                                              │
+[rank0]:│ Got errors:                                                                  │
+[rank0]:│ - <class 'NoneType'>: ['[0.99]'] does not match choices ('None',)            │
+[rank0]:│ - tuple: Could not find valid parse for arguments: ['[0.99]']                │
+[rank0]:│ ──────────────────────────────────────────────────────────────────────────── │
+[rank0]:│ Argument helptext:                                                           │
+[rank0]:│     --fl-metrics.hyperparameter-switch.new-vs {None}|{[FLOAT [FLOAT ...]]}   │
+[rank0]:│     Replacement values for optimizer 'vs' entries. Leave empty to skip.      │
+[rank0]:│     (default: 0.98)                                                          │
+[rank0]:│ ──────────────────────────────────────────────────────────────────────────── │
+[rank0]:│ For full helptext, see train.py --help                                       │
+[rank0]:╰──────────────────────────────────────────────────────────────────────────────╯
+E1108 15:54:43.606000 1290682 torch/distributed/elastic/multiprocessing/api.py:974] failed (exitcode: 2) local_rank: 0 (pid: 1290713) of binary: /nfs-share/aai30/projects/torchtitan/.venv/bin/python3
+Traceback (most recent call last):
+  File "/nfs-share/aai30/projects/torchtitan/.venv/bin/torchrun", line 10, in <module>
+    sys.exit(main())
+             ^^^^^^
+  File "/nfs-share/aai30/projects/torchtitan/.venv/lib/python3.12/site-packages/torch/distributed/elastic/multiprocessing/errors/__init__.py", line 362, in wrapper
+    return f(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^
+  File "/nfs-share/aai30/projects/torchtitan/.venv/lib/python3.12/site-packages/torch/distributed/run.py", line 977, in main
+    run(args)
+  File "/nfs-share/aai30/projects/torchtitan/.venv/lib/python3.12/site-packages/torch/distributed/run.py", line 968, in run
+    elastic_launch(
+  File "/nfs-share/aai30/projects/torchtitan/.venv/lib/python3.12/site-packages/torch/distributed/launcher/api.py", line 165, in __call__
+    return launch_agent(self._config, self._entrypoint, list(args))
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/nfs-share/aai30/projects/torchtitan/.venv/lib/python3.12/site-packages/torch/distributed/launcher/api.py", line 312, in launch_agent
+    raise ChildFailedError(
+torch.distributed.elastic.multiprocessing.errors.ChildFailedError: 
+============================================================
+torchtitan.experiments.fl.train FAILED
+------------------------------------------------------------
+Failures:
+  <NO_OTHER_FAILURES>
+------------------------------------------------------------
+Root Cause (first observed failure):
+[0]:
+  time      : 2025-11-08_15:54:43
+  host      : ruapehu.cl.cam.ac.uk
+  rank      : 0 (local_rank: 0)
+  exitcode  : 2 (pid: 1290713)
+  error_file: <N/A>
+  traceback : To enable traceback see: https://pytorch.org/docs/stable/elastic/errors.html
+============================================================

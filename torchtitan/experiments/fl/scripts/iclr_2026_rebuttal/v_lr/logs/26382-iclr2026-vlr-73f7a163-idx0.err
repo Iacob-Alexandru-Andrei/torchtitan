@@ -1,0 +1,184 @@
+[rank0]:wandb: Currently logged in as: alexiacob (camlsys) to https://api.wandb.ai. Use `wandb login --relogin` to force relogin
+[rank0]:wandb: setting up run y7fhjor6
+[rank0]:wandb: Tracking run with wandb version 0.22.1
+[rank0]:wandb: Run data is saved locally in ./outputs/iclr2026-vlr-73f7a163-v0p98-sw1-20251108-123812-idx0/tb/20251108-1238/rank_0/wandb/run-20251108_123831-y7fhjor6
+[rank0]:wandb: Run `wandb offline` to turn off syncing.
+[rank0]:wandb: Syncing run iclr2026-vlr-73f7a163-v0p98-sw1-20251108-123812-idx0-worker0-rep0-rank0
+[rank0]:wandb: ⭐️ View project at https://wandb.ai/camlsys/torchtitan_tune_lr
+[rank0]:wandb: 🚀 View run at https://wandb.ai/camlsys/torchtitan_tune_lr/runs/y7fhjor6
+[rank0]:
+[rank0]:Downloading torchtitan/16M-baseline-202510...3_manifest.json:   0%|          | 0.00/77.0 [00:00<?, ?iB/s]
+[rank0]:Downloading torchtitan/16M-baseline-202510...3_manifest.json: 100%|██████████| 77.0/77.0 [00:00<00:00, 462kiB/s]
+[rank0]:
+[rank0]:Downloading torchtitan/16M-baseline-202510...-2048/.metadata:   0%|          | 0.00/390k [00:00<?, ?iB/s]
+[rank0]:Downloading torchtitan/16M-baseline-202510...-2048/.metadata:  33%|███▎      | 128k/390k [00:00<00:00, 24.9MiB/s]
+[rank0]:
+[rank0]:Downloading torchtitan/16M-baseline-202510...48/__0_0.distcp:   0%|          | 0.00/62.1M [00:00<?, ?iB/s][rank0]:
+[rank0]:Downloading torchtitan/16M-baseline-202510...48/__0_0.distcp:   0%|          | 262k/62.1M [00:00<00:37, 1.67MiB/s]
+[rank0]:
+[rank0]:Downloading torchtitan/16M-baseline-202510...48/__1_0.distcp:   0%|          | 0.00/62.4M [00:00<?, ?iB/s][rank0]:
+[rank0]:
+[rank0]:Downloading torchtitan/16M-baseline-202510...48/__1_0.distcp:   0%|          | 0.00/62.4M [00:00<?, ?iB/s][A
+[rank0]:
+[rank0]:
+[rank0]:Downloading torchtitan/16M-baseline-202510...48/__1_0.distcp:   0%|          | 0.00/62.4M [00:00<?, ?iB/s][A[A
+[rank0]:Downloading torchtitan/16M-baseline-202510...48/__1_0.distcp:   0%|          | 262k/62.4M [00:00<00:01, 39.5MiB/s]
+[rank0]:
+[rank0]:Downloading torchtitan/16M-baseline-202510...48/__1_0.distcp:   0%|          | 262k/62.4M [00:00<00:01, 51.2MiB/s]
+[rank0]:
+[rank0]:Downloading torchtitan/16M-baseline-202510...48/__1_0.distcp:   0%|          | 262k/62.4M [00:00<00:31, 1.97MiB/s]
+[rank0]:
+[rank0]:Downloading torchtitan/16M-baseline-202510...48/__2_0.distcp:   0%|          | 0.00/62.4M [00:00<?, ?iB/s]
+[rank0]:
+[rank0]:
+[rank0]:
+[rank0]:Downloading torchtitan/16M-baseline-202510...48/__2_0.distcp:   0%|          | 0.00/62.4M [00:00<?, ?iB/s][A[A[A
+[rank0]:
+[rank0]:Downloading torchtitan/16M-baseline-202510...48/__2_0.distcp:   0%|          | 0.00/62.4M [00:00<?, ?iB/s][A
+[rank0]:Downloading torchtitan/16M-baseline-202510...48/__2_0.distcp:   0%|          | 262k/62.4M [00:00<00:01, 58.6MiB/s]
+[rank0]:
+[rank0]:
+[rank0]:
+[rank0]:Downloading torchtitan/16M-baseline-202510...48/__2_0.distcp:   0%|          | 0.00/62.4M [00:00<?, ?iB/s][A[A
+[rank0]:Downloading torchtitan/16M-baseline-202510...48/__2_0.distcp:   0%|          | 262k/62.4M [00:00<00:01, 40.6MiB/s]
+[rank0]:
+[rank0]:Downloading torchtitan/16M-baseline-202510...48/__2_0.distcp:   0%|          | 262k/62.4M [00:00<00:01, 51.8MiB/s]
+[rank0]:
+[rank0]:Downloading torchtitan/16M-baseline-202510...48/__2_0.distcp:   0%|          | 262k/62.4M [00:00<00:33, 1.87MiB/s]
+[rank0]:
+[rank0]:Downloading torchtitan/16M-baseline-202510...48/__3_0.distcp:   0%|          | 0.00/62.4M [00:00<?, ?iB/s]
+[rank0]:
+[rank0]:Downloading torchtitan/16M-baseline-202510...48/__3_0.distcp:   0%|          | 0.00/62.4M [00:00<?, ?iB/s][A
+[rank0]:Downloading torchtitan/16M-baseline-202510...48/__3_0.distcp:   0%|          | 262k/62.4M [00:00<00:00, 80.9MiB/s]
+[rank0]:
+[rank0]:Downloading torchtitan/16M-baseline-202510...48/__3_0.distcp:   0%|          | 262k/62.4M [00:00<00:32, 1.91MiB/s]
+[rank0]:/nfs-share/aai30/projects/torchtitan/.venv/lib/python3.12/site-packages/torch/distributed/c10d_logger.py:83: UserWarning: barrier(): using the device under current context. You can specify `device_id` in `init_process_group` to mute this warning.
+[rank0]:  return func(*args, **kwargs)
+[rank0]:/nfs-share/aai30/projects/torchtitan/torchtitan/experiments/fl/optimizers/qhadamw.py:497: UserWarning: `torch._utils.is_compiling` is deprecated. Use `torch.compiler.is_compiling` instead.
+[rank0]:  not torch._utils.is_compiling() and capturable  # pyright: ignore[reportAttributeAccessIssue]
+[rank0]:wandb: updating run metadata
+[rank0]:wandb: 🚀 View run iclr2026-vlr-73f7a163-v0p98-sw1-20251108-123812-idx0-worker0-rep0-rank0 at: https://wandb.ai/camlsys/torchtitan_tune_lr/runs/y7fhjor6
+[rank0]:wandb: ⭐️ View project at: https://wandb.ai/camlsys/torchtitan_tune_lr
+[rank0]:wandb: Synced 5 W&B file(s), 0 media file(s), 0 artifact file(s) and 0 other file(s)
+[rank0]:wandb: Find logs at: ./outputs/iclr2026-vlr-73f7a163-v0p98-sw1-20251108-123812-idx0/tb/20251108-1238/rank_0/wandb/run-20251108_123831-y7fhjor6/logs
+[rank0]:Traceback (most recent call last):
+[rank0]:  File "<frozen runpy>", line 198, in _run_module_as_main
+[rank0]:  File "<frozen runpy>", line 88, in _run_code
+[rank0]:  File "/nfs-share/aai30/projects/torchtitan/torchtitan/experiments/fl/train.py", line 652, in <module>
+[rank0]:    main()
+[rank0]:  File "/nfs-share/aai30/projects/torchtitan/torchtitan/experiments/fl/train.py", line 638, in main
+[rank0]:    trainer.train()
+[rank0]:  File "/nfs-share/aai30/projects/torchtitan/.venv/lib/python3.12/site-packages/torch/distributed/elastic/multiprocessing/errors/__init__.py", line 362, in wrapper
+[rank0]:    return f(*args, **kwargs)
+[rank0]:           ^^^^^^^^^^^^^^^^^^
+[rank0]:  File "/nfs-share/aai30/projects/torchtitan/torchtitan/train.py", line 643, in train
+[rank0]:    loaded = self.checkpointer.load(step=job_config.checkpoint.load_step)
+[rank0]:             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank0]:  File "/nfs-share/aai30/projects/torchtitan/.venv/lib/python3.12/site-packages/torch/utils/_contextlib.py", line 123, in decorate_context
+[rank0]:    return func(*args, **kwargs)
+[rank0]:           ^^^^^^^^^^^^^^^^^^^^^
+[rank0]:  File "/nfs-share/aai30/projects/torchtitan/torchtitan/components/checkpoint.py", line 620, in load
+[rank0]:    self.dcp_load(
+[rank0]:  File "/nfs-share/aai30/projects/torchtitan/torchtitan/components/checkpoint.py", line 445, in dcp_load
+[rank0]:    dcp.load(state_dict, checkpoint_id=checkpoint_id)
+[rank0]:  File "/nfs-share/aai30/projects/torchtitan/.venv/lib/python3.12/site-packages/torch/distributed/checkpoint/logger.py", line 90, in wrapper
+[rank0]:    result = func(*args, **kwargs)
+[rank0]:             ^^^^^^^^^^^^^^^^^^^^^
+[rank0]:  File "/nfs-share/aai30/projects/torchtitan/.venv/lib/python3.12/site-packages/torch/distributed/checkpoint/utils.py", line 483, in inner_func
+[rank0]:    return func(*args, **kwargs)
+[rank0]:           ^^^^^^^^^^^^^^^^^^^^^
+[rank0]:  File "/nfs-share/aai30/projects/torchtitan/.venv/lib/python3.12/site-packages/torch/distributed/checkpoint/state_dict_loader.py", line 199, in load
+[rank0]:    elem.load_state_dict(statetful_sd[key])
+[rank0]:  File "/nfs-share/aai30/projects/torchtitan/torchtitan/experiments/fl/dataloader/parallel.py", line 564, in load_state_dict
+[rank0]:    self.dp_world_size == state_dict["world_size"]
+[rank0]:AssertionError: dp_degree is inconsistent before and after checkpoint, dataloader resharding is not supported yet.
+[rank0]:[rank0]: Traceback (most recent call last):
+[rank0]:[rank0]:   File "<frozen runpy>", line 198, in _run_module_as_main
+[rank0]:[rank0]:   File "<frozen runpy>", line 88, in _run_code
+[rank0]:[rank0]:   File "/nfs-share/aai30/projects/torchtitan/torchtitan/experiments/fl/train.py", line 652, in <module>
+[rank0]:[rank0]:     main()
+[rank0]:[rank0]:   File "/nfs-share/aai30/projects/torchtitan/torchtitan/experiments/fl/train.py", line 638, in main
+[rank0]:[rank0]:     trainer.train()
+[rank0]:[rank0]:   File "/nfs-share/aai30/projects/torchtitan/.venv/lib/python3.12/site-packages/torch/distributed/elastic/multiprocessing/errors/__init__.py", line 362, in wrapper
+[rank0]:[rank0]:     return f(*args, **kwargs)
+[rank0]:[rank0]:            ^^^^^^^^^^^^^^^^^^
+[rank0]:[rank0]:   File "/nfs-share/aai30/projects/torchtitan/torchtitan/train.py", line 643, in train
+[rank0]:[rank0]:     loaded = self.checkpointer.load(step=job_config.checkpoint.load_step)
+[rank0]:[rank0]:              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank0]:[rank0]:   File "/nfs-share/aai30/projects/torchtitan/.venv/lib/python3.12/site-packages/torch/utils/_contextlib.py", line 123, in decorate_context
+[rank0]:[rank0]:     return func(*args, **kwargs)
+[rank0]:[rank0]:            ^^^^^^^^^^^^^^^^^^^^^
+[rank0]:[rank0]:   File "/nfs-share/aai30/projects/torchtitan/torchtitan/components/checkpoint.py", line 620, in load
+[rank0]:[rank0]:     self.dcp_load(
+[rank0]:[rank0]:   File "/nfs-share/aai30/projects/torchtitan/torchtitan/components/checkpoint.py", line 445, in dcp_load
+[rank0]:[rank0]:     dcp.load(state_dict, checkpoint_id=checkpoint_id)
+[rank0]:[rank0]:   File "/nfs-share/aai30/projects/torchtitan/.venv/lib/python3.12/site-packages/torch/distributed/checkpoint/logger.py", line 90, in wrapper
+[rank0]:[rank0]:     result = func(*args, **kwargs)
+[rank0]:[rank0]:              ^^^^^^^^^^^^^^^^^^^^^
+[rank0]:[rank0]:   File "/nfs-share/aai30/projects/torchtitan/.venv/lib/python3.12/site-packages/torch/distributed/checkpoint/utils.py", line 483, in inner_func
+[rank0]:[rank0]:     return func(*args, **kwargs)
+[rank0]:[rank0]:            ^^^^^^^^^^^^^^^^^^^^^
+[rank0]:[rank0]:   File "/nfs-share/aai30/projects/torchtitan/.venv/lib/python3.12/site-packages/torch/distributed/checkpoint/state_dict_loader.py", line 199, in load
+[rank0]:[rank0]:     elem.load_state_dict(statetful_sd[key])
+[rank0]:[rank0]:   File "/nfs-share/aai30/projects/torchtitan/torchtitan/experiments/fl/dataloader/parallel.py", line 564, in load_state_dict
+[rank0]:[rank0]:     self.dp_world_size == state_dict["world_size"]
+[rank0]:[rank0]: AssertionError: dp_degree is inconsistent before and after checkpoint, dataloader resharding is not supported yet.
+E1108 12:38:39.138000 1270014 torch/distributed/elastic/multiprocessing/api.py:974] failed (exitcode: 1) local_rank: 0 (pid: 1270043) of binary: /nfs-share/aai30/projects/torchtitan/.venv/bin/python3
+E1108 12:38:39.145000 1270014 torch/distributed/elastic/multiprocessing/errors/error_handler.py:145] no error file defined for parent, to copy child error file (/tmp/torchelastic_gvqjfci9/iclr2026-vlr-73f7a163-v0p98-sw1-20251108-123812-idx0_g7e3nofj/attempt_0/0/error.json)
+Traceback (most recent call last):
+  File "/nfs-share/aai30/projects/torchtitan/.venv/bin/torchrun", line 10, in <module>
+    sys.exit(main())
+             ^^^^^^
+  File "/nfs-share/aai30/projects/torchtitan/.venv/lib/python3.12/site-packages/torch/distributed/elastic/multiprocessing/errors/__init__.py", line 362, in wrapper
+    return f(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^
+  File "/nfs-share/aai30/projects/torchtitan/.venv/lib/python3.12/site-packages/torch/distributed/run.py", line 977, in main
+    run(args)
+  File "/nfs-share/aai30/projects/torchtitan/.venv/lib/python3.12/site-packages/torch/distributed/run.py", line 968, in run
+    elastic_launch(
+  File "/nfs-share/aai30/projects/torchtitan/.venv/lib/python3.12/site-packages/torch/distributed/launcher/api.py", line 165, in __call__
+    return launch_agent(self._config, self._entrypoint, list(args))
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/nfs-share/aai30/projects/torchtitan/.venv/lib/python3.12/site-packages/torch/distributed/launcher/api.py", line 312, in launch_agent
+    raise ChildFailedError(
+torch.distributed.elastic.multiprocessing.errors.ChildFailedError: 
+============================================================
+torchtitan.experiments.fl.train FAILED
+------------------------------------------------------------
+Failures:
+  <NO_OTHER_FAILURES>
+------------------------------------------------------------
+Root Cause (first observed failure):
+[0]:
+  time      : 2025-11-08_12:38:36
+  host      : ruapehu.cl.cam.ac.uk
+  rank      : 0 (local_rank: 0)
+  exitcode  : 1 (pid: 1270043)
+  error_file: /tmp/torchelastic_gvqjfci9/iclr2026-vlr-73f7a163-v0p98-sw1-20251108-123812-idx0_g7e3nofj/attempt_0/0/error.json
+  traceback : Traceback (most recent call last):
+    File "/nfs-share/aai30/projects/torchtitan/.venv/lib/python3.12/site-packages/torch/distributed/elastic/multiprocessing/errors/__init__.py", line 362, in wrapper
+      return f(*args, **kwargs)
+             ^^^^^^^^^^^^^^^^^^
+    File "/nfs-share/aai30/projects/torchtitan/torchtitan/train.py", line 643, in train
+      loaded = self.checkpointer.load(step=job_config.checkpoint.load_step)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    File "/nfs-share/aai30/projects/torchtitan/.venv/lib/python3.12/site-packages/torch/utils/_contextlib.py", line 123, in decorate_context
+      return func(*args, **kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^
+    File "/nfs-share/aai30/projects/torchtitan/torchtitan/components/checkpoint.py", line 620, in load
+      self.dcp_load(
+    File "/nfs-share/aai30/projects/torchtitan/torchtitan/components/checkpoint.py", line 445, in dcp_load
+      dcp.load(state_dict, checkpoint_id=checkpoint_id)
+    File "/nfs-share/aai30/projects/torchtitan/.venv/lib/python3.12/site-packages/torch/distributed/checkpoint/logger.py", line 90, in wrapper
+      result = func(*args, **kwargs)
+               ^^^^^^^^^^^^^^^^^^^^^
+    File "/nfs-share/aai30/projects/torchtitan/.venv/lib/python3.12/site-packages/torch/distributed/checkpoint/utils.py", line 483, in inner_func
+      return func(*args, **kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^
+    File "/nfs-share/aai30/projects/torchtitan/.venv/lib/python3.12/site-packages/torch/distributed/checkpoint/state_dict_loader.py", line 199, in load
+      elem.load_state_dict(statetful_sd[key])
+    File "/nfs-share/aai30/projects/torchtitan/torchtitan/experiments/fl/dataloader/parallel.py", line 564, in load_state_dict
+      self.dp_world_size == state_dict["world_size"]
+  AssertionError: dp_degree is inconsistent before and after checkpoint, dataloader resharding is not supported yet.
+  
+============================================================

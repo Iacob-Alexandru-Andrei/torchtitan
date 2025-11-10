@@ -1,0 +1,62 @@
+[rank0]:wandb: Currently logged in as: alexiacob (camlsys) to https://api.wandb.ai. Use `wandb login --relogin` to force relogin
+[rank0]:wandb: setting up run ablcq6hj
+[rank0]:wandb: Tracking run with wandb version 0.22.1
+[rank0]:wandb: Run data is saved locally in ./outputs/iclr2026-vlr-73f7a163-v0p98-sw1-20251108-130625-idx0/tb/20251108-1306/rank_0/wandb/run-20251108_130645-ablcq6hj
+[rank0]:wandb: Run `wandb offline` to turn off syncing.
+[rank0]:wandb: Syncing run iclr2026-vlr-73f7a163-v0p98-sw1-20251108-130625-idx0-worker0-rep0-rank0
+[rank0]:wandb: ⭐️ View project at https://wandb.ai/camlsys/torchtitan_tune_lr
+[rank0]:wandb: 🚀 View run at https://wandb.ai/camlsys/torchtitan_tune_lr/runs/ablcq6hj
+[rank0]:
+[rank0]:Downloading torchtitan/16M-baseline-202510...3_manifest.json:   0%|          | 0.00/77.0 [00:00<?, ?iB/s]
+[rank0]:Downloading torchtitan/16M-baseline-202510...3_manifest.json: 100%|██████████| 77.0/77.0 [00:00<00:00, 307kiB/s]
+[rank0]:
+[rank0]:Downloading torchtitan/16M-baseline-202510...-2048/.metadata:   0%|          | 0.00/390k [00:00<?, ?iB/s]
+[rank0]:Downloading torchtitan/16M-baseline-202510...-2048/.metadata:  33%|███▎      | 128k/390k [00:00<00:00, 24.4MiB/s]
+[rank0]:
+[rank0]:Downloading torchtitan/16M-baseline-202510...48/__0_0.distcp:   0%|          | 0.00/62.1M [00:00<?, ?iB/s]
+[rank0]:
+[rank0]:Downloading torchtitan/16M-baseline-202510...48/__0_0.distcp:   0%|          | 0.00/62.1M [00:00<?, ?iB/s][A
+[rank0]:Downloading torchtitan/16M-baseline-202510...48/__0_0.distcp:   0%|          | 262k/62.1M [00:00<00:00, 68.9MiB/s]
+[rank0]:
+[rank0]:Downloading torchtitan/16M-baseline-202510...48/__0_0.distcp:   0%|          | 262k/62.1M [00:00<00:31, 1.95MiB/s]
+[rank0]:
+[rank0]:Downloading torchtitan/16M-baseline-202510...48/__1_0.distcp:   0%|          | 0.00/62.4M [00:00<?, ?iB/s]
+[rank0]:
+[rank0]:Downloading torchtitan/16M-baseline-202510...48/__1_0.distcp:   0%|          | 0.00/62.4M [00:00<?, ?iB/s][A
+[rank0]:Downloading torchtitan/16M-baseline-202510...48/__1_0.distcp:   0%|          | 262k/62.4M [00:00<00:01, 56.9MiB/s]
+[rank0]:
+[rank0]:Downloading torchtitan/16M-baseline-202510...48/__1_0.distcp:   0%|          | 262k/62.4M [00:00<00:32, 1.94MiB/s]
+[rank0]:
+[rank0]:Downloading torchtitan/16M-baseline-202510...48/__2_0.distcp:   0%|          | 0.00/62.4M [00:00<?, ?iB/s]
+[rank0]:
+[rank0]:Downloading torchtitan/16M-baseline-202510...48/__2_0.distcp:   0%|          | 0.00/62.4M [00:00<?, ?iB/s][A
+[rank0]:
+[rank0]:
+[rank0]:Downloading torchtitan/16M-baseline-202510...48/__2_0.distcp:   0%|          | 0.00/62.4M [00:00<?, ?iB/s][A[A
+[rank0]:Downloading torchtitan/16M-baseline-202510...48/__2_0.distcp:   0%|          | 262k/62.4M [00:00<00:01, 44.4MiB/s]
+[rank0]:
+[rank0]:Downloading torchtitan/16M-baseline-202510...48/__2_0.distcp:   0%|          | 262k/62.4M [00:00<00:01, 54.2MiB/s]
+[rank0]:
+[rank0]:Downloading torchtitan/16M-baseline-202510...48/__2_0.distcp:   0%|          | 262k/62.4M [00:00<00:31, 1.95MiB/s]
+[rank0]:
+[rank0]:Downloading torchtitan/16M-baseline-202510...48/__3_0.distcp:   0%|          | 0.00/62.4M [00:00<?, ?iB/s]
+[rank0]:
+[rank0]:
+[rank0]:Downloading torchtitan/16M-baseline-202510...48/__3_0.distcp:   0%|          | 0.00/62.4M [00:00<?, ?iB/s][A[A
+[rank0]:
+[rank0]:Downloading torchtitan/16M-baseline-202510...48/__3_0.distcp:   0%|          | 0.00/62.4M [00:00<?, ?iB/s][A
+[rank0]:Downloading torchtitan/16M-baseline-202510...48/__3_0.distcp:   0%|          | 0.00/62.4M [00:00<?, ?iB/s]
+[rank0]:Downloading torchtitan/16M-baseline-202510...48/__3_0.distcp:   0%|          | 262k/62.4M [00:00<00:01, 59.9MiB/s]
+[rank0]:
+[rank0]:Downloading torchtitan/16M-baseline-202510...48/__3_0.distcp:   0%|          | 262k/62.4M [00:00<00:01, 34.1MiB/s]
+[rank0]:
+[rank0]:Downloading torchtitan/16M-baseline-202510...48/__3_0.distcp:   0%|          | 262k/62.4M [00:00<00:00, 68.8MiB/s]
+[rank0]:
+[rank0]:Downloading torchtitan/16M-baseline-202510...48/__3_0.distcp:   0%|          | 262k/62.4M [00:00<00:31, 2.00MiB/s]
+[rank0]:/nfs-share/aai30/projects/torchtitan/.venv/lib/python3.12/site-packages/torch/distributed/c10d_logger.py:83: UserWarning: barrier(): using the device under current context. You can specify `device_id` in `init_process_group` to mute this warning.
+[rank0]:  return func(*args, **kwargs)
+[rank0]:/nfs-share/aai30/projects/torchtitan/torchtitan/experiments/fl/optimizers/qhadamw.py:497: UserWarning: `torch._utils.is_compiling` is deprecated. Use `torch.compiler.is_compiling` instead.
+[rank0]:  not torch._utils.is_compiling() and capturable  # pyright: ignore[reportAttributeAccessIssue]
+[rank0]:/nfs-share/aai30/projects/torchtitan/torchtitan/experiments/fl/optimizers/qhadamw.py:497: UserWarning: `torch._utils.is_compiling` is deprecated. Use `torch.compiler.is_compiling` instead.
+[rank0]:  not torch._utils.is_compiling() and capturable  # pyright: ignore[reportAttributeAccessIssue]
+slurmstepd: error: *** JOB 26389 ON ruapehu CANCELLED AT 2025-11-08T13:09:15 ***

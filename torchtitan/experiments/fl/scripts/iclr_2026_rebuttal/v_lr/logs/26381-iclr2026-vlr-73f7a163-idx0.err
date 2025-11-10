@@ -1,0 +1,123 @@
+[rank0]:wandb: Currently logged in as: alexiacob (camlsys) to https://api.wandb.ai. Use `wandb login --relogin` to force relogin
+[rank0]:wandb: Tracking run with wandb version 0.22.1
+[rank0]:wandb: Run data is saved locally in ./outputs/iclr2026-vlr-73f7a163-v0p98-sw1-20251108-123620-idx0/tb/20251108-1236/rank_0/wandb/run-20251108_123640-05pqj7k3
+[rank0]:wandb: Run `wandb offline` to turn off syncing.
+[rank0]:wandb: Syncing run iclr2026-vlr-73f7a163-v0p98-sw1-20251108-123620-idx0-worker0-rep0-rank0
+[rank0]:wandb: ⭐️ View project at https://wandb.ai/camlsys/torchtitan
+[rank0]:wandb: 🚀 View run at https://wandb.ai/camlsys/torchtitan/runs/05pqj7k3
+[rank0]:wandb: updating run metadata
+[rank0]:wandb: 🚀 View run iclr2026-vlr-73f7a163-v0p98-sw1-20251108-123620-idx0-worker0-rep0-rank0 at: https://wandb.ai/camlsys/torchtitan/runs/05pqj7k3
+[rank0]:wandb: ⭐️ View project at: https://wandb.ai/camlsys/torchtitan
+[rank0]:wandb: Synced 5 W&B file(s), 0 media file(s), 0 artifact file(s) and 0 other file(s)
+[rank0]:wandb: Find logs at: ./outputs/iclr2026-vlr-73f7a163-v0p98-sw1-20251108-123620-idx0/tb/20251108-1236/rank_0/wandb/run-20251108_123640-05pqj7k3/logs
+[rank0]:Traceback (most recent call last):
+[rank0]:  File "<frozen runpy>", line 198, in _run_module_as_main
+[rank0]:  File "<frozen runpy>", line 88, in _run_code
+[rank0]:  File "/nfs-share/aai30/projects/torchtitan/torchtitan/experiments/fl/train.py", line 652, in <module>
+[rank0]:    main()
+[rank0]:  File "/nfs-share/aai30/projects/torchtitan/torchtitan/experiments/fl/train.py", line 630, in main
+[rank0]:    download_manager.download_if_needed()  # type: ignore[attr-defined]
+[rank0]:    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank0]:  File "/nfs-share/aai30/projects/torchtitan/torchtitan/experiments/fl/s3_checkpoint.py", line 319, in download_if_needed
+[rank0]:    self._download_step(step, remote_path=remote_path)
+[rank0]:  File "/nfs-share/aai30/projects/torchtitan/torchtitan/experiments/fl/s3_checkpoint.py", line 704, in _download_step
+[rank0]:    raise last_error
+[rank0]:  File "/nfs-share/aai30/projects/torchtitan/torchtitan/experiments/fl/s3_checkpoint.py", line 675, in _download_step
+[rank0]:    download_file_from_s3(
+[rank0]:  File "/nfs-share/aai30/projects/torchtitan/torchtitan/experiments/fl/s3_checkpoint.py", line 55, in download_file_from_s3
+[rank0]:    remote_up_down.download_file(
+[rank0]:  File "/nfs-share/aai30/projects/torchtitan/.venv/lib/python3.12/site-packages/composer/loggers/remote_uploader_downloader.py", line 468, in download_file
+[rank0]:    get_file(
+[rank0]:  File "/nfs-share/aai30/projects/torchtitan/.venv/lib/python3.12/site-packages/composer/utils/file_helpers.py", line 642, in get_file
+[rank0]:    _get_file(
+[rank0]:  File "/nfs-share/aai30/projects/torchtitan/.venv/lib/python3.12/site-packages/composer/utils/file_helpers.py", line 675, in _get_file
+[rank0]:    total_size_in_bytes = object_store.get_object_size(path)
+[rank0]:                          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank0]:  File "/nfs-share/aai30/projects/torchtitan/.venv/lib/python3.12/site-packages/composer/utils/object_store/s3_object_store.py", line 125, in get_object_size
+[rank0]:    _ensure_not_found_errors_are_wrapped(self.get_uri(object_name), e)
+[rank0]:  File "/nfs-share/aai30/projects/torchtitan/.venv/lib/python3.12/site-packages/composer/utils/object_store/s3_object_store.py", line 27, in _ensure_not_found_errors_are_wrapped
+[rank0]:    raise e
+[rank0]:  File "/nfs-share/aai30/projects/torchtitan/.venv/lib/python3.12/site-packages/composer/utils/object_store/s3_object_store.py", line 123, in get_object_size
+[rank0]:    obj = self.client.get_object(Bucket=self.bucket, Key=self.get_key(object_name))
+[rank0]:          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank0]:  File "/nfs-share/aai30/projects/torchtitan/.venv/lib/python3.12/site-packages/botocore/client.py", line 602, in _api_call
+[rank0]:    return self._make_api_call(operation_name, kwargs)
+[rank0]:           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank0]:  File "/nfs-share/aai30/projects/torchtitan/.venv/lib/python3.12/site-packages/botocore/context.py", line 123, in wrapper
+[rank0]:    return func(*args, **kwargs)
+[rank0]:           ^^^^^^^^^^^^^^^^^^^^^
+[rank0]:  File "/nfs-share/aai30/projects/torchtitan/.venv/lib/python3.12/site-packages/botocore/client.py", line 1078, in _make_api_call
+[rank0]:    raise error_class(parsed_response, operation_name)
+[rank0]:botocore.exceptions.ClientError: An error occurred (InvalidAccessKeyId) when calling the GetObject operation: The AWS Access Key Id you provided does not exist in our records.
+[rank0]:[rank0]: Traceback (most recent call last):
+[rank0]:[rank0]:   File "<frozen runpy>", line 198, in _run_module_as_main
+[rank0]:[rank0]:   File "<frozen runpy>", line 88, in _run_code
+[rank0]:[rank0]:   File "/nfs-share/aai30/projects/torchtitan/torchtitan/experiments/fl/train.py", line 652, in <module>
+[rank0]:[rank0]:     main()
+[rank0]:[rank0]:   File "/nfs-share/aai30/projects/torchtitan/torchtitan/experiments/fl/train.py", line 630, in main
+[rank0]:[rank0]:     download_manager.download_if_needed()  # type: ignore[attr-defined]
+[rank0]:[rank0]:     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank0]:[rank0]:   File "/nfs-share/aai30/projects/torchtitan/torchtitan/experiments/fl/s3_checkpoint.py", line 319, in download_if_needed
+[rank0]:[rank0]:     self._download_step(step, remote_path=remote_path)
+[rank0]:[rank0]:   File "/nfs-share/aai30/projects/torchtitan/torchtitan/experiments/fl/s3_checkpoint.py", line 704, in _download_step
+[rank0]:[rank0]:     raise last_error
+[rank0]:[rank0]:   File "/nfs-share/aai30/projects/torchtitan/torchtitan/experiments/fl/s3_checkpoint.py", line 675, in _download_step
+[rank0]:[rank0]:     download_file_from_s3(
+[rank0]:[rank0]:   File "/nfs-share/aai30/projects/torchtitan/torchtitan/experiments/fl/s3_checkpoint.py", line 55, in download_file_from_s3
+[rank0]:[rank0]:     remote_up_down.download_file(
+[rank0]:[rank0]:   File "/nfs-share/aai30/projects/torchtitan/.venv/lib/python3.12/site-packages/composer/loggers/remote_uploader_downloader.py", line 468, in download_file
+[rank0]:[rank0]:     get_file(
+[rank0]:[rank0]:   File "/nfs-share/aai30/projects/torchtitan/.venv/lib/python3.12/site-packages/composer/utils/file_helpers.py", line 642, in get_file
+[rank0]:[rank0]:     _get_file(
+[rank0]:[rank0]:   File "/nfs-share/aai30/projects/torchtitan/.venv/lib/python3.12/site-packages/composer/utils/file_helpers.py", line 675, in _get_file
+[rank0]:[rank0]:     total_size_in_bytes = object_store.get_object_size(path)
+[rank0]:[rank0]:                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank0]:[rank0]:   File "/nfs-share/aai30/projects/torchtitan/.venv/lib/python3.12/site-packages/composer/utils/object_store/s3_object_store.py", line 125, in get_object_size
+[rank0]:[rank0]:     _ensure_not_found_errors_are_wrapped(self.get_uri(object_name), e)
+[rank0]:[rank0]:   File "/nfs-share/aai30/projects/torchtitan/.venv/lib/python3.12/site-packages/composer/utils/object_store/s3_object_store.py", line 27, in _ensure_not_found_errors_are_wrapped
+[rank0]:[rank0]:     raise e
+[rank0]:[rank0]:   File "/nfs-share/aai30/projects/torchtitan/.venv/lib/python3.12/site-packages/composer/utils/object_store/s3_object_store.py", line 123, in get_object_size
+[rank0]:[rank0]:     obj = self.client.get_object(Bucket=self.bucket, Key=self.get_key(object_name))
+[rank0]:[rank0]:           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank0]:[rank0]:   File "/nfs-share/aai30/projects/torchtitan/.venv/lib/python3.12/site-packages/botocore/client.py", line 602, in _api_call
+[rank0]:[rank0]:     return self._make_api_call(operation_name, kwargs)
+[rank0]:[rank0]:            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank0]:[rank0]:   File "/nfs-share/aai30/projects/torchtitan/.venv/lib/python3.12/site-packages/botocore/context.py", line 123, in wrapper
+[rank0]:[rank0]:     return func(*args, **kwargs)
+[rank0]:[rank0]:            ^^^^^^^^^^^^^^^^^^^^^
+[rank0]:[rank0]:   File "/nfs-share/aai30/projects/torchtitan/.venv/lib/python3.12/site-packages/botocore/client.py", line 1078, in _make_api_call
+[rank0]:[rank0]:     raise error_class(parsed_response, operation_name)
+[rank0]:[rank0]: botocore.exceptions.ClientError: An error occurred (InvalidAccessKeyId) when calling the GetObject operation: The AWS Access Key Id you provided does not exist in our records.
+E1108 12:36:48.952000 1269721 torch/distributed/elastic/multiprocessing/api.py:974] failed (exitcode: 1) local_rank: 0 (pid: 1269744) of binary: /nfs-share/aai30/projects/torchtitan/.venv/bin/python3
+Traceback (most recent call last):
+  File "/nfs-share/aai30/projects/torchtitan/.venv/bin/torchrun", line 10, in <module>
+    sys.exit(main())
+             ^^^^^^
+  File "/nfs-share/aai30/projects/torchtitan/.venv/lib/python3.12/site-packages/torch/distributed/elastic/multiprocessing/errors/__init__.py", line 362, in wrapper
+    return f(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^
+  File "/nfs-share/aai30/projects/torchtitan/.venv/lib/python3.12/site-packages/torch/distributed/run.py", line 977, in main
+    run(args)
+  File "/nfs-share/aai30/projects/torchtitan/.venv/lib/python3.12/site-packages/torch/distributed/run.py", line 968, in run
+    elastic_launch(
+  File "/nfs-share/aai30/projects/torchtitan/.venv/lib/python3.12/site-packages/torch/distributed/launcher/api.py", line 165, in __call__
+    return launch_agent(self._config, self._entrypoint, list(args))
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/nfs-share/aai30/projects/torchtitan/.venv/lib/python3.12/site-packages/torch/distributed/launcher/api.py", line 312, in launch_agent
+    raise ChildFailedError(
+torch.distributed.elastic.multiprocessing.errors.ChildFailedError: 
+============================================================
+torchtitan.experiments.fl.train FAILED
+------------------------------------------------------------
+Failures:
+  <NO_OTHER_FAILURES>
+------------------------------------------------------------
+Root Cause (first observed failure):
+[0]:
+  time      : 2025-11-08_12:36:48
+  host      : ruapehu.cl.cam.ac.uk
+  rank      : 0 (local_rank: 0)
+  exitcode  : 1 (pid: 1269744)
+  error_file: <N/A>
+  traceback : To enable traceback see: https://pytorch.org/docs/stable/elastic/errors.html
+============================================================

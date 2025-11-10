@@ -1,0 +1,230 @@
+[rank0]:wandb: Currently logged in as: alexiacob (camlsys) to https://api.wandb.ai. Use `wandb login --relogin` to force relogin
+[rank0]:wandb: Tracking run with wandb version 0.22.1
+[rank0]:wandb: Run data is saved locally in ./outputs/iclr2026-vlr-73f7a163-v0p98-sw16-20251108-140329-idx4/tb/20251108-1403/rank_0/wandb/run-20251108_140350-qz589i9j
+[rank0]:wandb: Run `wandb offline` to turn off syncing.
+[rank0]:wandb: Syncing run iclr2026-vlr-73f7a163-v0p98-sw16-20251108-140329-idx4-worker0-rep0-rank0
+[rank0]:wandb: ⭐️ View project at https://wandb.ai/camlsys/torchtitan_tune_lr
+[rank0]:wandb: 🚀 View run at https://wandb.ai/camlsys/torchtitan_tune_lr/runs/qz589i9j
+[rank0]:
+[rank0]:Downloading torchtitan/16M-baseline-202510...3_manifest.json:   0%|          | 0.00/77.0 [00:00<?, ?iB/s]
+[rank0]:Downloading torchtitan/16M-baseline-202510...3_manifest.json: 100%|██████████| 77.0/77.0 [00:00<00:00, 474kiB/s]
+[rank0]:
+[rank0]:Downloading torchtitan/16M-baseline-202510...-2048/.metadata:   0%|          | 0.00/390k [00:00<?, ?iB/s]
+[rank0]:Downloading torchtitan/16M-baseline-202510...-2048/.metadata:  33%|███▎      | 128k/390k [00:00<00:00, 8.43MiB/s]
+[rank0]:
+[rank0]:Downloading torchtitan/16M-baseline-202510...48/__0_0.distcp:   0%|          | 0.00/62.1M [00:00<?, ?iB/s][rank0]:
+[rank0]:Downloading torchtitan/16M-baseline-202510...48/__0_0.distcp:   0%|          | 262k/62.1M [00:00<00:34, 1.77MiB/s]
+[rank0]:
+[rank0]:Downloading torchtitan/16M-baseline-202510...48/__1_0.distcp:   0%|          | 0.00/62.4M [00:00<?, ?iB/s]
+[rank0]:
+[rank0]:
+[rank0]:
+[rank0]:Downloading torchtitan/16M-baseline-202510...48/__1_0.distcp:   0%|          | 0.00/62.4M [00:00<?, ?iB/s][A[A[A
+[rank0]:
+[rank0]:
+[rank0]:Downloading torchtitan/16M-baseline-202510...48/__1_0.distcp:   0%|          | 0.00/62.4M [00:00<?, ?iB/s][A[A
+[rank0]:Downloading torchtitan/16M-baseline-202510...48/__1_0.distcp:   0%|          | 262k/62.4M [00:00<00:00, 62.5MiB/s]
+[rank0]:
+[rank0]:
+[rank0]:Downloading torchtitan/16M-baseline-202510...48/__1_0.distcp:   0%|          | 0.00/62.4M [00:00<?, ?iB/s][A
+[rank0]:Downloading torchtitan/16M-baseline-202510...48/__1_0.distcp:   0%|          | 262k/62.4M [00:00<00:01, 44.8MiB/s]
+[rank0]:
+[rank0]:Downloading torchtitan/16M-baseline-202510...48/__1_0.distcp:   0%|          | 0.00/62.4M [00:00<?, ?iB/s]
+[rank0]:Downloading torchtitan/16M-baseline-202510...48/__1_0.distcp:   0%|          | 262k/62.4M [00:00<00:01, 44.6MiB/s]
+[rank0]:
+[rank0]:Downloading torchtitan/16M-baseline-202510...48/__1_0.distcp:   0%|          | 262k/62.4M [00:00<00:01, 57.5MiB/s]
+[rank0]:
+[rank0]:Downloading torchtitan/16M-baseline-202510...48/__1_0.distcp:   0%|          | 262k/62.4M [00:00<00:31, 2.00MiB/s]
+[rank0]:
+[rank0]:Downloading torchtitan/16M-baseline-202510...48/__2_0.distcp:   0%|          | 0.00/62.4M [00:00<?, ?iB/s][rank0]:
+[rank0]:Downloading torchtitan/16M-baseline-202510...48/__2_0.distcp:   0%|          | 262k/62.4M [00:00<00:38, 1.60MiB/s]
+[rank0]:
+[rank0]:Downloading torchtitan/16M-baseline-202510...48/__3_0.distcp:   0%|          | 0.00/62.4M [00:00<?, ?iB/s]
+[rank0]:
+[rank0]:
+[rank0]:Downloading torchtitan/16M-baseline-202510...48/__3_0.distcp:   0%|          | 0.00/62.4M [00:00<?, ?iB/s][A[A
+[rank0]:
+[rank0]:Downloading torchtitan/16M-baseline-202510...48/__3_0.distcp:   0%|          | 0.00/62.4M [00:00<?, ?iB/s][A
+[rank0]:Downloading torchtitan/16M-baseline-202510...48/__3_0.distcp:   0%|          | 0.00/62.4M [00:00<?, ?iB/s]
+[rank0]:Downloading torchtitan/16M-baseline-202510...48/__3_0.distcp:   0%|          | 262k/62.4M [00:00<00:00, 73.8MiB/s]
+[rank0]:
+[rank0]:Downloading torchtitan/16M-baseline-202510...48/__3_0.distcp:   0%|          | 262k/62.4M [00:00<00:00, 98.1MiB/s]
+[rank0]:
+[rank0]:Downloading torchtitan/16M-baseline-202510...48/__3_0.distcp:   0%|          | 262k/62.4M [00:00<00:01, 53.7MiB/s]
+[rank0]:
+[rank0]:Downloading torchtitan/16M-baseline-202510...48/__3_0.distcp:   0%|          | 262k/62.4M [00:00<00:33, 1.87MiB/s]
+[rank0]:/nfs-share/aai30/projects/torchtitan/.venv/lib/python3.12/site-packages/torch/distributed/c10d_logger.py:83: UserWarning: barrier(): using the device under current context. You can specify `device_id` in `init_process_group` to mute this warning.
+[rank0]:  return func(*args, **kwargs)
+[rank0]:/nfs-share/aai30/projects/torchtitan/torchtitan/experiments/fl/optimizers/qhadamw.py:497: UserWarning: `torch._utils.is_compiling` is deprecated. Use `torch.compiler.is_compiling` instead.
+[rank0]:  not torch._utils.is_compiling() and capturable  # pyright: ignore[reportAttributeAccessIssue]
+[rank0]:wandb: updating run metadata
+[rank0]:wandb: 🚀 View run iclr2026-vlr-73f7a163-v0p98-sw16-20251108-140329-idx4-worker0-rep0-rank0 at: https://wandb.ai/camlsys/torchtitan_tune_lr/runs/qz589i9j
+[rank0]:wandb: ⭐️ View project at: https://wandb.ai/camlsys/torchtitan_tune_lr
+[rank0]:wandb: Synced 5 W&B file(s), 0 media file(s), 0 artifact file(s) and 0 other file(s)
+[rank0]:wandb: Find logs at: ./outputs/iclr2026-vlr-73f7a163-v0p98-sw16-20251108-140329-idx4/tb/20251108-1403/rank_0/wandb/run-20251108_140350-qz589i9j/logs
+[rank0]:Traceback (most recent call last):
+[rank0]:  File "<frozen runpy>", line 198, in _run_module_as_main
+[rank0]:  File "<frozen runpy>", line 88, in _run_code
+[rank0]:  File "/nfs-share/aai30/projects/torchtitan/torchtitan/experiments/fl/train.py", line 652, in <module>
+[rank0]:    main()
+[rank0]:  File "/nfs-share/aai30/projects/torchtitan/torchtitan/experiments/fl/train.py", line 638, in main
+[rank0]:    trainer.train()
+[rank0]:  File "/nfs-share/aai30/projects/torchtitan/.venv/lib/python3.12/site-packages/torch/distributed/elastic/multiprocessing/errors/__init__.py", line 362, in wrapper
+[rank0]:    return f(*args, **kwargs)
+[rank0]:           ^^^^^^^^^^^^^^^^^^
+[rank0]:  File "/nfs-share/aai30/projects/torchtitan/torchtitan/train.py", line 691, in train
+[rank0]:    self.train_step(data_iterator)
+[rank0]:  File "/nfs-share/aai30/projects/torchtitan/torchtitan/train.py", line 541, in train_step
+[rank0]:    input_dict, labels = next(data_iterator)
+[rank0]:                         ^^^^^^^^^^^^^^^^^^^
+[rank0]:  File "/nfs-share/aai30/projects/torchtitan/torchtitan/train.py", line 400, in batch_generator
+[rank0]:    batch = next(data_iterator)
+[rank0]:            ^^^^^^^^^^^^^^^^^^^
+[rank0]:  File "/nfs-share/aai30/projects/torchtitan/.venv/lib/python3.12/site-packages/torchdata/stateful_dataloader/stateful_dataloader.py", line 450, in __next__
+[rank0]:    return super().__next__()
+[rank0]:           ^^^^^^^^^^^^^^^^^^
+[rank0]:  File "/nfs-share/aai30/projects/torchtitan/.venv/lib/python3.12/site-packages/torch/utils/data/dataloader.py", line 740, in __next__
+[rank0]:    data = self._next_data()
+[rank0]:           ^^^^^^^^^^^^^^^^^
+[rank0]:  File "/nfs-share/aai30/projects/torchtitan/.venv/lib/python3.12/site-packages/torchdata/stateful_dataloader/stateful_dataloader.py", line 491, in _next_data
+[rank0]:    data = self._dataset_fetcher.fetch(index)  # may raise StopIteration
+[rank0]:           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank0]:  File "/nfs-share/aai30/projects/torchtitan/.venv/lib/python3.12/site-packages/torch/utils/data/_utils/fetch.py", line 33, in fetch
+[rank0]:    data.append(next(self.dataset_iter))
+[rank0]:                ^^^^^^^^^^^^^^^^^^^^^^^
+[rank0]:  File "/nfs-share/aai30/projects/torchtitan/.venv/lib/python3.12/site-packages/streaming/base/dataset.py", line 1502, in __iter__
+[rank0]:    sample_ids = self._get_work(epoch, sample_in_epoch)
+[rank0]:                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank0]:  File "/nfs-share/aai30/projects/torchtitan/.venv/lib/python3.12/site-packages/streaming/base/dataset.py", line 1049, in _get_work
+[rank0]:    shape_shm, data_shm = self._share_work(epoch_sample_ids)
+[rank0]:                          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank0]:  File "/nfs-share/aai30/projects/torchtitan/.venv/lib/python3.12/site-packages/streaming/base/dataset.py", line 964, in _share_work
+[rank0]:    shape_shm = SharedMemory(name=name, create=True, size=size, auto_cleanup=False)
+[rank0]:                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank0]:  File "/nfs-share/aai30/projects/torchtitan/.venv/lib/python3.12/site-packages/streaming/base/shared/memory.py", line 41, in __init__
+[rank0]:    shm = BuiltinSharedMemory(name, create, size)
+[rank0]:          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank0]:  File "/usr/lib/python3.12/multiprocessing/shared_memory.py", line 104, in __init__
+[rank0]:    self._fd = _posixshmem.shm_open(
+[rank0]:               ^^^^^^^^^^^^^^^^^^^^^
+[rank0]:FileExistsError: [Errno 17] File exists: '/527328870417_epoch_shape'
+[rank0]:[rank0]: Traceback (most recent call last):
+[rank0]:[rank0]:   File "<frozen runpy>", line 198, in _run_module_as_main
+[rank0]:[rank0]:   File "<frozen runpy>", line 88, in _run_code
+[rank0]:[rank0]:   File "/nfs-share/aai30/projects/torchtitan/torchtitan/experiments/fl/train.py", line 652, in <module>
+[rank0]:[rank0]:     main()
+[rank0]:[rank0]:   File "/nfs-share/aai30/projects/torchtitan/torchtitan/experiments/fl/train.py", line 638, in main
+[rank0]:[rank0]:     trainer.train()
+[rank0]:[rank0]:   File "/nfs-share/aai30/projects/torchtitan/.venv/lib/python3.12/site-packages/torch/distributed/elastic/multiprocessing/errors/__init__.py", line 362, in wrapper
+[rank0]:[rank0]:     return f(*args, **kwargs)
+[rank0]:[rank0]:            ^^^^^^^^^^^^^^^^^^
+[rank0]:[rank0]:   File "/nfs-share/aai30/projects/torchtitan/torchtitan/train.py", line 691, in train
+[rank0]:[rank0]:     self.train_step(data_iterator)
+[rank0]:[rank0]:   File "/nfs-share/aai30/projects/torchtitan/torchtitan/train.py", line 541, in train_step
+[rank0]:[rank0]:     input_dict, labels = next(data_iterator)
+[rank0]:[rank0]:                          ^^^^^^^^^^^^^^^^^^^
+[rank0]:[rank0]:   File "/nfs-share/aai30/projects/torchtitan/torchtitan/train.py", line 400, in batch_generator
+[rank0]:[rank0]:     batch = next(data_iterator)
+[rank0]:[rank0]:             ^^^^^^^^^^^^^^^^^^^
+[rank0]:[rank0]:   File "/nfs-share/aai30/projects/torchtitan/.venv/lib/python3.12/site-packages/torchdata/stateful_dataloader/stateful_dataloader.py", line 450, in __next__
+[rank0]:[rank0]:     return super().__next__()
+[rank0]:[rank0]:            ^^^^^^^^^^^^^^^^^^
+[rank0]:[rank0]:   File "/nfs-share/aai30/projects/torchtitan/.venv/lib/python3.12/site-packages/torch/utils/data/dataloader.py", line 740, in __next__
+[rank0]:[rank0]:     data = self._next_data()
+[rank0]:[rank0]:            ^^^^^^^^^^^^^^^^^
+[rank0]:[rank0]:   File "/nfs-share/aai30/projects/torchtitan/.venv/lib/python3.12/site-packages/torchdata/stateful_dataloader/stateful_dataloader.py", line 491, in _next_data
+[rank0]:[rank0]:     data = self._dataset_fetcher.fetch(index)  # may raise StopIteration
+[rank0]:[rank0]:            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank0]:[rank0]:   File "/nfs-share/aai30/projects/torchtitan/.venv/lib/python3.12/site-packages/torch/utils/data/_utils/fetch.py", line 33, in fetch
+[rank0]:[rank0]:     data.append(next(self.dataset_iter))
+[rank0]:[rank0]:                 ^^^^^^^^^^^^^^^^^^^^^^^
+[rank0]:[rank0]:   File "/nfs-share/aai30/projects/torchtitan/.venv/lib/python3.12/site-packages/streaming/base/dataset.py", line 1502, in __iter__
+[rank0]:[rank0]:     sample_ids = self._get_work(epoch, sample_in_epoch)
+[rank0]:[rank0]:                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank0]:[rank0]:   File "/nfs-share/aai30/projects/torchtitan/.venv/lib/python3.12/site-packages/streaming/base/dataset.py", line 1049, in _get_work
+[rank0]:[rank0]:     shape_shm, data_shm = self._share_work(epoch_sample_ids)
+[rank0]:[rank0]:                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank0]:[rank0]:   File "/nfs-share/aai30/projects/torchtitan/.venv/lib/python3.12/site-packages/streaming/base/dataset.py", line 964, in _share_work
+[rank0]:[rank0]:     shape_shm = SharedMemory(name=name, create=True, size=size, auto_cleanup=False)
+[rank0]:[rank0]:                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank0]:[rank0]:   File "/nfs-share/aai30/projects/torchtitan/.venv/lib/python3.12/site-packages/streaming/base/shared/memory.py", line 41, in __init__
+[rank0]:[rank0]:     shm = BuiltinSharedMemory(name, create, size)
+[rank0]:[rank0]:           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank0]:[rank0]:   File "/usr/lib/python3.12/multiprocessing/shared_memory.py", line 104, in __init__
+[rank0]:[rank0]:     self._fd = _posixshmem.shm_open(
+[rank0]:[rank0]:                ^^^^^^^^^^^^^^^^^^^^^
+[rank0]:[rank0]: FileExistsError: [Errno 17] File exists: '/527328870417_epoch_shape'
+E1108 14:04:23.342000 1278893 torch/distributed/elastic/multiprocessing/api.py:974] failed (exitcode: 1) local_rank: 0 (pid: 1278947) of binary: /nfs-share/aai30/projects/torchtitan/.venv/bin/python3
+E1108 14:04:23.353000 1278893 torch/distributed/elastic/multiprocessing/errors/error_handler.py:145] no error file defined for parent, to copy child error file (/tmp/torchelastic_73l5og0z/iclr2026-vlr-73f7a163-v0p98-sw16-20251108-140329-idx4_2erh188f/attempt_0/0/error.json)
+Traceback (most recent call last):
+  File "/nfs-share/aai30/projects/torchtitan/.venv/bin/torchrun", line 10, in <module>
+    sys.exit(main())
+             ^^^^^^
+  File "/nfs-share/aai30/projects/torchtitan/.venv/lib/python3.12/site-packages/torch/distributed/elastic/multiprocessing/errors/__init__.py", line 362, in wrapper
+    return f(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^
+  File "/nfs-share/aai30/projects/torchtitan/.venv/lib/python3.12/site-packages/torch/distributed/run.py", line 977, in main
+    run(args)
+  File "/nfs-share/aai30/projects/torchtitan/.venv/lib/python3.12/site-packages/torch/distributed/run.py", line 968, in run
+    elastic_launch(
+  File "/nfs-share/aai30/projects/torchtitan/.venv/lib/python3.12/site-packages/torch/distributed/launcher/api.py", line 165, in __call__
+    return launch_agent(self._config, self._entrypoint, list(args))
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/nfs-share/aai30/projects/torchtitan/.venv/lib/python3.12/site-packages/torch/distributed/launcher/api.py", line 312, in launch_agent
+    raise ChildFailedError(
+torch.distributed.elastic.multiprocessing.errors.ChildFailedError: 
+============================================================
+torchtitan.experiments.fl.train FAILED
+------------------------------------------------------------
+Failures:
+  <NO_OTHER_FAILURES>
+------------------------------------------------------------
+Root Cause (first observed failure):
+[0]:
+  time      : 2025-11-08_14:04:18
+  host      : ruapehu.cl.cam.ac.uk
+  rank      : 0 (local_rank: 0)
+  exitcode  : 1 (pid: 1278947)
+  error_file: /tmp/torchelastic_73l5og0z/iclr2026-vlr-73f7a163-v0p98-sw16-20251108-140329-idx4_2erh188f/attempt_0/0/error.json
+  traceback : Traceback (most recent call last):
+    File "/nfs-share/aai30/projects/torchtitan/.venv/lib/python3.12/site-packages/torch/distributed/elastic/multiprocessing/errors/__init__.py", line 362, in wrapper
+      return f(*args, **kwargs)
+             ^^^^^^^^^^^^^^^^^^
+    File "/nfs-share/aai30/projects/torchtitan/torchtitan/train.py", line 691, in train
+      self.train_step(data_iterator)
+    File "/nfs-share/aai30/projects/torchtitan/torchtitan/train.py", line 541, in train_step
+      input_dict, labels = next(data_iterator)
+                           ^^^^^^^^^^^^^^^^^^^
+    File "/nfs-share/aai30/projects/torchtitan/torchtitan/train.py", line 400, in batch_generator
+      batch = next(data_iterator)
+              ^^^^^^^^^^^^^^^^^^^
+    File "/nfs-share/aai30/projects/torchtitan/.venv/lib/python3.12/site-packages/torchdata/stateful_dataloader/stateful_dataloader.py", line 450, in __next__
+      return super().__next__()
+             ^^^^^^^^^^^^^^^^^^
+    File "/nfs-share/aai30/projects/torchtitan/.venv/lib/python3.12/site-packages/torch/utils/data/dataloader.py", line 740, in __next__
+      data = self._next_data()
+             ^^^^^^^^^^^^^^^^^
+    File "/nfs-share/aai30/projects/torchtitan/.venv/lib/python3.12/site-packages/torchdata/stateful_dataloader/stateful_dataloader.py", line 491, in _next_data
+      data = self._dataset_fetcher.fetch(index)  # may raise StopIteration
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    File "/nfs-share/aai30/projects/torchtitan/.venv/lib/python3.12/site-packages/torch/utils/data/_utils/fetch.py", line 33, in fetch
+      data.append(next(self.dataset_iter))
+                  ^^^^^^^^^^^^^^^^^^^^^^^
+    File "/nfs-share/aai30/projects/torchtitan/.venv/lib/python3.12/site-packages/streaming/base/dataset.py", line 1502, in __iter__
+      sample_ids = self._get_work(epoch, sample_in_epoch)
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    File "/nfs-share/aai30/projects/torchtitan/.venv/lib/python3.12/site-packages/streaming/base/dataset.py", line 1049, in _get_work
+      shape_shm, data_shm = self._share_work(epoch_sample_ids)
+                            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    File "/nfs-share/aai30/projects/torchtitan/.venv/lib/python3.12/site-packages/streaming/base/dataset.py", line 964, in _share_work
+      shape_shm = SharedMemory(name=name, create=True, size=size, auto_cleanup=False)
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    File "/nfs-share/aai30/projects/torchtitan/.venv/lib/python3.12/site-packages/streaming/base/shared/memory.py", line 41, in __init__
+      shm = BuiltinSharedMemory(name, create, size)
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    File "/usr/lib/python3.12/multiprocessing/shared_memory.py", line 104, in __init__
+      self._fd = _posixshmem.shm_open(
+                 ^^^^^^^^^^^^^^^^^^^^^
+  FileExistsError: [Errno 17] File exists: '/527328870417_epoch_shape'
+  
+============================================================

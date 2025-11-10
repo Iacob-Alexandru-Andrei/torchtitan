@@ -1,0 +1,90 @@
+[rank0]:wandb: Currently logged in as: alexiacob (camlsys) to https://api.wandb.ai. Use `wandb login --relogin` to force relogin
+[rank0]:wandb: setting up run 7zpgxtu4
+[rank0]:wandb: Tracking run with wandb version 0.22.1
+[rank0]:wandb: Run data is saved locally in ./outputs/iclr2026-vlr-73f7a163-v0p9996-sw4-20251108-155938-idx32/tb/20251109-0108/rank_0/wandb/run-20251109_010835-7zpgxtu4
+[rank0]:wandb: Run `wandb offline` to turn off syncing.
+[rank0]:wandb: Syncing run iclr2026-vlr-73f7a163-v0p9996-sw4-20251108-155938-idx32-worker0-rep0-rank0
+[rank0]:wandb: ⭐️ View project at https://wandb.ai/camlsys/torchtitan_tune_lr
+[rank0]:wandb: 🚀 View run at https://wandb.ai/camlsys/torchtitan_tune_lr/runs/7zpgxtu4
+[rank0]:
+[rank0]:Downloading torchtitan/16M-baseline-202510...3_manifest.json:   0%|          | 0.00/77.0 [00:00<?, ?iB/s]
+[rank0]:Downloading torchtitan/16M-baseline-202510...3_manifest.json: 100%|██████████| 77.0/77.0 [00:00<00:00, 434kiB/s]
+[rank0]:
+[rank0]:Downloading torchtitan/16M-baseline-202510...-2048/.metadata:   0%|          | 0.00/390k [00:00<?, ?iB/s]
+[rank0]:Downloading torchtitan/16M-baseline-202510...-2048/.metadata:  33%|███▎      | 128k/390k [00:00<00:00, 25.1MiB/s]
+[rank0]:
+[rank0]:Downloading torchtitan/16M-baseline-202510...48/__0_0.distcp:   0%|          | 0.00/62.1M [00:00<?, ?iB/s][rank0]:
+[rank0]:Downloading torchtitan/16M-baseline-202510...48/__0_0.distcp:   0%|          | 262k/62.1M [00:00<00:35, 1.75MiB/s]
+[rank0]:
+[rank0]:Downloading torchtitan/16M-baseline-202510...48/__1_0.distcp:   0%|          | 0.00/62.4M [00:00<?, ?iB/s]
+[rank0]:
+[rank0]:Downloading torchtitan/16M-baseline-202510...48/__1_0.distcp:   0%|          | 0.00/62.4M [00:00<?, ?iB/s][A
+[rank0]:Downloading torchtitan/16M-baseline-202510...48/__1_0.distcp:   0%|          | 262k/62.4M [00:00<00:01, 61.3MiB/s]
+[rank0]:
+[rank0]:Downloading torchtitan/16M-baseline-202510...48/__1_0.distcp:   0%|          | 262k/62.4M [00:00<00:34, 1.83MiB/s]
+[rank0]:
+[rank0]:Downloading torchtitan/16M-baseline-202510...48/__2_0.distcp:   0%|          | 0.00/62.4M [00:00<?, ?iB/s]
+[rank0]:
+[rank0]:Downloading torchtitan/16M-baseline-202510...48/__2_0.distcp:   0%|          | 0.00/62.4M [00:00<?, ?iB/s][A
+[rank0]:
+[rank0]:
+[rank0]:Downloading torchtitan/16M-baseline-202510...48/__2_0.distcp:   0%|          | 0.00/62.4M [00:00<?, ?iB/s][A[A
+[rank0]:Downloading torchtitan/16M-baseline-202510...48/__2_0.distcp:   0%|          | 0.00/62.4M [00:00<?, ?iB/s][rank0]:
+[rank0]:
+[rank0]:Downloading torchtitan/16M-baseline-202510...48/__2_0.distcp:   0%|          | 0.00/62.4M [00:00<?, ?iB/s][A
+[rank0]:Downloading torchtitan/16M-baseline-202510...48/__2_0.distcp:   0%|          | 262k/62.4M [00:00<00:01, 34.9MiB/s]
+[rank0]:
+[rank0]:Downloading torchtitan/16M-baseline-202510...48/__2_0.distcp:   0%|          | 262k/62.4M [00:00<00:01, 55.4MiB/s]
+[rank0]:
+[rank0]:Downloading torchtitan/16M-baseline-202510...48/__2_0.distcp:   0%|          | 262k/62.4M [00:00<00:01, 31.2MiB/s]
+[rank0]:
+[rank0]:Downloading torchtitan/16M-baseline-202510...48/__2_0.distcp:   0%|          | 262k/62.4M [00:00<00:01, 53.1MiB/s]
+[rank0]:
+[rank0]:Downloading torchtitan/16M-baseline-202510...48/__2_0.distcp:   0%|          | 262k/62.4M [00:00<00:30, 2.02MiB/s]
+[rank0]:
+[rank0]:Downloading torchtitan/16M-baseline-202510...48/__3_0.distcp:   0%|          | 0.00/62.4M [00:00<?, ?iB/s]
+[rank0]:
+[rank0]:Downloading torchtitan/16M-baseline-202510...48/__3_0.distcp:   0%|          | 0.00/62.4M [00:00<?, ?iB/s][A
+[rank0]:Downloading torchtitan/16M-baseline-202510...48/__3_0.distcp:   0%|          | 262k/62.4M [00:00<00:01, 57.0MiB/s]
+[rank0]:
+[rank0]:Downloading torchtitan/16M-baseline-202510...48/__3_0.distcp:   0%|          | 262k/62.4M [00:00<00:31, 2.00MiB/s]
+[rank0]:/nfs-share/aai30/projects/torchtitan/.venv/lib/python3.12/site-packages/torch/distributed/c10d_logger.py:83: UserWarning: barrier(): using the device under current context. You can specify `device_id` in `init_process_group` to mute this warning.
+[rank0]:  return func(*args, **kwargs)
+[rank0]:/nfs-share/aai30/projects/torchtitan/torchtitan/experiments/fl/optimizers/qhadamw.py:497: UserWarning: `torch._utils.is_compiling` is deprecated. Use `torch.compiler.is_compiling` instead.
+[rank0]:  not torch._utils.is_compiling() and capturable  # pyright: ignore[reportAttributeAccessIssue]
+[rank0]:/nfs-share/aai30/projects/torchtitan/torchtitan/experiments/fl/optimizers/qhadamw.py:497: UserWarning: `torch._utils.is_compiling` is deprecated. Use `torch.compiler.is_compiling` instead.
+[rank0]:  not torch._utils.is_compiling() and capturable  # pyright: ignore[reportAttributeAccessIssue]
+[rank0]:wandb: updating run metadata
+[rank0]:wandb: uploading output.log
+[rank0]:wandb: uploading history steps 10221-10239, summary, console lines 20973-31258
+[rank0]:wandb: 
+[rank0]:wandb: Run history:
+[rank0]:wandb:     activations/average/max/full_model_input ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁
+[rank0]:wandb:    activations/average/max/full_model_output ▁▁▁▁▁▁▁▂▂▃▅▅▆▆▆▆▇▇▇▇▇▇▇▇▇▇▇▇▇▇██████████
+[rank0]:wandb:  activations/average/median/full_model_input ████▇▃▄▃▃▃▃▂▃▂▃▂▂▂▁▁▂▁▂▁▃▂▃▃▃▃▃▃▃▅▃▃▄▄▄▃
+[rank0]:wandb: activations/average/median/full_model_output ▅▅▅▄▄▄▄▂▃▃▃▁▄▂▃▄▅▃▅▄▇▆▇▇▇▅▅█▇▅▆▅▆▆▅▅▄▅▅▄
+[rank0]:wandb:         activations/l2_norm/full_model_input ▁▁▁▁▁▁▁▂▂▂▃▃▃▃▄▄▄▄▅▅▅▅▅▅▅▆▆▆▆▆▆▇▇▇▇▇▇▇██
+[rank0]:wandb:        activations/l2_norm/full_model_output ▁▁▁▂▄▆▅▅▄▄▄▄▄▄▄▄▄▄▄▅▅▅▅▅▅▆▆▆▇▇▇▆▇▇▇▇▇▇▇█
+[rank0]:wandb:             activations/max/full_model_input ▁▁▁▂▂▂▂▃▃▃▃▃▃▃▃▃▄▄▄▃▄▄▄▄▄▄▅▅▅▆▆▇▇▇▇█████
+[rank0]:wandb:            activations/max/full_model_output ▁▁▁▁▁▂▂▂▂▂▂▂▃▃▃▃▃▃▃▃▃▃▄▄▄▅▅▅▅▅▆▆▆▇▇▇▇▇██
+[rank0]:wandb:                         beta1-QHAdamW/group0 ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁
+[rank0]:wandb:                         beta1-QHAdamW/group1 ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁
+[rank0]:wandb:                                         +272 ...
+[rank0]:wandb: 
+[rank0]:wandb: Run summary:
+[rank0]:wandb:     activations/average/max/full_model_input 0.18225
+[rank0]:wandb:    activations/average/max/full_model_output 0.13184
+[rank0]:wandb:  activations/average/median/full_model_input -0.00249
+[rank0]:wandb: activations/average/median/full_model_output -0.00047
+[rank0]:wandb:         activations/l2_norm/full_model_input 253178.98891
+[rank0]:wandb:        activations/l2_norm/full_model_output 560423.52386
+[rank0]:wandb:             activations/max/full_model_input 179
+[rank0]:wandb:            activations/max/full_model_output 179
+[rank0]:wandb:                         beta1-QHAdamW/group0 0.999
+[rank0]:wandb:                         beta1-QHAdamW/group1 0.999
+[rank0]:wandb:                                         +272 ...
+[rank0]:wandb: 
+[rank0]:wandb: 🚀 View run iclr2026-vlr-73f7a163-v0p9996-sw4-20251108-155938-idx32-worker0-rep0-rank0 at: https://wandb.ai/camlsys/torchtitan_tune_lr/runs/7zpgxtu4
+[rank0]:wandb: ⭐️ View project at: https://wandb.ai/camlsys/torchtitan_tune_lr
+[rank0]:wandb: Synced 5 W&B file(s), 0 media file(s), 0 artifact file(s) and 0 other file(s)
+[rank0]:wandb: Find logs at: ./outputs/iclr2026-vlr-73f7a163-v0p9996-sw4-20251108-155938-idx32/tb/20251109-0108/rank_0/wandb/run-20251109_010835-7zpgxtu4/logs

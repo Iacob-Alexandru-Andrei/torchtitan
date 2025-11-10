@@ -13,6 +13,8 @@ from .decoupled_adamw import DecoupledAdamW
 from .desloc_outer import DES_LOC_OUTER
 from .qhadamw import QHAdamW
 from .qhadopt import QHADOPT
+from .galore import GaLore
+from .scion import Scion, ScionAggMo, ScionLight, QHScion
 
 __all__ = [
     "ADOPT",
@@ -22,4 +24,9 @@ __all__ = [
     "DecoupledAdamW",
     "DES_LOC_OUTER",
     "QHAdamW",
+    "GaLore",
+    "Scion",
+    "ScionAggMo",
+    "QHScion",
+    "ScionLight",
 ]

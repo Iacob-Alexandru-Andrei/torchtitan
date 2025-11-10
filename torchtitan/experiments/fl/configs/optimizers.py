@@ -137,6 +137,45 @@ class MosaicOptimizerConfig(BaseOptimizer):
     * ``"default"`` delegates to the core TorchTitan optimizer builder.
     """
 
+    norm: str = "Auto"
+    """Norm backend to use with Scion optimizers."""
+
+    norm_kwargs: dict[str, Any] | None = None
+    """Additional keyword arguments for the selected norm backend."""
+
+    scale: float = 1.0
+    """Scalar multiplier applied to Scion updates."""
+
+    unconstrained: bool = False
+    """Disable the multiplicative shrinkage used by Scion when True."""
+
+    scion_v: float | None = None
+    """Quasi-hyperbolic mixing parameter for :class:`ScionQH`."""
+
+    scion_momentums: tuple[float, ...] = (1.0,)
+    """First-moment beta coefficients for :class:`ScionAggMo`."""
+
+    scion_weights: tuple[float, ...] | None = None
+    """Combination weights for :class:`ScionAggMo`."""
+
+    galore_rank: int | None = None
+    """Default low-rank size for GaLore. None disables projection."""
+
+    galore_update_proj_gap: int = 200
+    """Number of steps between GaLore projector refreshes."""
+
+    galore_scale: float = 1.0
+    """Scaling factor applied when projecting back to full rank."""
+
+    galore_proj_type: str = "std"
+    """Projection strategy for GaLore (std, reverse_std, left, right, full)."""
+
+    galore_dim: int = 2
+    """Expected tensor dimensionality for GaLore projections."""
+
+    galore_v1: float = 0.0
+    """Quasi-hyperbolic coefficient for GaLore first momentum."""
+
     def __post_init__(self) -> None:
         """Auto-initialize beta1 and beta2 from betas if betas is provided."""
         builder = self.builder.lower()
@@ -155,6 +194,19 @@ class MosaicOptimizerConfig(BaseOptimizer):
             # beta1 comes from the first element, beta2 from the last element
             self.beta1 = self.betas[0]
             self.beta2 = self.betas[-1]
+
+        if isinstance(self.norm_kwargs, dict):
+            self.norm_kwargs = dict(self.norm_kwargs)
+
+        if not 0.0 <= self.galore_v1 <= 1.0:
+            msg = "optimizer.galore_v1 must be in [0, 1]"
+            raise ValueError(msg)
+        if self.galore_rank is not None and self.galore_rank <= 0:
+            msg = "optimizer.galore_rank must be positive when set."
+            raise ValueError(msg)
+        if self.galore_update_proj_gap <= 0:
+            msg = "optimizer.galore_update_proj_gap must be positive."
+            raise ValueError(msg)
 
     def get_betas_tuple(self) -> tuple[float, ...]:
         """Get the betas tuple, either from explicit betas or constructed from beta1/beta2.
