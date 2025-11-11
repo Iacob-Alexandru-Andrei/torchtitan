@@ -9,16 +9,55 @@ SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 CONFIG_FILE=${CONFIG_FILE:-"${SCRIPT_DIR}/base.toml"}
 TRAIN_MODULE=${TRAIN_MODULE:-"torchtitan.experiments.fl.train"}
 MODEL_SIZES=${MODEL_SIZES:-"16M"}
-WORKER_COUNTS=${WORKER_COUNTS:-"1 2 4 8"}
+WORKER_COUNTS=${WORKER_COUNTS:-"8 4 2 1"}
 GLOBAL_BATCH_SIZES=${GLOBAL_BATCH_SIZES:-"64 128 256 512"}
 RUN_PREFIX=${RUN_PREFIX:-"iclr2026-mtdaoWB"}
 LOG_RANK=${LOG_RANK:-0}
-LOCAL_BATCH_SIZE=${LOCAL_BATCH_SIZE:-16}
+LOCAL_BATCH_SIZE_CAP=${LOCAL_BATCH_SIZE_CAP:-${LOCAL_BATCH_SIZE:-32}}
 BASE_LR=${BASE_LR:-0.04}
 VS_VALUE=${VS_VALUE:-0.98}
 REFERENCE_GLOBAL_BATCH_SIZE=${REFERENCE_GLOBAL_BATCH_SIZE:-64}
 REFERENCE_TRAINING_STEPS=${REFERENCE_TRAINING_STEPS:-20480}
 REFERENCE_VALIDATION_FREQ=${REFERENCE_VALIDATION_FREQ:-2048}
+BASE_PARAM_SYNC_EVERY=${BASE_PARAM_SYNC_EVERY:-32}
+BASE_OPTIMIZER_SYNC_EVERY=${BASE_OPTIMIZER_SYNC_EVERY:-"32 32"}
+
+if ! [[ "${BASE_PARAM_SYNC_EVERY}" =~ ^[0-9]+$ ]]; then
+  echo "BASE_PARAM_SYNC_EVERY must be a positive integer (got ${BASE_PARAM_SYNC_EVERY})." >&2
+  exit 1
+fi
+if (( BASE_PARAM_SYNC_EVERY <= 0 )); then
+  echo "BASE_PARAM_SYNC_EVERY must be a positive integer (got ${BASE_PARAM_SYNC_EVERY})." >&2
+  exit 1
+fi
+
+if ! [[ "${LOCAL_BATCH_SIZE_CAP}" =~ ^[0-9]+$ ]]; then
+  echo "LOCAL_BATCH_SIZE_CAP must be a positive integer (got ${LOCAL_BATCH_SIZE_CAP})." >&2
+  exit 1
+fi
+if (( LOCAL_BATCH_SIZE_CAP <= 0 )); then
+  echo "LOCAL_BATCH_SIZE_CAP must be a positive integer (got ${LOCAL_BATCH_SIZE_CAP})." >&2
+  exit 1
+fi
+
+declare -a BASE_OPTIMIZER_SYNC_ARRAY=()
+BASE_OPTIMIZER_SYNC_SPEC=${BASE_OPTIMIZER_SYNC_EVERY//,/ }
+if [[ -n "${BASE_OPTIMIZER_SYNC_SPEC// }" ]]; then
+  read -r -a BASE_OPTIMIZER_SYNC_ARRAY <<< "${BASE_OPTIMIZER_SYNC_SPEC}"
+fi
+if (( ${#BASE_OPTIMIZER_SYNC_ARRAY[@]} == 0 )); then
+  BASE_OPTIMIZER_SYNC_ARRAY=("${BASE_PARAM_SYNC_EVERY}")
+fi
+for sync_value in "${BASE_OPTIMIZER_SYNC_ARRAY[@]}"; do
+  if ! [[ "${sync_value}" =~ ^[0-9]+$ ]]; then
+    echo "BASE_OPTIMIZER_SYNC_EVERY values must be positive integers (got '${sync_value}')." >&2
+    exit 1
+  fi
+  if (( sync_value <= 0 )); then
+    echo "BASE_OPTIMIZER_SYNC_EVERY values must be positive integers (got ${sync_value})." >&2
+    exit 1
+  fi
+done
 
 WARMUP_RUN_STEP_16M="16M-baseline-20251029-095728/step-2048"
 
@@ -64,8 +103,9 @@ Options:
 Environment customizations:
   CONFIG_FILE, TRAIN_MODULE, RUN_PREFIX, LOG_DIR
   MODEL_SIZES, WORKER_COUNTS, GLOBAL_BATCH_SIZES
-  LOCAL_BATCH_SIZE, BASE_LR, VS_VALUE
+  LOCAL_BATCH_SIZE_CAP (or legacy LOCAL_BATCH_SIZE), BASE_LR, VS_VALUE
   REFERENCE_GLOBAL_BATCH_SIZE, REFERENCE_TRAINING_STEPS, REFERENCE_VALIDATION_FREQ
+  BASE_PARAM_SYNC_EVERY, BASE_OPTIMIZER_SYNC_EVERY
   RUN_INDEX, RUN_INDEX_OFFSET, RUN_INDEX_RANGE, DRY_RUN
   RDZV_HOST, RDZV_BASE_PORT, LIGHTHOUSE_HOST, LIGHTHOUSE_BASE_PORT, PORT_STRIDE
   GPU_IDS (space/comma separated or 'auto'), POLL_INTERVAL_SEC
@@ -337,6 +377,59 @@ compute_scaled_validation_freq() {
   echo "${freq}"
 }
 
+compute_local_batch_size() {
+  local global_bs=$1
+  local workers=$2
+  if (( workers <= 0 )); then
+    echo "Worker count must be positive when computing local batch size (got ${workers})." >&2
+    exit 1
+  fi
+  if (( global_bs <= 0 )); then
+    echo "Global batch size must be positive when computing local batch size (got ${global_bs})." >&2
+    exit 1
+  fi
+  local per_worker=$((global_bs / workers))
+  if (( per_worker <= 0 )); then
+    echo "Derived per-worker batch size must be positive (global=${global_bs}, workers=${workers})." >&2
+    exit 1
+  fi
+  if (( per_worker < LOCAL_BATCH_SIZE_CAP )); then
+    echo "${per_worker}"
+  else
+    echo "${LOCAL_BATCH_SIZE_CAP}"
+  fi
+}
+
+compute_scaled_sync_every() {
+  local base_sync=$1
+  local reference_bs=$2
+  local global_bs=$3
+  if (( base_sync <= 0 )); then
+    echo "Sync cadence must be positive when scaling (got ${base_sync})." >&2
+    exit 1
+  fi
+  if (( reference_bs <= 0 || global_bs <= 0 )); then
+    echo "Batch sizes must be positive when scaling sync cadence (ref=${reference_bs}, batch=${global_bs})." >&2
+    exit 1
+  fi
+  local tokens=$((base_sync * reference_bs))
+  local scaled=$(((tokens + global_bs - 1) / global_bs))
+  if (( scaled < 1 )); then
+    scaled=1
+  fi
+  echo "${scaled}"
+}
+
+build_optimizer_sync_spec() {
+  local global_bs=$1
+  local -a scaled_values=()
+  for base_value in "${BASE_OPTIMIZER_SYNC_ARRAY[@]}"; do
+    scaled_values+=("$(compute_scaled_sync_every "${base_value}" "${REFERENCE_GLOBAL_BATCH_SIZE}" "${global_bs}")")
+  done
+  local IFS=','
+  echo "${scaled_values[*]}"
+}
+
 should_run_combination() {
   local combo_index_1=$1
   local combo_index_0=$((combo_index_1 - 1))
@@ -365,16 +458,19 @@ declare -a RUN_PLAN_INDICES=()
 declare -a RUN_PLAN_MODELS=()
 declare -a RUN_PLAN_WORKERS=()
 declare -a RUN_PLAN_GLOBAL_BS=()
+declare -a RUN_PLAN_LOCAL_BS=()
 declare -a RUN_PLAN_WARMUPS=()
 declare -a RUN_PLAN_STEPS=()
 declare -a RUN_PLAN_VAL_FREQ=()
+declare -a RUN_PLAN_PARAM_SYNC=()
+declare -a RUN_PLAN_OPT_SYNC=()
 declare -i SKIPPED_GPU_RUNS=0
 
 combination_index=0
 for model_size in "${MODEL_SIZE_ARRAY[@]}"; do
   warmup_step="16M-baseline-20251029-095728/step-2048"
-  for global_bs in "${GLOBAL_BATCH_ARRAY[@]}"; do
-    for workers in "${WORKER_COUNT_ARRAY[@]}"; do
+  for workers in "${WORKER_COUNT_ARRAY[@]}"; do
+    for global_bs in "${GLOBAL_BATCH_ARRAY[@]}"; do
       ensure_divisible "${global_bs}" "${workers}"
       ((++combination_index))
       if ! should_run_combination "${combination_index}"; then
@@ -387,13 +483,19 @@ for model_size in "${MODEL_SIZE_ARRAY[@]}"; do
       fi
       scaled_steps=$(compute_scaled_steps "${global_bs}")
       val_freq=$(compute_scaled_validation_freq "${global_bs}")
+      local_batch_size=$(compute_local_batch_size "${global_bs}" "${workers}")
+      param_sync_every=$(compute_scaled_sync_every "${BASE_PARAM_SYNC_EVERY}" "${REFERENCE_GLOBAL_BATCH_SIZE}" "${global_bs}")
+      optimizer_sync_every=$(build_optimizer_sync_spec "${global_bs}")
       RUN_PLAN_INDICES+=("${combination_index}")
       RUN_PLAN_MODELS+=("${model_size}")
       RUN_PLAN_WORKERS+=("${workers}")
       RUN_PLAN_GLOBAL_BS+=("${global_bs}")
+      RUN_PLAN_LOCAL_BS+=("${local_batch_size}")
       RUN_PLAN_WARMUPS+=("${warmup_step}")
       RUN_PLAN_STEPS+=("${scaled_steps}")
       RUN_PLAN_VAL_FREQ+=("${val_freq}")
+      RUN_PLAN_PARAM_SYNC+=("${param_sync_every}")
+      RUN_PLAN_OPT_SYNC+=("${optimizer_sync_every}")
     done
   done
 done
@@ -419,7 +521,7 @@ if (( SKIPPED_GPU_RUNS > 0 )); then
   echo "Skipped ${SKIPPED_GPU_RUNS} configuration(s) that exceeded the ${TOTAL_GPUS} GPU limit." >&2
 fi
 
-SWEEP_CONFIG_STRING="models=${MODEL_SIZES}|workers=${WORKER_COUNTS}|gbs=${GLOBAL_BATCH_SIZES}|lbs=${LOCAL_BATCH_SIZE}|lr=${BASE_LR}|vs=${VS_VALUE}|config=${CONFIG_FILE}|refg=${REFERENCE_GLOBAL_BATCH_SIZE}|refs=${REFERENCE_TRAINING_STEPS}|refv=${REFERENCE_VALIDATION_FREQ}"
+SWEEP_CONFIG_STRING="models=${MODEL_SIZES}|workers=${WORKER_COUNTS}|gbs=${GLOBAL_BATCH_SIZES}|lbs_cap=${LOCAL_BATCH_SIZE_CAP}|lr=${BASE_LR}|vs=${VS_VALUE}|config=${CONFIG_FILE}|refg=${REFERENCE_GLOBAL_BATCH_SIZE}|refs=${REFERENCE_TRAINING_STEPS}|refv=${REFERENCE_VALIDATION_FREQ}"
 if command -v sha1sum >/dev/null 2>&1; then
   SWEEP_HASH=$(printf "%s" "${SWEEP_CONFIG_STRING}" | sha1sum | awk '{print $1}')
 elif command -v shasum >/dev/null 2>&1; then
@@ -545,13 +647,16 @@ start_run() {
   local model_size=$2
   local workers=$3
   local global_bs=$4
-  local warmup_step=$5
-  local training_steps=$6
-  local validation_freq=$7
-  local gpu_csv=$8
-  local rdzv_base_port=$9
-  local lighthouse_port=${10}
-  local combo_label=${11}
+  local local_batch_size=$5
+  local warmup_step=$6
+  local training_steps=$7
+  local validation_freq=$8
+  local param_sync_every=$9
+  local optimizer_sync_every=${10}
+  local gpu_csv=${11}
+  local rdzv_base_port=${12}
+  local lighthouse_port=${13}
+  local combo_label=${14}
   local run_dir="${LOG_DIR}/${run_uuid}"
   mkdir -p "${run_dir}"
 
@@ -633,8 +738,11 @@ start_run() {
           --model.flavor "${model_size}" \
           --fl_metrics.hyperparameter_switch.new_vs "${VS_VALUE}" \
           --training.global_batch_size "${global_bs}" \
-          --training.local_batch_size "${LOCAL_BATCH_SIZE}" \
+          --training.local_batch_size "${local_batch_size}" \
           --training.steps "${training_steps}" \
+          --optimizer.desloc.param_sync_every "${param_sync_every}" \
+          --fault_tolerance.sync_steps "${param_sync_every}" \
+          --optimizer.desloc.optimizer_sync_every "${optimizer_sync_every}" \
           --parallelism.data_parallel_replicate_degree 1 \
           --lr_scheduler.switch_step 2049 \
           --validation.freq "${validation_freq}" \
@@ -675,7 +783,7 @@ start_run() {
   ACTIVE_PIDS+=("${pid}")
   ACTIVE_GPU_LISTS+=("${gpu_csv}")
   ACTIVE_LABELS+=("${run_uuid}")
-  echo "[TorchFT RUN] ${run_uuid} | combo=${combo_label} | model=${model_size} | workers=${workers} | gbs=${global_bs} | steps=${training_steps} | val_freq=${validation_freq} | GPUs=${gpu_csv} | logs=${run_dir}" >&2
+  echo "[TorchFT RUN] ${run_uuid} | combo=${combo_label} | model=${model_size} | workers=${workers} | gbs=${global_bs} | lbs=${local_batch_size} | steps=${training_steps} | val_freq=${validation_freq} | param_sync=${param_sync_every} | opt_sync=${optimizer_sync_every} | GPUs=${gpu_csv} | logs=${run_dir}" >&2
 }
 
 if [[ -n "${RUN_INDEX}" ]]; then
@@ -693,19 +801,24 @@ print_run_plan() {
   local total=$1
   echo "" >&2
   echo "Selected MT-Dao configurations (${total} total | hash ${SWEEP_HASH}):" >&2
-  printf "%-10s %-10s %-10s %-10s %-12s %-12s %-12s\n" "Idx(1)" "Idx(0)" "Model" "Workers" "GlobalBS" "Steps" "ValFreq" >&2
-  printf "%-10s %-10s %-10s %-10s %-12s %-12s %-12s\n" "------" "------" "-----" "-------" "--------" "-----" "-------" >&2
+  printf "%-10s %-10s %-10s %-10s %-12s %-12s %-12s %-12s %-12s %-16s\n" \
+    "Idx(1)" "Idx(0)" "Model" "Workers" "GlobalBS" "LocalBS" "Steps" "ValFreq" "ParamSync" "OptSync" >&2
+  printf "%-10s %-10s %-10s %-10s %-12s %-12s %-12s %-12s %-12s %-16s\n" \
+    "------" "------" "-----" "-------" "--------" "-------" "-----" "-------" "---------" "-------" >&2
   for i in "${!RUN_PLAN_INDICES[@]}"; do
     combo_index=${RUN_PLAN_INDICES[i]}
     combo_index_zero=$((combo_index - 1))
-    printf "%-10s %-10s %-10s %-10s %-12s %-12s %-12s\n" \
+    printf "%-10s %-10s %-10s %-10s %-12s %-12s %-12s %-12s %-12s %-16s\n" \
       "${combo_index}" \
       "${combo_index_zero}" \
       "${RUN_PLAN_MODELS[i]}" \
       "${RUN_PLAN_WORKERS[i]}" \
       "${RUN_PLAN_GLOBAL_BS[i]}" \
+      "${RUN_PLAN_LOCAL_BS[i]}" \
       "${RUN_PLAN_STEPS[i]}" \
-      "${RUN_PLAN_VAL_FREQ[i]}" >&2
+      "${RUN_PLAN_VAL_FREQ[i]}" \
+      "${RUN_PLAN_PARAM_SYNC[i]}" \
+      "${RUN_PLAN_OPT_SYNC[i]}" >&2
   done
   echo "" >&2
 }
@@ -727,9 +840,12 @@ for i in "${!RUN_PLAN_INDICES[@]}"; do
   model_size=${RUN_PLAN_MODELS[i]}
   workers=${RUN_PLAN_WORKERS[i]}
   global_bs=${RUN_PLAN_GLOBAL_BS[i]}
+  local_batch_size=${RUN_PLAN_LOCAL_BS[i]}
   warmup_step=${RUN_PLAN_WARMUPS[i]}
   training_steps=${RUN_PLAN_STEPS[i]}
   validation_freq=${RUN_PLAN_VAL_FREQ[i]}
+  param_sync_every=${RUN_PLAN_PARAM_SYNC[i]}
+  optimizer_sync_every=${RUN_PLAN_OPT_SYNC[i]}
   model_tag=$(sanitize_value "${model_size}")
   run_uuid="${RUN_PREFIX}-${SWEEP_HASH}-${model_tag}-w${workers}-gb${global_bs}-${timestamp_global}-idx${combo_index_zero}"
 
@@ -747,7 +863,7 @@ for i in "${!RUN_PLAN_INDICES[@]}"; do
   rdzv_base_port=$((RDZV_BASE_PORT + run_counter * PORT_STRIDE))
   lighthouse_port=$((LIGHTHOUSE_BASE_PORT + run_counter * PORT_STRIDE))
 
-  start_run "${run_uuid}" "${model_size}" "${workers}" "${global_bs}" "${warmup_step}" "${training_steps}" "${validation_freq}" "${gpu_csv}" "${rdzv_base_port}" "${lighthouse_port}" "${combo_index}/${TOTAL_RUNS}"
+  start_run "${run_uuid}" "${model_size}" "${workers}" "${global_bs}" "${local_batch_size}" "${warmup_step}" "${training_steps}" "${validation_freq}" "${param_sync_every}" "${optimizer_sync_every}" "${gpu_csv}" "${rdzv_base_port}" "${lighthouse_port}" "${combo_index}/${TOTAL_RUNS}"
 done
 
 # Wait for all remaining runs to complete.
