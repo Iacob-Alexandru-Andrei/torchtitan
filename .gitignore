@@ -13,6 +13,7 @@ data
 out
 wandb
 *.out
+*.err
 *filelock
 torchinductor_aai30
 
