@@ -426,13 +426,22 @@ build_optimizer_sync_spec() {
   for base_value in "${BASE_OPTIMIZER_SYNC_ARRAY[@]}"; do
     scaled_values+=("$(compute_scaled_sync_every "${base_value}" "${REFERENCE_GLOBAL_BATCH_SIZE}" "${global_bs}")")
   done
-  if (( ${#scaled_values[@]} == 1 )); then
-    echo "${scaled_values[0]}"
-  else
-    local IFS=','
-    local joined="${scaled_values[*]}"
-    echo "[${joined}]"
+  echo "${scaled_values[*]}"
+}
+
+format_optimizer_sync_display() {
+  local spec="$1"
+  if [[ -z "${spec// }" ]]; then
+    echo ""
+    return
   fi
+  read -r -a parts <<< "${spec}"
+  if (( ${#parts[@]} <= 1 )); then
+    echo "${parts[0]}"
+    return
+  fi
+  local IFS=','
+  echo "[${parts[*]}]"
 }
 
 should_run_combination() {
@@ -469,6 +478,7 @@ declare -a RUN_PLAN_STEPS=()
 declare -a RUN_PLAN_VAL_FREQ=()
 declare -a RUN_PLAN_PARAM_SYNC=()
 declare -a RUN_PLAN_OPT_SYNC=()
+declare -a RUN_PLAN_OPT_SYNC_SPEC=()
 declare -i SKIPPED_GPU_RUNS=0
 
 combination_index=0
@@ -490,7 +500,8 @@ for model_size in "${MODEL_SIZE_ARRAY[@]}"; do
       val_freq=$(compute_scaled_validation_freq "${global_bs}")
       local_batch_size=$(compute_local_batch_size "${global_bs}" "${workers}")
       param_sync_every=$(compute_scaled_sync_every "${BASE_PARAM_SYNC_EVERY}" "${REFERENCE_GLOBAL_BATCH_SIZE}" "${global_bs}")
-      optimizer_sync_every=$(build_optimizer_sync_spec "${global_bs}")
+      optimizer_sync_spec=$(build_optimizer_sync_spec "${global_bs}")
+      optimizer_sync_display=$(format_optimizer_sync_display "${optimizer_sync_spec}")
       RUN_PLAN_INDICES+=("${combination_index}")
       RUN_PLAN_MODELS+=("${model_size}")
       RUN_PLAN_WORKERS+=("${workers}")
@@ -500,7 +511,8 @@ for model_size in "${MODEL_SIZE_ARRAY[@]}"; do
       RUN_PLAN_STEPS+=("${scaled_steps}")
       RUN_PLAN_VAL_FREQ+=("${val_freq}")
       RUN_PLAN_PARAM_SYNC+=("${param_sync_every}")
-      RUN_PLAN_OPT_SYNC+=("${optimizer_sync_every}")
+      RUN_PLAN_OPT_SYNC+=("${optimizer_sync_display}")
+      RUN_PLAN_OPT_SYNC_SPEC+=("${optimizer_sync_spec}")
     done
   done
 done
@@ -657,7 +669,7 @@ start_run() {
   local training_steps=$7
   local validation_freq=$8
   local param_sync_every=$9
-  local optimizer_sync_every=${10}
+  local optimizer_sync_spec=${10}
   local gpu_csv=${11}
   local rdzv_base_port=${12}
   local lighthouse_port=${13}
@@ -682,6 +694,15 @@ start_run() {
     local lighthouse_log="${run_dir}/lighthouse.log"
     local lighthouse_pid=""
     declare -a replica_pids=()
+    local optimizer_sync_display
+    optimizer_sync_display=$(format_optimizer_sync_display "${optimizer_sync_spec}")
+    local -a optimizer_sync_args=()
+    if [[ -n "${optimizer_sync_spec// }" ]]; then
+      read -r -a optimizer_sync_args <<< "${optimizer_sync_spec}"
+    fi
+    if (( ${#optimizer_sync_args[@]} == 0 )); then
+      optimizer_sync_args=("${param_sync_every}")
+    fi
 
     cleanup_run() {
       for pid in "${replica_pids[@]-}"; do
@@ -747,7 +768,7 @@ start_run() {
           --training.steps "${training_steps}" \
           --optimizer.desloc.param_sync_every "${param_sync_every}" \
           --fault_tolerance.sync_steps "${param_sync_every}" \
-          --optimizer.desloc.optimizer_sync_every "${optimizer_sync_every}" \
+          --optimizer.desloc.optimizer_sync_every "${optimizer_sync_args[@]}" \
           --parallelism.data_parallel_replicate_degree 1 \
           --lr_scheduler.switch_step 2049 \
           --validation.freq "${validation_freq}" \
@@ -788,7 +809,7 @@ start_run() {
   ACTIVE_PIDS+=("${pid}")
   ACTIVE_GPU_LISTS+=("${gpu_csv}")
   ACTIVE_LABELS+=("${run_uuid}")
-  echo "[TorchFT RUN] ${run_uuid} | combo=${combo_label} | model=${model_size} | workers=${workers} | gbs=${global_bs} | lbs=${local_batch_size} | steps=${training_steps} | val_freq=${validation_freq} | param_sync=${param_sync_every} | opt_sync=${optimizer_sync_every} | GPUs=${gpu_csv} | logs=${run_dir}" >&2
+  echo "[TorchFT RUN] ${run_uuid} | combo=${combo_label} | model=${model_size} | workers=${workers} | gbs=${global_bs} | lbs=${local_batch_size} | steps=${training_steps} | val_freq=${validation_freq} | param_sync=${param_sync_every} | opt_sync=${optimizer_sync_display} | GPUs=${gpu_csv} | logs=${run_dir}" >&2
 }
 
 if [[ -n "${RUN_INDEX}" ]]; then
@@ -850,7 +871,7 @@ for i in "${!RUN_PLAN_INDICES[@]}"; do
   training_steps=${RUN_PLAN_STEPS[i]}
   validation_freq=${RUN_PLAN_VAL_FREQ[i]}
   param_sync_every=${RUN_PLAN_PARAM_SYNC[i]}
-  optimizer_sync_every=${RUN_PLAN_OPT_SYNC[i]}
+  optimizer_sync_spec=${RUN_PLAN_OPT_SYNC_SPEC[i]}
   model_tag=$(sanitize_value "${model_size}")
   run_uuid="${RUN_PREFIX}-${SWEEP_HASH}-${model_tag}-w${workers}-gb${global_bs}-${timestamp_global}-idx${combo_index_zero}"
 
@@ -868,7 +889,7 @@ for i in "${!RUN_PLAN_INDICES[@]}"; do
   rdzv_base_port=$((RDZV_BASE_PORT + run_counter * PORT_STRIDE))
   lighthouse_port=$((LIGHTHOUSE_BASE_PORT + run_counter * PORT_STRIDE))
 
-  start_run "${run_uuid}" "${model_size}" "${workers}" "${global_bs}" "${local_batch_size}" "${warmup_step}" "${training_steps}" "${validation_freq}" "${param_sync_every}" "${optimizer_sync_every}" "${gpu_csv}" "${rdzv_base_port}" "${lighthouse_port}" "${combo_index}/${TOTAL_RUNS}"
+  start_run "${run_uuid}" "${model_size}" "${workers}" "${global_bs}" "${local_batch_size}" "${warmup_step}" "${training_steps}" "${validation_freq}" "${param_sync_every}" "${optimizer_sync_spec}" "${gpu_csv}" "${rdzv_base_port}" "${lighthouse_port}" "${combo_index}/${TOTAL_RUNS}"
 done
 
 # Wait for all remaining runs to complete.
