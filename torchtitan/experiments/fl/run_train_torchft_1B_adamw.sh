@@ -80,40 +80,133 @@ echo "Min replicas: ${MIN_REPLICAS}"
 echo "Log directory: ${LOG_DIR}"
 echo "=========================================="
 
-# Function to cleanup background processes on exit
-cleanup() {
-    echo "Cleaning up background processes..."
-    # Kill all child processes
-    pkill -P $$ || true
-    # Kill lighthouse if it's running
-    pkill -f "torchft_lighthouse" || true
-    wait
-    echo "Cleanup complete"
+declare -a ACTIVE_REPLICA_PIDS=()
+ACTIVE_LIGHTHOUSE_PID=""
+
+cleanup_active_processes() {
+    set +e
+    for pid in "${ACTIVE_REPLICA_PIDS[@]}"; do
+        if [[ -n "${pid}" ]] && kill -0 "${pid}" 2>/dev/null; then
+            kill "${pid}" 2>/dev/null || true
+        fi
+    done
+    for pid in "${ACTIVE_REPLICA_PIDS[@]}"; do
+        if [[ -n "${pid}" ]]; then
+            wait "${pid}" 2>/dev/null || true
+        fi
+    done
+    if [[ -n "${ACTIVE_LIGHTHOUSE_PID:-}" ]] && kill -0 "${ACTIVE_LIGHTHOUSE_PID}" 2>/dev/null; then
+        kill "${ACTIVE_LIGHTHOUSE_PID}" 2>/dev/null || true
+        wait "${ACTIVE_LIGHTHOUSE_PID}" 2>/dev/null || true
+    fi
+    set -e
+}
+trap cleanup_active_processes EXIT INT TERM
+
+start_lighthouse() {
+    local host=$1
+    local port=$2
+    local log_file=$3
+
+    uv run --no-sync torchft_lighthouse \
+        --min_replicas "${MIN_REPLICAS}" \
+        --quorum_tick_ms "${QUORUM_TICK_MS}" \
+        --bind "${host}:${port}" \
+        > "${log_file}" 2>&1 &
+
+    local pid=$!
+    sleep 2
+    if ! kill -0 "${pid}" 2>/dev/null; then
+        echo "ERROR: Lighthouse failed to start. Check ${log_file}" >&2
+        return 1
+    fi
+    echo "${pid}"
 }
 
-trap cleanup EXIT INT TERM
+stop_lighthouse() {
+    local pid=$1
+    if [[ -z "${pid}" ]]; then
+        return
+    fi
+    if kill -0 "${pid}" 2>/dev/null; then
+        kill "${pid}" 2>/dev/null || true
+        wait "${pid}" 2>/dev/null || true
+    fi
+}
+
+launch_replica_process() {
+    local replica_id=$1
+    local gpu_id=$2
+    local log_file=$3
+    local config_file=$4
+
+    (
+        set -euo pipefail
+        cd "${REPO_ROOT}"
+        export CUDA_VISIBLE_DEVICES="${gpu_id}"
+        export PYTORCH_ALLOC_CONF="expandable_segments:True"
+        local rdzv_port=$((29600 + replica_id))
+        uv run --no-sync torchrun \
+            --nproc_per_node=1 \
+            --rdzv_backend c10d \
+            --rdzv_endpoint="localhost:${rdzv_port}" \
+            --role rank \
+            --tee 3 \
+            -m "${TRAIN_FILE}" \
+            --job.config_file "${config_file}" \
+            --fault_tolerance.replica_id "${replica_id}" \
+            --fault_tolerance.group_size "${NGPU}" \
+            --fault_tolerance.min_replica_size "${MIN_REPLICAS}"
+    ) > "${log_file}" 2>&1 &
+
+    echo $!
+}
+
+wait_for_replicas() {
+    local status=0
+    set +e
+    for idx in "${!ACTIVE_REPLICA_PIDS[@]}"; do
+        local pid=${ACTIVE_REPLICA_PIDS[idx]}
+        if [[ -z "${pid}" ]]; then
+            continue
+        fi
+        wait "${pid}"
+        local exit_code=$?
+        if (( exit_code == 0 )); then
+            echo "Replica ${idx} completed successfully."
+        else
+            echo "Replica ${idx} exited with status ${exit_code}."
+        fi
+        ACTIVE_REPLICA_PIDS[idx]=""
+        if (( exit_code != 0 )); then
+            status=${exit_code}
+            break
+        fi
+    done
+    set -e
+
+    if (( status != 0 )); then
+        for pid in "${ACTIVE_REPLICA_PIDS[@]}"; do
+            if [[ -n "${pid}" ]] && kill -0 "${pid}" 2>/dev/null; then
+                kill "${pid}" 2>/dev/null || true
+            fi
+        done
+        for pid in "${ACTIVE_REPLICA_PIDS[@]}"; do
+            if [[ -n "${pid}" ]]; then
+                wait "${pid}" 2>/dev/null || true
+            fi
+        done
+    fi
+
+    ACTIVE_REPLICA_PIDS=()
+    return "${status}"
+}
 
 # Step 1: Start the TorchFT lighthouse server
 echo "Starting TorchFT lighthouse server..."
 echo "[Lighthouse] logging to ${LIGHTHOUSE_LOG_FILE}"
-uv run --no-sync torchft_lighthouse \
-    --min_replicas ${MIN_REPLICAS} \
-    --quorum_tick_ms ${QUORUM_TICK_MS} \
-    --bind ${LIGHTHOUSE_HOST}:${LIGHTHOUSE_PORT} \
-    > "${LIGHTHOUSE_LOG_FILE}" 2>&1 &
-
-LIGHTHOUSE_PID=$!
-echo "Lighthouse started with PID: ${LIGHTHOUSE_PID}"
-
-# Wait a moment for lighthouse to start
-sleep 2
-
-# Check if lighthouse is running
-if ! kill -0 ${LIGHTHOUSE_PID} 2>/dev/null; then
-    echo "ERROR: Lighthouse failed to start. Check ${LOG_DIR}/lighthouse.log"
-    exit 1
-fi
-
+ACTIVE_LIGHTHOUSE_PID=$(start_lighthouse "${LIGHTHOUSE_HOST}" "${LIGHTHOUSE_PORT}" "${LIGHTHOUSE_LOG_FILE}") || exit 1
+echo "Lighthouse started with PID: ${ACTIVE_LIGHTHOUSE_PID}"
 echo "Lighthouse is running successfully"
 
 # Step 2: Launch N replicas, one per GPU
@@ -141,36 +234,17 @@ for ((i=0; i<NGPU; i++)); do
     echo "  Replica ${i} -> GPU ${REPLICA_GPUS[$i]}"
 done
 
-declare -a REPLICA_PIDS=()
-
 for ((replica_id=0; replica_id<NGPU; replica_id++)); do
     gpu_id="${REPLICA_GPUS[$replica_id]}"
     log_file="${LOG_DIR}/replica_${replica_id}.log"
     echo "[Replica ${replica_id}] logging to ${log_file}"
 
-    (
-        set -euo pipefail
-        cd "${REPO_ROOT}"
-        export CUDA_VISIBLE_DEVICES="${gpu_id}"
-        export PYTORCH_ALLOC_CONF="expandable_segments:True"
-        rdzv_port=$((29600 + replica_id))
-        uv run --no-sync torchrun \
-            --nproc_per_node=1 \
-            --rdzv_backend c10d \
-            --rdzv_endpoint="localhost:${rdzv_port}" \
-            --role rank \
-            --tee 3 \
-            -m "${TRAIN_FILE}" \
-            --job.config_file "${CONFIG_FILE}" \
-            --fault_tolerance.replica_id "${replica_id}" \
-            --fault_tolerance.group_size "${NGPU}" \
-            --fault_tolerance.min_replica_size "${MIN_REPLICAS}"
-    ) > "${log_file}" 2>&1 &
-    REPLICA_PIDS[$replica_id]=$!
+    replica_pid=$(launch_replica_process "${replica_id}" "${gpu_id}" "${log_file}" "${CONFIG_FILE}")
+    ACTIVE_REPLICA_PIDS+=("${replica_pid}")
     sleep 1
 done
 
-echo "Lighthouse PID: ${LIGHTHOUSE_PID}"
+echo "Lighthouse PID: ${ACTIVE_LIGHTHOUSE_PID}"
 echo ""
 echo "Monitoring logs:"
 echo "  Lighthouse: tail -f ${LIGHTHOUSE_LOG_FILE}"
@@ -180,26 +254,15 @@ done
 echo ""
 
 echo "Waiting for replicas to finish..."
-set +e
-REPLICA_EXIT=0
-for ((replica_id=0; replica_id<NGPU; replica_id++)); do
-    pid=${REPLICA_PIDS[$replica_id]}
-    if wait "${pid}"; then
-        echo "Replica ${replica_id} completed successfully."
-    else
-        status=$?
-        echo "Replica ${replica_id} exited with status ${status}."
-        REPLICA_EXIT=${status}
-    fi
-done
-set -e
-
-# Check lighthouse
-if kill -0 ${LIGHTHOUSE_PID} 2>/dev/null; then
-    echo "Stopping lighthouse..."
-    kill ${LIGHTHOUSE_PID}
-    wait ${LIGHTHOUSE_PID} 2>/dev/null || true
+if wait_for_replicas; then
+    REPLICA_EXIT=0
+else
+    REPLICA_EXIT=$?
 fi
+
+echo "Stopping lighthouse..."
+stop_lighthouse "${ACTIVE_LIGHTHOUSE_PID}"
+ACTIVE_LIGHTHOUSE_PID=""
 
 if [ ${REPLICA_EXIT} -eq 0 ]; then
     echo "All replicas completed successfully!"
