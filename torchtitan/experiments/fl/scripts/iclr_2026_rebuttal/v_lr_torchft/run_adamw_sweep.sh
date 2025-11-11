@@ -446,29 +446,38 @@ wait_for_replicas() {
   local status=0
   set +e
   while true; do
-    local pending=false
+    local -a pending_pids=()
     for pid in "${ACTIVE_REPLICA_PIDS[@]}"; do
       if [[ -n "${pid}" ]]; then
-        pending=true
-        break
+        pending_pids+=("${pid}")
       fi
     done
 
-    if [[ "${pending}" == "false" ]]; then
+    if (( ${#pending_pids[@]} == 0 )); then
       break
     fi
 
     local finished_pid=""
-    wait -n -p finished_pid
+    wait -n -p finished_pid "${pending_pids[@]}" 2>/dev/null
     local exit_code=$?
     if (( exit_code == 127 )); then
-      # Shell believes there are no unwaited children. Bail out so cleanup can run.
-      status=$(( status == 0 ? 127 : status ))
-      break
+      # Shell lost track of at least one PID; prune any dead entries and retry.
+      for idx in "${!ACTIVE_REPLICA_PIDS[@]}"; do
+        pid=${ACTIVE_REPLICA_PIDS[idx]}
+        if [[ -z "${pid}" ]]; then
+          continue
+        fi
+        if ! kill -0 "${pid}" 2>/dev/null; then
+          unset "REPLICA_PID_TO_ID[${pid}]"
+          ACTIVE_REPLICA_PIDS[idx]=""
+        fi
+      done
+      continue
     fi
 
-    if [[ -z "${REPLICA_PID_TO_ID[${finished_pid}]+_}" ]]; then
-      # Some other child process (e.g., lighthouse) finished; ignore and continue.
+    # finished_pid may be empty if wait -n was interrupted; guard to avoid
+    # accidentally treating the lighthouse PID as a replica.
+    if [[ -z "${finished_pid}" || -z "${REPLICA_PID_TO_ID[${finished_pid}]+_}" ]]; then
       continue
     fi
 
