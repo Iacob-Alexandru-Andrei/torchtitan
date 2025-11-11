@@ -444,12 +444,17 @@ launch_replica_process() {
 wait_for_replicas() {
   local status=0
   set +e
-  for pid in "${ACTIVE_REPLICA_PIDS[@]}"; do
+  # Iterate by index so we can clear entries we've already waited on. This avoids
+  # re-waiting on the same PID during failure cleanup, which would otherwise
+  # trigger "pid is not a child" errors once the child has been reaped.
+  for idx in "${!ACTIVE_REPLICA_PIDS[@]}"; do
+    pid=${ACTIVE_REPLICA_PIDS[idx]}
     if [[ -z "${pid}" ]]; then
       continue
     fi
     wait "${pid}"
     exit_code=$?
+    ACTIVE_REPLICA_PIDS[idx]=""
     if (( exit_code != 0 )); then
       status=${exit_code}
       break
