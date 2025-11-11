@@ -446,19 +446,20 @@ wait_for_replicas() {
   local status=0
   set +e
   while true; do
-    local -a pending_pids=()
+    local pending=false
     for pid in "${ACTIVE_REPLICA_PIDS[@]}"; do
       if [[ -n "${pid}" ]]; then
-        pending_pids+=("${pid}")
+        pending=true
+        break
       fi
     done
 
-    if (( ${#pending_pids[@]} == 0 )); then
+    if [[ "${pending}" == "false" ]]; then
       break
     fi
 
     local finished_pid=""
-    wait -n -p finished_pid "${pending_pids[@]}"
+    wait -n -p finished_pid
     local exit_code=$?
     if (( exit_code == 127 )); then
       # Shell believes there are no unwaited children. Bail out so cleanup can run.
@@ -466,7 +467,12 @@ wait_for_replicas() {
       break
     fi
 
-    local replica_idx="${REPLICA_PID_TO_ID[${finished_pid}]:-unknown}"
+    if [[ -z "${REPLICA_PID_TO_ID[${finished_pid}]+_}" ]]; then
+      # Some other child process (e.g., lighthouse) finished; ignore and continue.
+      continue
+    fi
+
+    local replica_idx="${REPLICA_PID_TO_ID[${finished_pid}]}"
     if (( exit_code == 0 )); then
       echo "Replica ${replica_idx} (pid ${finished_pid}) completed successfully." >&2
     else

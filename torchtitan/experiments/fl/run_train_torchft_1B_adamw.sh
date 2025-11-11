@@ -82,6 +82,7 @@ echo "=========================================="
 
 declare -a ACTIVE_REPLICA_PIDS=()
 ACTIVE_LIGHTHOUSE_PID=""
+declare -A REPLICA_PID_TO_ID=()
 
 cleanup_active_processes() {
     set +e
@@ -99,6 +100,8 @@ cleanup_active_processes() {
         kill "${ACTIVE_LIGHTHOUSE_PID}" 2>/dev/null || true
         wait "${ACTIVE_LIGHTHOUSE_PID}" 2>/dev/null || true
     fi
+    ACTIVE_REPLICA_PIDS=()
+    REPLICA_PID_TO_ID=()
     set -e
 }
 trap cleanup_active_processes EXIT INT TERM
@@ -165,21 +168,49 @@ launch_replica_process() {
 wait_for_replicas() {
     local status=0
     set +e
-    for idx in "${!ACTIVE_REPLICA_PIDS[@]}"; do
-        local pid=${ACTIVE_REPLICA_PIDS[idx]}
-        if [[ -z "${pid}" ]]; then
+    while true; do
+        local pending=false
+        for pid in "${ACTIVE_REPLICA_PIDS[@]}"; do
+            if [[ -n "${pid}" ]]; then
+                pending=true
+                break
+            fi
+        done
+
+        if [[ "${pending}" == "false" ]]; then
+            break
+        fi
+
+        local finished_pid=""
+        wait -n -p finished_pid
+        local exit_code=$?
+        if (( exit_code == 127 )); then
+            status=$(( status == 0 ? 127 : status ))
+            break
+        fi
+
+        if [[ -z "${REPLICA_PID_TO_ID[${finished_pid}]+_}" ]]; then
+            # Some other child process finished; keep waiting for replicas.
             continue
         fi
-        wait "${pid}"
-        local exit_code=$?
+
+        local replica_idx="${REPLICA_PID_TO_ID[${finished_pid}]}"
         if (( exit_code == 0 )); then
-            echo "Replica ${idx} completed successfully."
+            echo "Replica ${replica_idx} (pid ${finished_pid}) completed successfully."
         else
-            echo "Replica ${idx} exited with status ${exit_code}."
-        fi
-        ACTIVE_REPLICA_PIDS[idx]=""
-        if (( exit_code != 0 )); then
+            echo "Replica ${replica_idx} (pid ${finished_pid}) exited with status ${exit_code}."
             status=${exit_code}
+        fi
+        unset "REPLICA_PID_TO_ID[${finished_pid}]"
+
+        for idx in "${!ACTIVE_REPLICA_PIDS[@]}"; do
+            if [[ "${ACTIVE_REPLICA_PIDS[idx]}" == "${finished_pid}" ]]; then
+                ACTIVE_REPLICA_PIDS[idx]=""
+                break
+            fi
+        done
+
+        if (( exit_code != 0 )); then
             break
         fi
     done
@@ -199,6 +230,7 @@ wait_for_replicas() {
     fi
 
     ACTIVE_REPLICA_PIDS=()
+    REPLICA_PID_TO_ID=()
     return "${status}"
 }
 
@@ -241,6 +273,7 @@ for ((replica_id=0; replica_id<NGPU; replica_id++)); do
 
     replica_pid=$(launch_replica_process "${replica_id}" "${gpu_id}" "${log_file}" "${CONFIG_FILE}")
     ACTIVE_REPLICA_PIDS+=("${replica_pid}")
+    REPLICA_PID_TO_ID["${replica_pid}"]="${replica_id}"
     sleep 1
 done
 
