@@ -619,6 +619,7 @@ start_run() {
       (
         set -euo pipefail
         export CUDA_VISIBLE_DEVICES="${gpu_id}"
+        export TORCHFT_REPLICA_ID="${replica_id}"
         uv run --no-sync torchrun \
           --nproc_per_node=1 \
           --rdzv_backend=c10d \
@@ -637,6 +638,9 @@ start_run() {
           --parallelism.data_parallel_replicate_degree 1 \
           --lr_scheduler.switch_step 2049 \
           --validation.freq "${validation_freq}" \
+          --fault_tolerance.replica_id "${replica_id}" \
+          --fault_tolerance.group_size "${workers}" \
+          --fault_tolerance.min_replica_size "${min_replicas}" \
           --run_uuid "${RUN_UUID}" \
           "${TRAINING_ARGS[@]}"
       ) > "${replica_log}" 2>&1 &
