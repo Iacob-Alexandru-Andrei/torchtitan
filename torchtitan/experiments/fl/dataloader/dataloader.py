@@ -100,6 +100,12 @@ def _apply_split_overrides(
 
 def _resolve_replica_identifier(job_config: MosaicJobConfig) -> str | None:
     """Resolve a stable identifier for the current replica if available."""
+    run_uuid = getattr(job_config, "run_uuid", None) or os.getenv("RUN_UUID")
+    run_uuid_str: str | None = None
+    if run_uuid not in (None, ""):
+        run_uuid_str = str(run_uuid)
+        job_config.run_uuid = run_uuid_str
+
     candidate: int | str | None = getattr(job_config.fault_tolerance, "replica_id", None)
     if candidate in (None, "", -1):
         for env_var in (
@@ -112,9 +118,15 @@ def _resolve_replica_identifier(job_config: MosaicJobConfig) -> str | None:
             if env_value not in (None, "", "-1"):
                 candidate = env_value
                 break
-    if candidate in (None, "", -1):
-        return None
-    return str(candidate)
+    replica_str: str | None = None
+    if candidate not in (None, "", -1):
+        replica_str = str(candidate)
+
+    if run_uuid_str and replica_str:
+        return f"{run_uuid_str}-rep{replica_str}"
+    if run_uuid_str:
+        return run_uuid_str
+    return replica_str
 
 
 def _build_mosaic_dataloader(
