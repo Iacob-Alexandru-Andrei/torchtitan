@@ -335,6 +335,7 @@ print_run_plan_table() {
 
 declare -a ACTIVE_REPLICA_PIDS=()
 ACTIVE_LIGHTHOUSE_PID=""
+declare -A REPLICA_PID_TO_ID=()
 
 cleanup_active_processes() {
   if (( ${#ACTIVE_REPLICA_PIDS[@]} > 0 )); then
@@ -444,19 +445,44 @@ launch_replica_process() {
 wait_for_replicas() {
   local status=0
   set +e
-  # Iterate by index so we can clear entries we've already waited on. This avoids
-  # re-waiting on the same PID during failure cleanup, which would otherwise
-  # trigger "pid is not a child" errors once the child has been reaped.
-  for idx in "${!ACTIVE_REPLICA_PIDS[@]}"; do
-    pid=${ACTIVE_REPLICA_PIDS[idx]}
-    if [[ -z "${pid}" ]]; then
-      continue
+  while true; do
+    local -a pending_pids=()
+    for pid in "${ACTIVE_REPLICA_PIDS[@]}"; do
+      if [[ -n "${pid}" ]]; then
+        pending_pids+=("${pid}")
+      fi
+    done
+
+    if (( ${#pending_pids[@]} == 0 )); then
+      break
     fi
-    wait "${pid}"
-    exit_code=$?
-    ACTIVE_REPLICA_PIDS[idx]=""
-    if (( exit_code != 0 )); then
+
+    local finished_pid=""
+    wait -n -p finished_pid "${pending_pids[@]}"
+    local exit_code=$?
+    if (( exit_code == 127 )); then
+      # Shell believes there are no unwaited children. Bail out so cleanup can run.
+      status=$(( status == 0 ? 127 : status ))
+      break
+    fi
+
+    local replica_idx="${REPLICA_PID_TO_ID[${finished_pid}]:-unknown}"
+    if (( exit_code == 0 )); then
+      echo "Replica ${replica_idx} (pid ${finished_pid}) completed successfully." >&2
+    else
+      echo "Replica ${replica_idx} (pid ${finished_pid}) exited with status ${exit_code}." >&2
       status=${exit_code}
+    fi
+    unset "REPLICA_PID_TO_ID[${finished_pid}]"
+
+    for idx in "${!ACTIVE_REPLICA_PIDS[@]}"; do
+      if [[ "${ACTIVE_REPLICA_PIDS[idx]}" == "${finished_pid}" ]]; then
+        ACTIVE_REPLICA_PIDS[idx]=""
+        break
+      fi
+    done
+
+    if (( exit_code != 0 )); then
       break
     fi
   done
@@ -476,6 +502,7 @@ wait_for_replicas() {
   fi
 
   ACTIVE_REPLICA_PIDS=()
+  REPLICA_PID_TO_ID=()
   return "${status}"
 }
 
@@ -533,6 +560,7 @@ for idx in "${!RUN_PLAN_INDICES[@]}"; do
   export TORCHFT_LIGHTHOUSE="${lighthouse_url}"
 
   ACTIVE_REPLICA_PIDS=()
+  REPLICA_PID_TO_ID=()
   for replica_id in $(seq 0 $((WORKER_COUNT - 1))); do
     gpu_id=${REPLICA_GPUS[$replica_id]}
     replica_log="${run_log_dir}/replica_${replica_id}.log"
@@ -540,6 +568,7 @@ for idx in "${!RUN_PLAN_INDICES[@]}"; do
     rdzv_id="${run_uuid}-replica-${replica_id}"
     replica_pid=$(launch_replica_process "${replica_id}" "${gpu_id}" "${replica_log}" "${rdzv_port}" "${rdzv_id}" "${lighthouse_url}" "${v_value}" "${switch_scale}")
     ACTIVE_REPLICA_PIDS+=("${replica_pid}")
+    REPLICA_PID_TO_ID["${replica_pid}"]="${replica_id}"
     echo "  Replica ${replica_id} -> GPU ${gpu_id} (log: ${replica_log})" >&2
     sleep 1
   done
