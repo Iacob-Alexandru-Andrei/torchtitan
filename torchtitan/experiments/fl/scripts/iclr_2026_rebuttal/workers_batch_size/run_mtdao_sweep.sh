@@ -426,8 +426,13 @@ build_optimizer_sync_spec() {
   for base_value in "${BASE_OPTIMIZER_SYNC_ARRAY[@]}"; do
     scaled_values+=("$(compute_scaled_sync_every "${base_value}" "${REFERENCE_GLOBAL_BATCH_SIZE}" "${global_bs}")")
   done
-  local IFS=','
-  echo "${scaled_values[*]}"
+  if (( ${#scaled_values[@]} == 1 )); then
+    echo "${scaled_values[0]}"
+  else
+    local IFS=','
+    local joined="${scaled_values[*]}"
+    echo "[${joined}]"
+  fi
 }
 
 should_run_combination() {
