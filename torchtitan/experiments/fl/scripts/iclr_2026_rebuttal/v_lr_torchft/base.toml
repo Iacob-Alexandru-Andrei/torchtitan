@@ -20,7 +20,7 @@ save_for_all_ranks = true
 
 [model]
 name = "mosaic_llama3_mup"
-flavor = "1B"
+flavor = "16M"
 # test folder with tokenizer.json, for debug purpose only
 hf_assets_path = "./tests/assets/tokenizer"
 # converters = ["float8"]
@@ -35,12 +35,12 @@ weight_decay = 0.0
 betas = [0.9,0.999]
 implementation = "for-loop"
 
-# [optimizer.desloc]
-# enabled = false
-# param_sync_every = 32
-# optimizer_sync_every = [32,32]
-# backup_device = "cpu"
-# pin_memory = true
+[optimizer.desloc]
+enabled = true
+param_sync_every = 32
+optimizer_sync_every = [32,32]
+backup_device = "cpu"
+pin_memory = true
 
 [fl_metrics.optimizer_monitor]
 interval = 16
@@ -68,7 +68,7 @@ warmup_steps = 2048  # lr scheduler warm up, normally 20% of the train steps
 decay_ratio = 0.0  # lr scheduler decay ratio, 80% of the train steps
 decay_type = "sqrt"
 min_lr_factor = 0.0
-switch_step = 2048
+switch_step = 2049
 switch_scale = 4.0
 
 [fl_metrics.hyperparameter_switch]

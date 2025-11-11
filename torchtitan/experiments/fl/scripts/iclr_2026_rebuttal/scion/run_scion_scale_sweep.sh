@@ -1,14 +1,18 @@
 #!/usr/bin/env bash
-# Sweep QHScion optimizer hyperparameters. Only the learning rate and momentum (beta)
-# values are swept; VS is fixed to 1.0 and there is no hyperparameter switch logic.
+# Sweep Scion hidden/output scale and constrained toggles at a fixed QHScion lr/momentum.
 set -euo pipefail
 
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 CONFIG_FILE=${CONFIG_FILE:-"${SCRIPT_DIR}/base.toml"}
 TRAIN_MODULE=${TRAIN_MODULE:-"torchtitan.experiments.fl.train"}
-RUN_PREFIX=${RUN_PREFIX:-"iclr2026-scionDisco-qh-lr"}
+RUN_PREFIX=${RUN_PREFIX:-"iclr2026-scionDisco-scale"}
 LOG_RANK=${LOG_RANK:-0}
 SCION_V=${SCION_V:-"1.0"}
+FIXED_LR=${FIXED_LR:-0.000125}
+FIXED_MOMENTUM=${FIXED_MOMENTUM:-0.1}
+SCION_BASE_SCALES=${SCION_BASE_SCALES:-"30 60"}
+SCION_OUTPUT_MULTIPLIER=${SCION_OUTPUT_MULTIPLIER:-60}
+UNCONSTRAINED_VALUES=${UNCONSTRAINED_VALUES:-"false true"}
 
 RUN_INDEX=${RUN_INDEX:-}
 RUN_INDEX_OFFSET=${RUN_INDEX_OFFSET:-0}
@@ -17,7 +21,7 @@ USE_SBATCH=${USE_SBATCH:-false}
 DRY_RUN=${DRY_RUN:-false}
 SBATCH_CPUS_PER_TASK=${SBATCH_CPUS_PER_TASK:-8}
 SBATCH_GPUS_PER_TASK=${SBATCH_GPUS_PER_TASK:-1}
-SBATCH_MAX_CHAINS=${SBATCH_MAX_CHAINS:-1}
+SBATCH_MAX_CHAINS=${SBATCH_MAX_CHAINS:-2}
 SBATCH_MEM=${SBATCH_MEM:-}
 SBATCH_TIME=${SBATCH_TIME:-}
 SBATCH_PARTITION=${SBATCH_PARTITION:-}
@@ -27,7 +31,7 @@ SBATCH_CONSTRAINT=${SBATCH_CONSTRAINT:-}
 SBATCH_COMMENT=${SBATCH_COMMENT:-}
 SBATCH_LOG_DIR=${SBATCH_LOG_DIR:-"${SCRIPT_DIR}/logs"}
 SBATCH_ADDITIONAL_ARGS=${SBATCH_ADDITIONAL_ARGS:-}
-SBATCH_NODE=${SBATCH_NODE:-"ruapehu"}
+SBATCH_NODE=${SBATCH_NODE:-"mauao"}
 
 DEFAULT_LOG_STREAM_DIR=${SBATCH_LOG_DIR:-"${SCRIPT_DIR}/logs"}
 LOG_STREAM_DIR=${LOG_STREAM_DIR:-"${DEFAULT_LOG_STREAM_DIR}"}
@@ -37,7 +41,7 @@ fi
 
 usage() {
   cat <<'EOF'
-Usage: run_scion_qh_lr_sweep.sh [OPTIONS] [-- extra training args]
+Usage: run_scion_scale_sweep.sh [OPTIONS] [-- extra training args]
 
 Options:
   --range START-END        Run only the 0-indexed inclusive range of sweep jobs.
@@ -54,7 +58,8 @@ Environment variables (override defaults):
   SBATCH_CPUS_PER_TASK, SBATCH_GPUS_PER_TASK, SBATCH_MAX_CHAINS, SBATCH_MEM, SBATCH_TIME
   SBATCH_PARTITION, SBATCH_ACCOUNT, SBATCH_QOS, SBATCH_CONSTRAINT, SBATCH_COMMENT
   SBATCH_LOG_DIR, SBATCH_ADDITIONAL_ARGS, SBATCH_NODE
-  MOMENTUM_VALUES, LR_VALUES, SCION_V
+  FIXED_LR, FIXED_MOMENTUM, SCION_BASE_SCALES, SCION_OUTPUT_MULTIPLIER
+  UNCONSTRAINED_VALUES, SCION_V
 EOF
 }
 
@@ -135,17 +140,13 @@ TRAINING_ARGS_ESCAPED=$(serialize_training_args)
 read -r -a SBATCH_EXTRA_ARRAY <<< "${SBATCH_ADDITIONAL_ARGS}"
 [[ -z "${SBATCH_ADDITIONAL_ARGS}" ]] && SBATCH_EXTRA_ARRAY=()
 
-MOMENTUM_VALUES=${MOMENTUM_VALUES:-"0.1 0.2 0.3 0.4 0.5 0.6 0.7 0.8 0.9 1.0"}
-# LR_VALUES=${LR_VALUES:-"0.0005 0.001 0.002 0.004"}
-LR_VALUES=${LR_VALUES:-"0.00025 0.000125 0.0000625"}
+read -r -a BASE_SCALE_ARRAY <<< "${SCION_BASE_SCALES}"
+read -r -a UNCONSTRAINED_ARRAY <<< "${UNCONSTRAINED_VALUES}"
 
-read -r -a MOMENTUM_ARRAY <<< "${MOMENTUM_VALUES}"
-read -r -a LR_ARRAY <<< "${LR_VALUES}"
+(( ${#BASE_SCALE_ARRAY[@]} == 0 )) && { echo "SCION_BASE_SCALES must contain at least one entry." >&2; exit 1; }
+(( ${#UNCONSTRAINED_ARRAY[@]} == 0 )) && { echo "UNCONSTRAINED_VALUES must contain at least one entry." >&2; exit 1; }
 
-(( ${#MOMENTUM_ARRAY[@]} == 0 )) && { echo "MOMENTUM_VALUES must contain at least one entry." >&2; exit 1; }
-(( ${#LR_ARRAY[@]} == 0 )) && { echo "LR_VALUES must contain at least one entry." >&2; exit 1; }
-
-TOTAL_RUNS=$(( ${#MOMENTUM_ARRAY[@]} * ${#LR_ARRAY[@]} ))
+TOTAL_RUNS=$(( ${#BASE_SCALE_ARRAY[@]} * ${#UNCONSTRAINED_ARRAY[@]} ))
 
 RANGE_ENABLED=false
 RANGE_START=
@@ -211,8 +212,8 @@ should_run_combination() {
 count_selected_runs() {
   local idx=0
   local selected=0
-  for momentum in "${MOMENTUM_ARRAY[@]}"; do
-    for lr_value in "${LR_ARRAY[@]}"; do
+  for base_scale in "${BASE_SCALE_ARRAY[@]}"; do
+    for unconstrained in "${UNCONSTRAINED_ARRAY[@]}"; do
       ((++idx))
       if should_run_combination "${idx}"; then
         ((++selected))
@@ -222,27 +223,54 @@ count_selected_runs() {
   echo "${selected}"
 }
 
+calculate_output_scale() {
+  local base_value=$1
+  awk -v base="${base_value}" -v mult="${SCION_OUTPUT_MULTIPLIER}" 'BEGIN { printf "%.12g\n", base * mult }'
+}
+
+build_unconstrained_flag() {
+  local value="${1,,}"
+  if [[ "${value}" == "true" ]]; then
+    echo "--optimizer.unconstrained"
+  else
+    echo "--optimizer.no-unconstrained"
+  fi
+}
+
 SELECTED_RUNS=$(count_selected_runs)
 (( SELECTED_RUNS == 0 )) && { echo "No runs match the requested filters; nothing to do." >&2; exit 0; }
 
 declare -a RUN_PLAN_INDICES=()
-declare -a RUN_PLAN_MOMENTUM=()
-declare -a RUN_PLAN_LR=()
+declare -a RUN_PLAN_BASE_SCALE=()
+declare -a RUN_PLAN_OUTPUT_SCALE=()
+declare -a RUN_PLAN_UNCONSTRAINED=()
 
 combination_index=0
-for momentum in "${MOMENTUM_ARRAY[@]}"; do
-  for lr_value in "${LR_ARRAY[@]}"; do
+for base_scale in "${BASE_SCALE_ARRAY[@]}"; do
+  for unconstrained in "${UNCONSTRAINED_ARRAY[@]}"; do
     ((++combination_index))
     if ! should_run_combination "${combination_index}"; then
       continue
     fi
+    output_scale=$(calculate_output_scale "${base_scale}")
     RUN_PLAN_INDICES+=("${combination_index}")
-    RUN_PLAN_MOMENTUM+=("${momentum}")
-    RUN_PLAN_LR+=("${lr_value}")
+    RUN_PLAN_BASE_SCALE+=("${base_scale}")
+    RUN_PLAN_OUTPUT_SCALE+=("${output_scale}")
+    RUN_PLAN_UNCONSTRAINED+=("${unconstrained}")
   done
 done
 
-SWEEP_CONFIG_STRING="mom=${MOMENTUM_VALUES}|lr=${LR_VALUES}|scion_v=${SCION_V}|train_module=${TRAIN_MODULE}|config=${CONFIG_FILE}"
+SWEEP_CONFIG_STRING=$(
+  printf "base_scales=%s|unconstrained=%s|output_multiplier=%s|momentum=%s|lr=%s|scion_v=%s|train_module=%s|config=%s" \
+    "${SCION_BASE_SCALES}" \
+    "${UNCONSTRAINED_VALUES}" \
+    "${SCION_OUTPUT_MULTIPLIER}" \
+    "${FIXED_MOMENTUM}" \
+    "${FIXED_LR}" \
+    "${SCION_V}" \
+    "${TRAIN_MODULE}" \
+    "${CONFIG_FILE}"
+)
 if command -v sha1sum >/dev/null 2>&1; then
   SWEEP_HASH=$(printf "%s" "${SWEEP_CONFIG_STRING}" | sha1sum | awk '{print $1}')
 elif command -v shasum >/dev/null 2>&1; then
@@ -356,14 +384,15 @@ print_run_plan_table() {
   (( total == 0 )) && return
   echo "" >&2
   echo "Selected run configurations (${total} total):" >&2
-  printf "%-10s %-10s %-14s %-14s\n" "Idx(1-based)" "Idx(0-based)" "momentum" "lr" >&2
-  printf "%-10s %-10s %-14s %-14s\n" "----------" "----------" "------------" "------------" >&2
+  printf "%-10s %-10s %-14s %-14s %-14s\n" "Idx(1-based)" "Idx(0-based)" "base_scale" "output_scale" "unconstrained" >&2
+  printf "%-10s %-10s %-14s %-14s %-14s\n" "----------" "----------" "------------" "--------------" "--------------" >&2
   for idx in "${!RUN_PLAN_INDICES[@]}"; do
     local combo_index_1=${RUN_PLAN_INDICES[idx]}
     local combo_index_0=$((combo_index_1 - 1))
-    local momentum=${RUN_PLAN_MOMENTUM[idx]}
-    local lr_value=${RUN_PLAN_LR[idx]}
-    printf "%-10s %-10s %-14s %-14s\n" "${combo_index_1}" "${combo_index_0}" "${momentum}" "${lr_value}" >&2
+    local base_scale=${RUN_PLAN_BASE_SCALE[idx]}
+    local output_scale=${RUN_PLAN_OUTPUT_SCALE[idx]}
+    local unconstrained=${RUN_PLAN_UNCONSTRAINED[idx]}
+    printf "%-10s %-10s %-14s %-14s %-14s\n" "${combo_index_1}" "${combo_index_0}" "${base_scale}" "${output_scale}" "${unconstrained}" >&2
   done
   echo "" >&2
 }
@@ -374,10 +403,14 @@ submit_sbatch_job() {
   local rdzv_endpoint=$3
   local lighthouse_url=$4
   local combo_index_label=$5
-  local momentum=$6
-  local lr_value=$7
-  local dependency_job=$8
-  local chain_index=$9
+  local base_scale=$6
+  local output_scale=$7
+  local unconstrained=$8
+  local dependency_job=$9
+  local chain_index=${10}
+
+  local unconstrained_flag
+  unconstrained_flag=$(build_unconstrained_flag "${unconstrained}")
 
   local job_name="${RUN_PREFIX}-${SWEEP_HASH}-idx${combo_index_label}"
   local sbatch_opts=(--parsable "-c" "${SBATCH_CPUS_PER_TASK}" "--gres=gpu:${SBATCH_GPUS_PER_TASK}" "--job-name=${job_name}")
@@ -401,7 +434,8 @@ submit_sbatch_job() {
 set -euo pipefail
 echo "==================================================================="
 echo "STARTING SBATCH JOB: ${job_name} (ID: \$SLURM_JOB_ID)"
-echo "Run UUID: ${run_uuid} | Progress: ${run_progress} | momentum=${momentum} | lr=${lr_value}"
+echo "Run UUID: ${run_uuid} | Progress: ${run_progress} | momentum=${FIXED_MOMENTUM} | lr=${FIXED_LR}"
+echo "Scales: hidden=${base_scale} | output=${output_scale} | unconstrained=${unconstrained}"
 echo "Chain Index: ${chain_index} | Dependency: ${dependency_job:-none}"
 echo "Node: \$(hostname) at \$(date)"
 echo "==================================================================="
@@ -433,9 +467,12 @@ uv run --no-sync torchrun \
   --model.flavor "16M_RMS_scion" \
   --optimizer.builder mosaic \
   --optimizer.name ScionQH \
-  --optimizer.lr "${lr_value}" \
-  --optimizer.betas "${momentum}" \
+  --optimizer.lr "${FIXED_LR}" \
+  --optimizer.betas "${FIXED_MOMENTUM}" \
   --optimizer.vs "${SCION_V}" \
+  --optimizer.scion_hidden_scale "${base_scale}" \
+  --optimizer.scion_output_scale "${output_scale}" \
+  ${unconstrained_flag} \
   --parallelism.data_parallel_replicate_degree 1 \
   ${TRAINING_ARGS_ESCAPED} \
   2>&1 | tee -a "\${STREAM_LOG_FILE}"
@@ -466,7 +503,7 @@ else
   FILTER_DESC="all runs"
 fi
 
-echo "Starting QHScion momentum/lr sweep hash=${SWEEP_HASH} using ${EXECUTION_DESC}: ${SELECTED_RUNS}/${TOTAL_RUNS} run(s) selected (${FILTER_DESC})." >&2
+echo "Starting QHScion scale/unconstrained sweep hash=${SWEEP_HASH} using ${EXECUTION_DESC}: ${SELECTED_RUNS}/${TOTAL_RUNS} run(s) selected (${FILTER_DESC})." >&2
 print_run_plan_table "${SELECTED_RUNS}"
 
 timestamp_global=$(date +"%Y%m%d-%H%M%S")
@@ -475,18 +512,21 @@ dispatched_runs=0
 for idx in "${!RUN_PLAN_INDICES[@]}"; do
   combination_index=${RUN_PLAN_INDICES[idx]}
   combination_index_zero=$((combination_index - 1))
-  momentum=${RUN_PLAN_MOMENTUM[idx]}
-  lr_value=${RUN_PLAN_LR[idx]}
-  momentum_tag=$(sanitize_value "${momentum}")
-  lr_tag=$(sanitize_value "${lr_value}")
-  run_uuid="${RUN_PREFIX}-${SWEEP_HASH}-mom${momentum_tag}-lr${lr_tag}-${timestamp_global}-idx${combination_index_zero}"
+  base_scale=${RUN_PLAN_BASE_SCALE[idx]}
+  output_scale=${RUN_PLAN_OUTPUT_SCALE[idx]}
+  unconstrained=${RUN_PLAN_UNCONSTRAINED[idx]}
+  base_tag=$(sanitize_value "${base_scale}")
+  output_tag=$(sanitize_value "${output_scale}")
+  unconstrained_tag=$(sanitize_value "${unconstrained}")
+  run_uuid="${RUN_PREFIX}-${SWEEP_HASH}-base${base_tag}-out${output_tag}-uncon${unconstrained_tag}-${timestamp_global}-idx${combination_index_zero}"
   run_progress="run ${combination_index}/${TOTAL_RUNS}"
+  unconstrained_flag=$(build_unconstrained_flag "${unconstrained}")
 
   if [[ "${DRY_RUN}" == "true" ]]; then
     if [[ "${USE_SBATCH}" == "true" ]]; then
-      echo "[DRY-RUN][SBATCH] ${run_uuid} (momentum=${momentum}, lr=${lr_value}) [${run_progress}]" >&2
+      echo "[DRY-RUN][SBATCH] ${run_uuid} (hidden=${base_scale}, output=${output_scale}, unconstrained=${unconstrained}) [${run_progress}]" >&2
     else
-      echo "[DRY-RUN][LOCAL] ${run_uuid} (momentum=${momentum}, lr=${lr_value}) [${run_progress}]" >&2
+      echo "[DRY-RUN][LOCAL] ${run_uuid} (hidden=${base_scale}, output=${output_scale}, unconstrained=${unconstrained}) [${run_progress}]" >&2
     fi
     continue
   fi
@@ -506,20 +546,20 @@ for idx in "${!RUN_PLAN_INDICES[@]}"; do
     else
       echo "[SBATCH] Chain ${chain_index}: submitting ${run_uuid} with no dependency." >&2
     fi
-    job_id=$(submit_sbatch_job "${run_uuid}" "${run_progress}" "${rdzv_endpoint}" "${lighthouse_url}" "${combination_index_zero}" "${momentum}" "${lr_value}" "${dependency_job}" "${chain_index}")
+    job_id=$(submit_sbatch_job "${run_uuid}" "${run_progress}" "${rdzv_endpoint}" "${lighthouse_url}" "${combination_index_zero}" "${base_scale}" "${output_scale}" "${unconstrained}" "${dependency_job}" "${chain_index}")
     if [[ -z "${job_id}" ]]; then
       echo "Aborting sweep after failed sbatch submission." >&2
       exit 1
     fi
     SBATCH_CHAIN_LAST_IDS[chain_index]="${job_id}"
     SBATCH_JOB_IDS+=("${job_id}")
-    echo "[SBATCH] Submitted ${run_uuid} (${run_progress}) as job ${job_id} | momentum=${momentum}, lr=${lr_value}" >&2
+    echo "[SBATCH] Submitted ${run_uuid} (${run_progress}) as job ${job_id} | hidden=${base_scale}, output=${output_scale}, unconstrained=${unconstrained}" >&2
     sleep 30
   else
     gpu_slot=$(wait_for_gpu)
     gpu_id=${GPU_ARRAY[gpu_slot]}
     run_log_file="${LOG_STREAM_DIR}/${run_uuid}.local.log"
-    echo "[GPU ${gpu_id}] Launching run ${run_uuid} (momentum=${momentum}, lr=${lr_value}) [${run_progress}]" >&2
+    echo "[GPU ${gpu_id}] Launching run ${run_uuid} (hidden=${base_scale}, output=${output_scale}, unconstrained=${unconstrained}) [${run_progress}]" >&2
     echo "           torchrun rendezvous: ${rdzv_endpoint}, lighthouse: ${lighthouse_url}" >&2
     echo "           streaming stdout/stderr to ${run_log_file}" >&2
 
@@ -547,9 +587,12 @@ uv run --no-sync torchrun \
   --model.flavor "16M" \
   --optimizer.builder mosaic \
   --optimizer.name ScionQH \
-  --optimizer.lr "${lr_value}" \
-  --optimizer.betas "${momentum}" \
+  --optimizer.lr "${FIXED_LR}" \
+  --optimizer.betas "${FIXED_MOMENTUM}" \
   --optimizer.vs "${SCION_V}" \
+  --optimizer.scion_hidden_scale "${base_scale}" \
+  --optimizer.scion_output_scale "${output_scale}" \
+  ${unconstrained_flag} \
   --training.global_batch_size 64 \
   --training.local_batch_size 32 \
   --training.steps 6144 \

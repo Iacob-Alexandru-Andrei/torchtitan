@@ -1,0 +1,20 @@
+Starting QHScion scale/unconstrained sweep hash=b5cf87e7 using sbatch submission: 4/4 run(s) selected (all runs).
+
+Selected run configurations (4 total):
+Idx(1-based) Idx(0-based) base_scale     output_scale   unconstrained 
+---------- ---------- ------------   -------------- --------------
+1          0          30             1800           false         
+2          1          30             1800           true          
+3          2          60             3600           false         
+4          3          60             3600           true          
+
+[SBATCH] Chain 0: submitting iclr2026-scionDisco-scale-b5cf87e7-base30-out1800-unconfalse-20251111-181214-idx0 with no dependency.
+[SBATCH] Submitted iclr2026-scionDisco-scale-b5cf87e7-base30-out1800-unconfalse-20251111-181214-idx0 (run 1/4) as job 27078 | hidden=30, output=1800, unconstrained=false
+[SBATCH] Chain 1: submitting iclr2026-scionDisco-scale-b5cf87e7-base30-out1800-uncontrue-20251111-181214-idx1 with no dependency.
+[SBATCH] Submitted iclr2026-scionDisco-scale-b5cf87e7-base30-out1800-uncontrue-20251111-181214-idx1 (run 2/4) as job 27079 | hidden=30, output=1800, unconstrained=true
+[SBATCH] Chain 0: submitting iclr2026-scionDisco-scale-b5cf87e7-base60-out3600-unconfalse-20251111-181214-idx2 after job 27078.
+[SBATCH] Submitted iclr2026-scionDisco-scale-b5cf87e7-base60-out3600-unconfalse-20251111-181214-idx2 (run 3/4) as job 27080 | hidden=60, output=3600, unconstrained=false
+[SBATCH] Chain 1: submitting iclr2026-scionDisco-scale-b5cf87e7-base60-out3600-uncontrue-20251111-181214-idx3 after job 27079.
+[SBATCH] Submitted iclr2026-scionDisco-scale-b5cf87e7-base60-out3600-uncontrue-20251111-181214-idx3 (run 4/4) as job 27081 | hidden=60, output=3600, unconstrained=true
+Submitted 4 job(s) via sbatch (hash b5cf87e7).
+Sweep complete.

@@ -20,7 +20,7 @@ RUN_INDEX_RANGE=${RUN_INDEX_RANGE:-}
 DRY_RUN=${DRY_RUN:-false}
 
 VS_VALUES=${VS_VALUES:-"0.98 0.99 0.993 0.996 0.999 0.9993 0.9996 0.9999"}
-SWITCH_SCALES=${SWITCH_SCALES:-"1 2 4 8 16"}
+SWITCH_SCALES=${SWITCH_SCALES:-"4 8 16"}
 
 GPU_IDS=${GPU_IDS:-"0 1 2 3"}
 RDZV_HOST=${RDZV_HOST:-"127.0.0.1"}
@@ -245,8 +245,8 @@ should_run_combination() {
 count_selected_runs() {
   local idx=0
   local selected=0
+  for sw_val in "${SWITCH_SCALE_ARRAY[@]}"; do
   for v_val in "${VS_ARRAY[@]}"; do
-    for sw_val in "${SWITCH_SCALE_ARRAY[@]}"; do
       ((++idx))
       if should_run_combination "${idx}"; then
         ((++selected))
@@ -267,8 +267,8 @@ declare -a RUN_PLAN_VS=()
 declare -a RUN_PLAN_SWITCHES=()
 
 combination_index=0
-for v_value in "${VS_ARRAY[@]}"; do
-  for switch_scale in "${SWITCH_SCALE_ARRAY[@]}"; do
+for switch_scale in "${SWITCH_SCALE_ARRAY[@]}"; do
+  for v_value in "${VS_ARRAY[@]}"; do
     ((++combination_index))
     if ! should_run_combination "${combination_index}"; then
       continue
