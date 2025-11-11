@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from torchtitan.experiments.fl.metrics import get_or_create_unigram_manager
+from torchtitan.tools.logging import logger
 
 from .dataset_factory import (
     _normalize_mosaic_dataloader_config,
@@ -100,12 +101,6 @@ def _apply_split_overrides(
 
 def _resolve_replica_identifier(job_config: MosaicJobConfig) -> str | None:
     """Resolve a stable identifier for the current replica if available."""
-    run_uuid = getattr(job_config, "run_uuid", None) or os.getenv("RUN_UUID")
-    run_uuid_str: str | None = None
-    if run_uuid not in (None, ""):
-        run_uuid_str = str(run_uuid)
-        job_config.run_uuid = run_uuid_str
-
     candidate: int | str | None = getattr(job_config.fault_tolerance, "replica_id", None)
     if candidate in (None, "", -1):
         for env_var in (
@@ -118,15 +113,9 @@ def _resolve_replica_identifier(job_config: MosaicJobConfig) -> str | None:
             if env_value not in (None, "", "-1"):
                 candidate = env_value
                 break
-    replica_str: str | None = None
-    if candidate not in (None, "", -1):
-        replica_str = str(candidate)
-
-    if run_uuid_str and replica_str:
-        return f"{run_uuid_str}-rep{replica_str}"
-    if run_uuid_str:
-        return run_uuid_str
-    return replica_str
+    if candidate in (None, "", -1):
+        return None
+    return str(candidate)
 
 
 def _build_mosaic_dataloader(
@@ -153,7 +142,23 @@ def _build_mosaic_dataloader(
 
     extraction = _extract_streams(dict(normalized.dataset_config))
     replica_identifier = _resolve_replica_identifier(request.job_config)
-    namespace_base = f"rep{replica_identifier}" if replica_identifier is not None else f"pid{os.getpid()}"
+    run_uuid = getattr(request.job_config, "run_uuid", None) or os.getenv("RUN_UUID")
+    namespace_parts: list[str] = []
+    if run_uuid not in (None, ""):
+        namespace_parts.append(str(run_uuid))
+    if replica_identifier is not None:
+        namespace_parts.append(f"rep{replica_identifier}")
+    if not namespace_parts:
+        namespace_parts.append(f"pid{os.getpid()}")
+    namespace_base = "-".join(namespace_parts)
+    logger.info(
+        "Mosaic dataloader namespace components: run_uuid=%s replica=%s split=%s dp_rank=%s -> %s",
+        run_uuid or "none",
+        replica_identifier or "none",
+        request.split,
+        request.dp_rank,
+        namespace_base,
+    )
     shared_memory_namespace = f"{namespace_base}-{request.split}-dp{request.dp_rank}"
     dataset, assignment = build_dataset_for_rank(
         normalized,
