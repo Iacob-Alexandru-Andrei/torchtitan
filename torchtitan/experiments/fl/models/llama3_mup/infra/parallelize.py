@@ -83,7 +83,7 @@ def _apply_mup_tp(
         )
 
     for transformer_block in model.layers.values():
-        layer_plan = {
+        layer_plan: dict[str, object] = {
             "attention_norm": SequenceParallel(),
             "attention": prepare_module_input(
                 input_layouts=(Shard(1), Replicate()),
@@ -93,8 +93,6 @@ def _apply_mup_tp(
             "attention.wk": colwise_parallel(),
             "attention.wv": colwise_parallel(),
             "attention.wo": rowwise_parallel(output_layouts=Shard(1)),
-            "attention.q_norm": NoParallel(use_local_output=False),
-            "attention.k_norm": NoParallel(use_local_output=False),
             "ffn_norm": SequenceParallel(),
             "feed_forward": prepare_module_input(
                 input_layouts=(Shard(1),),
@@ -102,13 +100,27 @@ def _apply_mup_tp(
             ),
             "feed_forward.w1": colwise_parallel(),
             "feed_forward.w2": rowwise_parallel(output_layouts=Shard(1)),
-            "feed_forward.w3": colwise_parallel(),
         }
+
+        attention_module = transformer_block.attention
+        if getattr(attention_module, "q_norm", None) is not None:
+            layer_plan["attention.q_norm"] = NoParallel(use_local_output=False)
+        if getattr(attention_module, "k_norm", None) is not None:
+            layer_plan["attention.k_norm"] = NoParallel(use_local_output=False)
+        if getattr(attention_module, "v_norm", None) is not None:
+            layer_plan["attention.v_norm"] = NoParallel(use_local_output=False)
+        if getattr(attention_module, "o_norm", None) is not None:
+            layer_plan["attention.o_norm"] = SequenceParallel()
 
         if getattr(transformer_block, "post_attn_norm", None) is not None:
             layer_plan["post_attn_norm"] = SequenceParallel()
         if getattr(transformer_block, "post_ffn_norm", None) is not None:
             layer_plan["post_ffn_norm"] = SequenceParallel()
+        feed_forward_module = transformer_block.feed_forward
+        if getattr(feed_forward_module, "w3", None) is not None:
+            layer_plan["feed_forward.w3"] = colwise_parallel()
+        if getattr(feed_forward_module, "mid_norm", None) is not None:
+            layer_plan["feed_forward.mid_norm"] = SequenceParallel()
 
         parallelize_module(transformer_block, tp_mesh, layer_plan)
 

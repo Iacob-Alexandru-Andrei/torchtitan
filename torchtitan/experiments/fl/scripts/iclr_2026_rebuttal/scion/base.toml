@@ -19,12 +19,11 @@ enable_wandb = true
 save_for_all_ranks = true
 
 [model]
-name = "mosaic_llama3_mup"
-flavor = "1B"
+name = "mosaic_llama3_mup_scion"
+flavor = "16M_RMS_scion"
 # test folder with tokenizer.json, for debug purpose only
 hf_assets_path = "./tests/assets/tokenizer"
 # converters = ["float8"]
-
 
 [optimizer]
 name = "QHScion"
@@ -32,8 +31,22 @@ vs = [1.0]
 lr = 0.001
 eps = 1e-8
 weight_decay = 0.0
-betas = [0.9,0.999]
+betas = [0.9]
 implementation = "for-loop"
+norm = "Auto"
+scion_hidden_scale = 50.0
+scion_output_scale = 3000.0
+scion_hidden_norm = "spectral"
+scion_output_norm = "sign"
+
+[optimizer.norm_kwargs]
+backend = "newtonschulz5"
+backend_steps = 5
+eps = 1e-7
+
+[optimizer.scion_hidden_norm_kwargs]
+backend = "newtonschulz5"
+backend_steps = 5
 
 # [optimizer.desloc]
 # enabled = false
@@ -69,21 +82,21 @@ decay_ratio = 0.0  # lr scheduler decay ratio, 80% of the train steps
 decay_type = "sqrt"
 min_lr_factor = 0.0
 switch_step = 2048
-switch_scale = 4.0
+switch_scale = 1.0
 
 [fl_metrics.hyperparameter_switch]
-enabled = true
+enabled = false
 steps = [2049]
 new_vs = [0.98]
 new_betas = [0.999,0.999]
 reset_momenta = ["exp_avg"]
 
 [training]
-local_batch_size = 64
+local_batch_size = 8
 global_batch_size = 64
 seq_len = 2048
-max_norm = 1.0  # grad norm clipping
-steps = 12288
+# max_norm = 1.0  # no grad norm clipping with scion
+steps = 6144
 dataset = "c4_test"  # supported datasets: c4_test (2K), c4 (177M)
 
 
@@ -107,7 +120,7 @@ async_mode = "async_with_pinned_mem"  # ["disabled", "async", "async_with_pinned
 exclude_from_loading = ["dataloader"]
 
 [s3_checkpoint]
-enable = true
+enable = false
 bucket = "checkpoints"
 prefix = ""  # Root of bucket
 download_on_start = true

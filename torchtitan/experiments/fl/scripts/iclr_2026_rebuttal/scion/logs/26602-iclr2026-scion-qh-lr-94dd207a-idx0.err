@@ -1,0 +1,9 @@
+[rank0]:wandb: Currently logged in as: alexiacob (camlsys) to https://api.wandb.ai. Use `wandb login --relogin` to force relogin
+[rank0]:wandb: setting up run xfnuudmk
+[rank0]:wandb: Tracking run with wandb version 0.22.1
+[rank0]:wandb: Run data is saved locally in ./outputs/iclr2026-scion-qh-lr-94dd207a-mom0p0-lr0p0005-20251110-061727-idx0/tb/20251110-0617/rank_0/wandb/run-20251110_061746-xfnuudmk
+[rank0]:wandb: Run `wandb offline` to turn off syncing.
+[rank0]:wandb: Syncing run iclr2026-scion-qh-lr-94dd207a-mom0p0-lr0p0005-20251110-061727-idx0-worker0-rep0-rank0
+[rank0]:wandb: ⭐️ View project at https://wandb.ai/camlsys/torchtitan_tune_lr
+[rank0]:wandb: 🚀 View run at https://wandb.ai/camlsys/torchtitan_tune_lr/runs/xfnuudmk
+slurmstepd: error: *** JOB 26602 ON ruapehu CANCELLED AT 2025-11-10T06:20:45 ***

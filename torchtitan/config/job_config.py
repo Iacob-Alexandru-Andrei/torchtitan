@@ -547,9 +547,7 @@ class ActivationCheckpoint:
     'int' (e.g., 2) for every nth layer, or 'op' for op level ac.
     """
 
-    per_op_sac_force_recompute_mm_shapes_by_fqns: list[str] = field(
-        default_factory=lambda: ["moe.router.gate"]
-    )
+    per_op_sac_force_recompute_mm_shapes_by_fqns: list[str] = field(default_factory=lambda: ["moe.router.gate"])
     """
     When per-op selective ac is used, this list of fully qualified names is used
     to determine which mm shapes to force recompute, rather than being considered
@@ -573,9 +571,7 @@ class Compile:
     enable: bool = False
     """Whether to apply torch.compile"""
 
-    components: list[Literal["model", "loss"]] = field(
-        default_factory=lambda: ["model", "loss"]
-    )
+    components: list[Literal["model", "loss"]] = field(default_factory=lambda: ["model", "loss"])
     """Which components to compile"""
     backend: str = "inductor"
 
@@ -808,9 +804,7 @@ class Validation:
     """
 
     def __post_init__(self):
-        assert (
-            self.steps > 0 or self.steps == -1
-        ), "validation steps must be positive or -1"
+        assert self.steps > 0 or self.steps == -1, "validation steps must be positive or -1"
 
 
 @dataclass
@@ -828,9 +822,7 @@ class JobConfig:
     training: Training = field(default_factory=Training)
     parallelism: Parallelism = field(default_factory=Parallelism)
     checkpoint: Checkpoint = field(default_factory=Checkpoint)
-    activation_checkpoint: ActivationCheckpoint = field(
-        default_factory=ActivationCheckpoint
-    )
+    activation_checkpoint: ActivationCheckpoint = field(default_factory=ActivationCheckpoint)
     compile: Compile = field(default_factory=Compile)
     quantize: Quantize = field(default_factory=Quantize)
     comm: Comm = field(default_factory=Comm)

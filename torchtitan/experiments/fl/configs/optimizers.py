@@ -17,6 +17,8 @@ from torchtitan.config import Optimizer as BaseOptimizer
 
 from torch.optim import Optimizer
 
+MUON_ZEROpower_COEFFS = (3.4445, -4.7750, 2.0315)
+
 # Default values from BaseOptimizer
 _MIN_BETAS_LENGTH = 2
 
@@ -158,6 +160,29 @@ class MosaicOptimizerConfig(BaseOptimizer):
     scion_weights: tuple[float, ...] | None = None
     """Combination weights for :class:`ScionAggMo`."""
 
+    scion_hidden_scale: float = 50.0
+    """Default Scion radius applied to transformer body parameter buckets."""
+
+    scion_output_scale: float = 3000.0
+    """Default Scion radius applied to embedding/output parameter buckets."""
+
+    scion_hidden_norm: str | None = "spectral"
+    """Norm applied to Scion transformer body buckets when `use_scion` is true."""
+
+    scion_hidden_norm_kwargs: dict[str, Any] | None = field(
+        default_factory=lambda: {"backend": "newtonschulz5", "backend_steps": 5}
+    )
+    """Optional kwargs used with the Scion transformer body norm."""
+
+    scion_output_norm: str | None = "sign"
+    """Norm applied to Scion embedding/output buckets when `use_scion` is true."""
+
+    scion_output_norm_kwargs: dict[str, Any] | None = field(default_factory=dict)
+    """Optional kwargs used with the Scion embedding/output norm."""
+
+    zeropower_coefficients: tuple[float, float, float] | list[float] | None = None
+    """Optional override for Muon-style zeropower coefficients (a, b, c)."""
+
     galore_rank: int | None = None
     """Default low-rank size for GaLore. None disables projection."""
 
@@ -189,6 +214,17 @@ class MosaicOptimizerConfig(BaseOptimizer):
         if self.desloc.quorum_timeout_seconds <= 0:
             msg = "desloc.quorum_timeout_seconds must be positive"
             raise ValueError(msg)
+        if self.scion_hidden_scale <= 0 or self.scion_output_scale <= 0:
+            msg = "scion_hidden_scale and scion_output_scale must be positive"
+            raise ValueError(msg)
+        if self.scion_hidden_norm_kwargs is None:
+            self.scion_hidden_norm_kwargs = {}
+        else:
+            self.scion_hidden_norm_kwargs = dict(self.scion_hidden_norm_kwargs)
+        if self.scion_output_norm_kwargs is None:
+            self.scion_output_norm_kwargs = {}
+        else:
+            self.scion_output_norm_kwargs = dict(self.scion_output_norm_kwargs)
         if self.betas is not None and len(self.betas) >= _MIN_BETAS_LENGTH:
             # If betas is provided, it always overrides beta1 and beta2
             # beta1 comes from the first element, beta2 from the last element
@@ -207,6 +243,12 @@ class MosaicOptimizerConfig(BaseOptimizer):
         if self.galore_update_proj_gap <= 0:
             msg = "optimizer.galore_update_proj_gap must be positive."
             raise ValueError(msg)
+        if self.zeropower_coefficients is not None:
+            coeffs = tuple(float(v) for v in self.zeropower_coefficients)
+            if len(coeffs) != 3:
+                msg = "optimizer.zeropower_coefficients must contain exactly three values."
+                raise ValueError(msg)
+            object.__setattr__(self, "zeropower_coefficients", coeffs)
 
     def get_betas_tuple(self) -> tuple[float, ...]:
         """Get the betas tuple, either from explicit betas or constructed from beta1/beta2.
@@ -226,6 +268,12 @@ class MosaicOptimizerConfig(BaseOptimizer):
 
         # Construct betas: (beta1, beta1, ..., beta2) with num_moments beta1s
         return tuple([self.beta1] * num_moments + [self.beta2])
+
+    def resolved_zeropower_coefficients(self) -> tuple[float, float, float]:
+        """Return zeropower coefficients, defaulting to Muon constants."""
+        if self.zeropower_coefficients is not None:
+            return cast(tuple[float, float, float], self.zeropower_coefficients)
+        return MUON_ZEROpower_COEFFS
 
 
 @dataclass(frozen=True)

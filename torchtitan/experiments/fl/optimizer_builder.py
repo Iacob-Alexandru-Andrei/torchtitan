@@ -130,15 +130,25 @@ def _normalize_mosaic_optimizer_config(
             {
                 "norm": config.norm,
                 "norm_kwargs": config.norm_kwargs or {},
-                "scale": config.scale,
                 "unconstrained": config.unconstrained,
+                "zeropower_coeffs": config.resolved_zeropower_coefficients(),
             }
         )
         if name in {"Scion", "ScionLight", "ScionQH"}:
-            extra_kwargs["betas"] = (config.beta1,)
+            extra_kwargs["betas"] = config.get_betas_tuple()
         if name == "ScionQH":
-            v_value = config.scion_v if config.scion_v is not None else config.vs[0]
-            extra_kwargs["v"] = v_value
+            if config.scion_v is not None:
+                vs_tuple = (float(config.scion_v),)
+            else:
+                vs_raw = config.vs
+                if vs_raw is None:
+                    vs_source: tuple[float, ...] = ()
+                elif isinstance(vs_raw, tuple):
+                    vs_source = vs_raw
+                else:
+                    vs_source = tuple(vs_raw)
+                vs_tuple = tuple(float(v) for v in vs_source) if len(vs_source) > 0 else (1.0,)
+            extra_kwargs["vs"] = vs_tuple
         if name == "ScionAggMo":
             extra_kwargs["betas"] = config.scion_momentums
             extra_kwargs["weights"] = config.scion_weights
@@ -201,6 +211,12 @@ def _apply_mup_overrides(
                 lr=config.lr,
                 eps=config.eps,
                 weight_decay=config.weight_decay,
+                scion_hidden_scale=config.scion_hidden_scale,
+                scion_output_scale=config.scion_output_scale,
+                scion_hidden_norm=config.scion_hidden_norm,
+                scion_output_norm=config.scion_output_norm,
+                scion_hidden_norm_kwargs=config.scion_hidden_norm_kwargs,
+                scion_output_norm_kwargs=config.scion_output_norm_kwargs,
             )
             if overrides is None:
                 continue

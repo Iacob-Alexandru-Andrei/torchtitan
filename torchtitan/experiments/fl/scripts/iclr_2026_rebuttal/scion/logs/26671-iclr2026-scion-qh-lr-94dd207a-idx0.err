@@ -1,0 +1,49 @@
+[rank0]:Traceback (most recent call last):
+[rank0]:  File "<frozen runpy>", line 189, in _run_module_as_main
+[rank0]:  File "<frozen runpy>", line 112, in _get_module_details
+[rank0]:  File "/nfs-share/aai30/projects/torchtitan/torchtitan/experiments/fl/__init__.py", line 15, in <module>
+[rank0]:    from . import models
+[rank0]:  File "/nfs-share/aai30/projects/torchtitan/torchtitan/experiments/fl/models/__init__.py", line 12, in <module>
+[rank0]:    from .llama3_mup.train_configs import get_train_spec as get_llama3_mup_train_spec
+[rank0]:  File "/nfs-share/aai30/projects/torchtitan/torchtitan/experiments/fl/models/llama3_mup/__init__.py", line 11, in <module>
+[rank0]:    from .train_configs import get_train_spec
+[rank0]:  File "/nfs-share/aai30/projects/torchtitan/torchtitan/experiments/fl/models/llama3_mup/train_configs/__init__.py", line 22, in <module>
+[rank0]:    from torchtitan.experiments.fl.models.llama3_mup.infra.parallelize import (
+[rank0]:  File "/nfs-share/aai30/projects/torchtitan/torchtitan/experiments/fl/models/llama3_mup/infra/__init__.py", line 7, in <module>
+[rank0]:    from .parallelize import parallelize_llama_mup
+[rank0]:  File "/nfs-share/aai30/projects/torchtitan/torchtitan/experiments/fl/models/llama3_mup/infra/parallelize.py", line 61
+[rank0]:    if getattr(model, "embedding_norm", None) is not None:
+[rank0]:IndentationError: unexpected indent
+E1110 19:24:36.106000 1595869 torch/distributed/elastic/multiprocessing/api.py:974] failed (exitcode: 1) local_rank: 0 (pid: 1595894) of binary: /nfs-share/aai30/projects/torchtitan/.venv/bin/python3
+Traceback (most recent call last):
+  File "/nfs-share/aai30/projects/torchtitan/.venv/bin/torchrun", line 10, in <module>
+    sys.exit(main())
+             ^^^^^^
+  File "/nfs-share/aai30/projects/torchtitan/.venv/lib/python3.12/site-packages/torch/distributed/elastic/multiprocessing/errors/__init__.py", line 362, in wrapper
+    return f(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^
+  File "/nfs-share/aai30/projects/torchtitan/.venv/lib/python3.12/site-packages/torch/distributed/run.py", line 977, in main
+    run(args)
+  File "/nfs-share/aai30/projects/torchtitan/.venv/lib/python3.12/site-packages/torch/distributed/run.py", line 968, in run
+    elastic_launch(
+  File "/nfs-share/aai30/projects/torchtitan/.venv/lib/python3.12/site-packages/torch/distributed/launcher/api.py", line 165, in __call__
+    return launch_agent(self._config, self._entrypoint, list(args))
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/nfs-share/aai30/projects/torchtitan/.venv/lib/python3.12/site-packages/torch/distributed/launcher/api.py", line 312, in launch_agent
+    raise ChildFailedError(
+torch.distributed.elastic.multiprocessing.errors.ChildFailedError: 
+============================================================
+torchtitan.experiments.fl.train FAILED
+------------------------------------------------------------
+Failures:
+  <NO_OTHER_FAILURES>
+------------------------------------------------------------
+Root Cause (first observed failure):
+[0]:
+  time      : 2025-11-10_19:24:35
+  host      : ruapehu.cl.cam.ac.uk
+  rank      : 0 (local_rank: 0)
+  exitcode  : 1 (pid: 1595894)
+  error_file: <N/A>
+  traceback : To enable traceback see: https://pytorch.org/docs/stable/elastic/errors.html
+============================================================

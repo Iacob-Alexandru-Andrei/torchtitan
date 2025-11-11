@@ -35,5 +35,6 @@ from .mosaic_llama3_mup import (  # noqa: E402
 get_mosaic_llama3_train_spec()
 
 
-# Register the Mosaic Llama3 MuP spec
-get_mosaic_llama3_mup_train_spec()
+# Register the Mosaic Llama3 MuP spec and alias it for the Scion flavor.
+_mosaic_llama3_mup_spec = get_mosaic_llama3_mup_train_spec()
+register_train_spec(replace(_mosaic_llama3_mup_spec, name="mosaic_llama3_mup_scion"))

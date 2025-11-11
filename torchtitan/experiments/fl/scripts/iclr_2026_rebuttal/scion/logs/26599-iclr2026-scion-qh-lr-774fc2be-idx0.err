@@ -1,0 +1,106 @@
+[rank0]:wandb: Currently logged in as: alexiacob (camlsys) to https://api.wandb.ai. Use `wandb login --relogin` to force relogin
+[rank0]:wandb: Tracking run with wandb version 0.22.1
+[rank0]:wandb: Run data is saved locally in ./outputs/iclr2026-scion-qh-lr-774fc2be-mom0p1-lr0p0005-20251110-060913-idx0/tb/20251110-0609/rank_0/wandb/run-20251110_060932-4nbvadmq
+[rank0]:wandb: Run `wandb offline` to turn off syncing.
+[rank0]:wandb: Syncing run iclr2026-scion-qh-lr-774fc2be-mom0p1-lr0p0005-20251110-060913-idx0-worker0-rep0-rank0
+[rank0]:wandb: ⭐️ View project at https://wandb.ai/camlsys/torchtitan
+[rank0]:wandb: 🚀 View run at https://wandb.ai/camlsys/torchtitan/runs/4nbvadmq
+[rank0]:Traceback (most recent call last):
+[rank0]:  File "<frozen runpy>", line 198, in _run_module_as_main
+[rank0]:  File "<frozen runpy>", line 88, in _run_code
+[rank0]:  File "/nfs-share/aai30/projects/torchtitan/torchtitan/experiments/fl/train.py", line 652, in <module>
+[rank0]:    main()
+[rank0]:  File "/nfs-share/aai30/projects/torchtitan/torchtitan/experiments/fl/train.py", line 485, in main
+[rank0]:    trainer = Trainer(job_config)
+[rank0]:              ^^^^^^^^^^^^^^^^^^^
+[rank0]:  File "/nfs-share/aai30/projects/torchtitan/.venv/lib/python3.12/site-packages/torch/distributed/elastic/multiprocessing/errors/__init__.py", line 362, in wrapper
+[rank0]:    return f(*args, **kwargs)
+[rank0]:           ^^^^^^^^^^^^^^^^^^
+[rank0]:  File "/nfs-share/aai30/projects/torchtitan/torchtitan/train.py", line 287, in __init__
+[rank0]:    self.optimizers = self.train_spec.build_optimizers_fn(
+[rank0]:                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank0]:  File "/nfs-share/aai30/projects/torchtitan/torchtitan/experiments/fl/optimizer_builder.py", line 338, in build_mosaic_optimizers
+[rank0]:    return _build_optimizer_container(
+[rank0]:           ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank0]:  File "/nfs-share/aai30/projects/torchtitan/torchtitan/experiments/fl/optimizer_builder.py", line 297, in _build_optimizer_container
+[rank0]:    return OptimizersContainer(
+[rank0]:           ^^^^^^^^^^^^^^^^^^^^
+[rank0]:  File "/nfs-share/aai30/projects/torchtitan/torchtitan/components/optimizer.py", line 159, in __init__
+[rank0]:    self.optimizers.append(optimizer_cls(param_groups, **optimizer_kwargs))
+[rank0]:                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank0]:TypeError: QHScion.__init__() got an unexpected keyword argument 'v'
+[rank0]:[rank0]: Traceback (most recent call last):
+[rank0]:[rank0]:   File "<frozen runpy>", line 198, in _run_module_as_main
+[rank0]:[rank0]:   File "<frozen runpy>", line 88, in _run_code
+[rank0]:[rank0]:   File "/nfs-share/aai30/projects/torchtitan/torchtitan/experiments/fl/train.py", line 652, in <module>
+[rank0]:[rank0]:     main()
+[rank0]:[rank0]:   File "/nfs-share/aai30/projects/torchtitan/torchtitan/experiments/fl/train.py", line 485, in main
+[rank0]:[rank0]:     trainer = Trainer(job_config)
+[rank0]:[rank0]:               ^^^^^^^^^^^^^^^^^^^
+[rank0]:[rank0]:   File "/nfs-share/aai30/projects/torchtitan/.venv/lib/python3.12/site-packages/torch/distributed/elastic/multiprocessing/errors/__init__.py", line 362, in wrapper
+[rank0]:[rank0]:     return f(*args, **kwargs)
+[rank0]:[rank0]:            ^^^^^^^^^^^^^^^^^^
+[rank0]:[rank0]:   File "/nfs-share/aai30/projects/torchtitan/torchtitan/train.py", line 287, in __init__
+[rank0]:[rank0]:     self.optimizers = self.train_spec.build_optimizers_fn(
+[rank0]:[rank0]:                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank0]:[rank0]:   File "/nfs-share/aai30/projects/torchtitan/torchtitan/experiments/fl/optimizer_builder.py", line 338, in build_mosaic_optimizers
+[rank0]:[rank0]:     return _build_optimizer_container(
+[rank0]:[rank0]:            ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank0]:[rank0]:   File "/nfs-share/aai30/projects/torchtitan/torchtitan/experiments/fl/optimizer_builder.py", line 297, in _build_optimizer_container
+[rank0]:[rank0]:     return OptimizersContainer(
+[rank0]:[rank0]:            ^^^^^^^^^^^^^^^^^^^^
+[rank0]:[rank0]:   File "/nfs-share/aai30/projects/torchtitan/torchtitan/components/optimizer.py", line 159, in __init__
+[rank0]:[rank0]:     self.optimizers.append(optimizer_cls(param_groups, **optimizer_kwargs))
+[rank0]:[rank0]:                            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank0]:[rank0]: TypeError: QHScion.__init__() got an unexpected keyword argument 'v'
+E1110 06:09:37.601000 1518383 torch/distributed/elastic/multiprocessing/api.py:974] failed (exitcode: 1) local_rank: 0 (pid: 1518398) of binary: /nfs-share/aai30/projects/torchtitan/.venv/bin/python3
+E1110 06:09:37.610000 1518383 torch/distributed/elastic/multiprocessing/errors/error_handler.py:145] no error file defined for parent, to copy child error file (/tmp/torchelastic_jfktuy2f/iclr2026-scion-qh-lr-774fc2be-mom0p1-lr0p0005-20251110-060913-idx0_z2n5yukh/attempt_0/0/error.json)
+Traceback (most recent call last):
+  File "/nfs-share/aai30/projects/torchtitan/.venv/bin/torchrun", line 10, in <module>
+    sys.exit(main())
+             ^^^^^^
+  File "/nfs-share/aai30/projects/torchtitan/.venv/lib/python3.12/site-packages/torch/distributed/elastic/multiprocessing/errors/__init__.py", line 362, in wrapper
+    return f(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^
+  File "/nfs-share/aai30/projects/torchtitan/.venv/lib/python3.12/site-packages/torch/distributed/run.py", line 977, in main
+    run(args)
+  File "/nfs-share/aai30/projects/torchtitan/.venv/lib/python3.12/site-packages/torch/distributed/run.py", line 968, in run
+    elastic_launch(
+  File "/nfs-share/aai30/projects/torchtitan/.venv/lib/python3.12/site-packages/torch/distributed/launcher/api.py", line 165, in __call__
+    return launch_agent(self._config, self._entrypoint, list(args))
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/nfs-share/aai30/projects/torchtitan/.venv/lib/python3.12/site-packages/torch/distributed/launcher/api.py", line 312, in launch_agent
+    raise ChildFailedError(
+torch.distributed.elastic.multiprocessing.errors.ChildFailedError: 
+============================================================
+torchtitan.experiments.fl.train FAILED
+------------------------------------------------------------
+Failures:
+  <NO_OTHER_FAILURES>
+------------------------------------------------------------
+Root Cause (first observed failure):
+[0]:
+  time      : 2025-11-10_06:09:34
+  host      : ruapehu.cl.cam.ac.uk
+  rank      : 0 (local_rank: 0)
+  exitcode  : 1 (pid: 1518398)
+  error_file: /tmp/torchelastic_jfktuy2f/iclr2026-scion-qh-lr-774fc2be-mom0p1-lr0p0005-20251110-060913-idx0_z2n5yukh/attempt_0/0/error.json
+  traceback : Traceback (most recent call last):
+    File "/nfs-share/aai30/projects/torchtitan/.venv/lib/python3.12/site-packages/torch/distributed/elastic/multiprocessing/errors/__init__.py", line 362, in wrapper
+      return f(*args, **kwargs)
+             ^^^^^^^^^^^^^^^^^^
+    File "/nfs-share/aai30/projects/torchtitan/torchtitan/train.py", line 287, in __init__
+      self.optimizers = self.train_spec.build_optimizers_fn(
+                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    File "/nfs-share/aai30/projects/torchtitan/torchtitan/experiments/fl/optimizer_builder.py", line 338, in build_mosaic_optimizers
+      return _build_optimizer_container(
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    File "/nfs-share/aai30/projects/torchtitan/torchtitan/experiments/fl/optimizer_builder.py", line 297, in _build_optimizer_container
+      return OptimizersContainer(
+             ^^^^^^^^^^^^^^^^^^^^
+    File "/nfs-share/aai30/projects/torchtitan/torchtitan/components/optimizer.py", line 159, in __init__
+      self.optimizers.append(optimizer_cls(param_groups, **optimizer_kwargs))
+                             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  TypeError: QHScion.__init__() got an unexpected keyword argument 'v'
+  
+============================================================
