@@ -75,6 +75,7 @@ class _TestDeslocConfig:
         pin_memory: bool = True,
         quorum_timeout_seconds: int = 60,
         outer_optimizer: _TestOuterOptimizerConfig | None = None,
+        checkpoint_outer_optimizer: bool = True,
     ) -> None:
         self.enabled = enabled
         self.param_sync_every = param_sync_every
@@ -83,6 +84,7 @@ class _TestDeslocConfig:
         self.pin_memory = pin_memory
         self.quorum_timeout_seconds = quorum_timeout_seconds
         self.outer_optimizer = outer_optimizer
+        self.checkpoint_outer_optimizer = checkpoint_outer_optimizer
 
     def resolved_backup_device(self) -> torch.device | None:
         return None if self.backup_device is None else torch.device(self.backup_device)

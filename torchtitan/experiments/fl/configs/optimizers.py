@@ -57,6 +57,9 @@ class DesLocConfig:
     log_outer_metrics: bool = False
     """Whether to log DES-LOC outer optimizer pseudo-gradient and momentum norms."""
 
+    checkpoint_outer_optimizer: bool = True
+    """Whether to include the DES-LOC outer optimizer state in checkpoints."""
+
     def resolved_backup_device(self) -> torch.device | None:
         """Convert the configured ``backup_device`` into a ``torch.device``."""
         device = self.backup_device

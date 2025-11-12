@@ -59,6 +59,7 @@ class ParameterFragmentConfig:
     outer_optimizer: "DesLocOuterOptimizerConfig | None" = None
     log_outer_metrics: bool = False
     metrics_logger: Callable[[dict[str, float]], None] | None = None
+    checkpoint_outer_optimizer: bool = True
 
 
 @dataclass(frozen=True)
@@ -90,6 +91,7 @@ class DesLocControllerConfig:
     outer_optimizer: "DesLocOuterOptimizerConfig | None" = None
     log_outer_metrics: bool = False
     metrics_logger: Callable[[dict[str, float]], None] | None = None
+    checkpoint_outer_optimizer: bool = True
 
 
 @dataclass(frozen=True)
@@ -179,6 +181,7 @@ class _ParameterFragment(_BaseFragment):
         self._reference_pending: list[tuple[str, torch.Tensor]] = []
         self._log_outer_metrics = config.log_outer_metrics
         self._metrics_logger = config.metrics_logger
+        self._checkpoint_outer_optimizer = config.checkpoint_outer_optimizer
         if config.outer_optimizer is not None:
             optimizer_cls = config.outer_optimizer.resolve_optimizer_cls()
             params = [p for p in self._model.parameters() if p.requires_grad]
@@ -343,7 +346,7 @@ class _ParameterFragment(_BaseFragment):
             save_fn,
         )
 
-        if self._outer_optimizer is not None:
+        if self._outer_optimizer is not None and self._checkpoint_outer_optimizer:
             def load_outer(state_dict: dict[str, Any]) -> None:
                 self._outer_optimizer.load_state_dict(state_dict)
 
@@ -467,6 +470,7 @@ class DesLocController:
             outer_optimizer=config.outer_optimizer,
             log_outer_metrics=config.log_outer_metrics,
             metrics_logger=config.metrics_logger,
+            checkpoint_outer_optimizer=config.checkpoint_outer_optimizer,
         )
         self._param_fragment = _ParameterFragment(param_fragment_cfg)
         self._param_fragment.register_state_dict_fn()
@@ -675,6 +679,7 @@ class DesLocFTOptimizersContainer(FTOptimizersContainer):
                 outer_optimizer=outer_optimizer_spec,
                 log_outer_metrics=desloc_config.log_outer_metrics,
                 metrics_logger=None,
+                checkpoint_outer_optimizer=desloc_config.checkpoint_outer_optimizer,
             )
             controller = DesLocController(controller_config)
             self._desloc_controllers.append(controller)

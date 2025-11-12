@@ -40,8 +40,9 @@ enabled = true
 param_sync_every = 32
 optimizer_sync_every = [32,32]
 backup_device = "cpu"
-pin_memory = false
+pin_memory = true
 log_outer_metrics = true
+checkpoint_outer_optimizer = false
 
 [optimizer.desloc.outer_optimizer]
 target = "SGD"
