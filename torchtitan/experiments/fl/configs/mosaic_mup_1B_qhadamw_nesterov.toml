@@ -42,7 +42,7 @@ optimizer_sync_every = [32,32]
 backup_device = "cpu"
 pin_memory = true
 log_outer_metrics = true
-checkpoint_outer_optimizer = false
+checkpoint_outer_optimizer = true
 
 
 [optimizer.desloc.outer_optimizer]

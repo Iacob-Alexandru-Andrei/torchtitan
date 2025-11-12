@@ -211,12 +211,12 @@ def _apply_mup_overrides(
                 lr=config.lr,
                 eps=config.eps,
                 weight_decay=config.weight_decay,
-                scion_hidden_scale=config.scion_hidden_scale,
-                scion_output_scale=config.scion_output_scale,
-                scion_hidden_norm=config.scion_hidden_norm,
-                scion_output_norm=config.scion_output_norm,
-                scion_hidden_norm_kwargs=config.scion_hidden_norm_kwargs,
-                scion_output_norm_kwargs=config.scion_output_norm_kwargs,
+                # scion_hidden_scale=config.scion_hidden_scale,
+                # scion_output_scale=config.scion_output_scale,
+                # scion_hidden_norm=config.scion_hidden_norm,
+                # scion_output_norm=config.scion_output_norm,
+                # scion_hidden_norm_kwargs=config.scion_hidden_norm_kwargs,
+                # scion_output_norm_kwargs=config.scion_output_norm_kwargs,
             )
             if overrides is None:
                 continue
