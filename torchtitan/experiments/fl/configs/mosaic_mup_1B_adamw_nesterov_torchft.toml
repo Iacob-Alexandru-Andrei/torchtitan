@@ -40,7 +40,7 @@ enabled = true
 param_sync_every = 32
 optimizer_sync_every = [32,32]
 backup_device = "cpu"
-pin_memory = true
+pin_memory = false
 log_outer_metrics = true
 
 [optimizer.desloc.outer_optimizer]
