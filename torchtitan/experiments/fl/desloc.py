@@ -110,11 +110,7 @@ class DesLocFTOptimizersConfig:
 
 def _extract_local_tensor(tensor: torch.Tensor) -> torch.Tensor:
     """Return a detached clone of ``tensor`` on its local device."""
-    local = (
-        tensor.to_local()
-        if DTensor is not None and isinstance(tensor, DTensor)
-        else tensor
-    )
+    local = tensor.to_local() if DTensor is not None and isinstance(tensor, DTensor) else tensor
     return local.detach().clone()
 
 
@@ -186,45 +182,29 @@ class _ParameterFragment(_BaseFragment):
             optimizer_cls = config.outer_optimizer.resolve_optimizer_cls()
             params = [p for p in self._model.parameters() if p.requires_grad]
             if not params:
-                msg = (
-                    "DES-LOC outer optimizer requires at least one trainable parameter."
-                )
+                msg = "DES-LOC outer optimizer requires at least one trainable parameter."
                 raise ValueError(msg)
-            self._outer_optimizer = optimizer_cls(
-                params, **config.outer_optimizer.kwargs
-            )
+            self._outer_optimizer = optimizer_cls(params, **config.outer_optimizer.kwargs)
 
         self._init_backup_storage()
         self.save_state()
 
-    def set_metrics_logger(
-        self, logger_fn: Callable[[dict[str, float]], None] | None
-    ) -> None:
+    def set_metrics_logger(self, logger_fn: Callable[[dict[str, float]], None] | None) -> None:
         self._metrics_logger = logger_fn
 
     def _init_backup_storage(self) -> None:
         for name, param in self._model.named_parameters():
             local_tensor = _extract_local_tensor(param.data)
-            device = (
-                self._backup_device
-                if self._backup_device is not None
-                else local_tensor.device
-            )
+            device = self._backup_device if self._backup_device is not None else local_tensor.device
             backup = torch.empty_like(local_tensor, device=device)
-            if (
-                self._pin_memory
-                and backup.device.type == "cpu"
-                and torch.cuda.is_available()
-            ):
+            if self._pin_memory and backup.device.type == "cpu" and torch.cuda.is_available():
                 backup = backup.pin_memory()
             self._original_parameters[name] = backup
 
     def save_state(self) -> None:
         with torch.no_grad():
             for name, param in self._model.named_parameters():
-                self._original_parameters[name].copy_(
-                    _extract_local_tensor(param.data), non_blocking=True
-                )
+                self._original_parameters[name].copy_(_extract_local_tensor(param.data), non_blocking=True)
 
     def restore_state(self) -> None:
         with torch.no_grad():
@@ -307,9 +287,7 @@ class _ParameterFragment(_BaseFragment):
         self._outer_optimizer.zero_grad(set_to_none=False)
 
         if self._log_outer_metrics and self._metrics_logger is not None:
-            metrics: dict[str, float] = {
-                "desloc_outer/pseudo_grad_l2": math.sqrt(max(pseudo_norm_sq, 0.0))
-            }
+            metrics: dict[str, float] = {"desloc_outer/pseudo_grad_l2": math.sqrt(max(pseudo_norm_sq, 0.0))}
             momentum_norm_sq = 0.0
             has_momentum = False
             if isinstance(self._outer_optimizer, torch.optim.SGD):
@@ -319,15 +297,11 @@ class _ParameterFragment(_BaseFragment):
                         has_momentum = True
                         momentum_norm_sq += buffer.pow(2).sum().item()
             if has_momentum:
-                metrics["desloc_outer/momentum_l2"] = math.sqrt(
-                    max(momentum_norm_sq, 0.0)
-                )
+                metrics["desloc_outer/momentum_l2"] = math.sqrt(max(momentum_norm_sq, 0.0))
             try:
                 self._metrics_logger(metrics)
             except Exception:  # pragma: no cover - diagnostics only
-                logger.exception(
-                    "DES-LOC failed to log outer optimizer metrics; continuing."
-                )
+                logger.exception("DES-LOC failed to log outer optimizer metrics; continuing.")
 
     def register_state_dict_fn(self) -> None:
         def load_fn(state_dict: dict[str, torch.Tensor]) -> None:
@@ -389,14 +363,8 @@ class _OptimizerStateFragment(_BaseFragment):
             state = self._optimizer.state.get(param, {})
             tensor = state.get(self.state_key)
             if isinstance(tensor, torch.Tensor):
-                device = (
-                    self._backup_device
-                    if self._backup_device is not None
-                    else tensor.device
-                )
-                self._original_state_tensors[name] = torch.empty_like(
-                    tensor, device=device
-                )
+                device = self._backup_device if self._backup_device is not None else tensor.device
+                self._original_state_tensors[name] = torch.empty_like(tensor, device=device)
 
     def save_state(self) -> None:
         with torch.no_grad():
@@ -409,10 +377,7 @@ class _OptimizerStateFragment(_BaseFragment):
         with torch.no_grad():
             for name, backup in self._original_state_tensors.items():
                 param = self._param_map[name]
-                if (
-                    param in self._optimizer.state
-                    and self.state_key in self._optimizer.state[param]
-                ):
+                if param in self._optimizer.state and self.state_key in self._optimizer.state[param]:
                     self._optimizer.state[param][self.state_key].copy_(backup)
 
     def prepare_sync(self) -> list[Any]:
@@ -492,9 +457,7 @@ class DesLocController:
             self._hook.remove()
             self._hook = None
 
-    def set_metrics_logger(
-        self, logger_fn: Callable[[dict[str, float]], None] | None
-    ) -> None:
+    def set_metrics_logger(self, logger_fn: Callable[[dict[str, float]], None] | None) -> None:
         self._param_fragment.set_metrics_logger(logger_fn)
 
     def _resolve_optimizer_sync_intervals(self, state_keys: Iterable[str]) -> list[int]:
@@ -512,19 +475,14 @@ class DesLocController:
         if isinstance(spec, dict):
             return self._expand_dict_intervals(spec, keys)
 
-        msg = (
-            "optimizer_sync_every must be an int, list, dict, or None; "
-            f"received {type(spec)!r}"
-        )
+        msg = f"optimizer_sync_every must be an int, list, dict, or None; received {type(spec)!r}"
         raise TypeError(msg)
 
     def _expand_single_interval(self, interval: int, keys: list[str]) -> list[int]:
         self._validate_positive_interval(interval)
         return [interval for _ in keys]
 
-    def _expand_list_intervals(
-        self, intervals: list[int], keys: list[str]
-    ) -> list[int]:
+    def _expand_list_intervals(self, intervals: list[int], keys: list[str]) -> list[int]:
         if len(intervals) != len(keys):
             msg = "Length of optimizer_sync_every list does not match discovered optimizer states."
             raise ValueError(msg)
@@ -533,9 +491,7 @@ class DesLocController:
             self._validate_positive_interval(value)
         return normalized
 
-    def _expand_dict_intervals(
-        self, mapping: dict[str, int], keys: list[str]
-    ) -> list[int]:
+    def _expand_dict_intervals(self, mapping: dict[str, int], keys: list[str]) -> list[int]:
         resolved: list[int] = []
         for key in keys:
             if key not in mapping:
@@ -663,14 +619,10 @@ class DesLocFTOptimizersContainer(FTOptimizersContainer):
 
         backup_device = desloc_config.resolved_backup_device()
         optimizer_sync = desloc_config.normalized_optimizer_sync()
-        outer_optimizer_spec = (
-            config.outer_optimizer or desloc_config.normalized_outer_optimizer()
-        )
+        outer_optimizer_spec = config.outer_optimizer or desloc_config.normalized_outer_optimizer()
 
         self._desloc_controllers: list[DesLocController] = []
-        for idx, (model, optimizer) in enumerate(
-            zip(self.model_parts, self.optimizers, strict=True)
-        ):
+        for idx, (model, optimizer) in enumerate(zip(self.model_parts, self.optimizers, strict=True)):
             controller_config = DesLocControllerConfig(
                 manager=config.ft_manager,
                 model=model,
@@ -695,17 +647,13 @@ class DesLocFTOptimizersContainer(FTOptimizersContainer):
             controller.close()
         self._desloc_controllers.clear()
 
-    def set_desloc_metrics_logger(
-        self, logger_fn: Callable[[dict[str, float]], None] | None
-    ) -> None:
+    def set_desloc_metrics_logger(self, logger_fn: Callable[[dict[str, float]], None] | None) -> None:
         for controller in self._desloc_controllers:
             controller.set_metrics_logger(logger_fn)
 
 
 @contextmanager
-def desloc_semi_sync_context(
-    _ft_manager: FTManager, optimizer: torch.optim.Optimizer
-) -> Iterator[None]:
+def desloc_semi_sync_context(_ft_manager: FTManager, optimizer: torch.optim.Optimizer) -> Iterator[None]:
     """Context manager wiring DES-LOC into TorchFT semi-sync execution."""
     try:
         yield

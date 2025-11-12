@@ -5,7 +5,6 @@
 # LICENSE file in the root directory of this source tree.
 """Training configuration for Llama-3 MuP models."""
 
-from copy import deepcopy
 from dataclasses import replace
 from typing import Any, cast
 
@@ -70,12 +69,6 @@ def build_mup_optimizers(
         lr=initial_optimizer_kwargs["lr"],
         eps=initial_optimizer_kwargs["eps"],
         weight_decay=initial_optimizer_kwargs["weight_decay"],
-        scion_hidden_scale=getattr(optimizer_config, "scion_hidden_scale", None),
-        scion_output_scale=getattr(optimizer_config, "scion_output_scale", None),
-        scion_hidden_norm=getattr(optimizer_config, "scion_hidden_norm", None),
-        scion_output_norm=getattr(optimizer_config, "scion_output_norm", None),
-        scion_hidden_norm_kwargs=deepcopy(getattr(optimizer_config, "scion_hidden_norm_kwargs", None)),
-        scion_output_norm_kwargs=deepcopy(getattr(optimizer_config, "scion_output_norm_kwargs", None)),
     )
 
     param_groups_list = overrides.param_groups if overrides else None
@@ -110,7 +103,6 @@ llama3_mup_configs = {
         tie_word_embeddings=True,
         use_torch_layernorm=True,
         use_simple_silu_ffn=False,
-        use_torch_qk_layernorm=True,
         qk_norm=True,
         qk_norm_bias=False,
         qk_norm_elementwise_affine=True,
@@ -135,54 +127,6 @@ llama3_mup_configs = {
             "init_std": 0.02,
             "emb_init_std": 0.02,  # Will default to init_std
             "output_mult": None,  # No special output scaling
-        },
-    ),
-    "16M_RMS": TransformerModelArgs(
-        norm_eps=1e-20,
-        dim=256,
-        n_layers=4,
-        n_heads=4,
-        vocab_size=50368,
-        rope_theta=10_000,
-        # FFN expansion ratio of 4x (4 * 768 = 3072)
-        ffn_dim_multiplier=None,
-        # MuP features
-        use_embedding_norm=True,
-        use_peri_norm=True,
-        tie_word_embeddings=True,
-        use_torch_layernorm=False,
-        use_simple_silu_ffn=False,
-        use_mlp_mid_norm=True,
-        use_torch_qk_layernorm=False,
-        qk_norm=True,
-        use_attention_value_norm=True,
-        use_attention_output_norm=True,
-        qk_norm_bias=False,
-        qk_norm_elementwise_affine=False,
-        torch_layernorm_bias=False,
-        torch_layernorm_elementwise_affine=False,
-        # Flex attention
-        use_flex_attn=True,
-        attn_mask_type="block_causal",
-        mup_config={
-            "mup_enabled": True,
-            "mup_disable_attention_scaling": True,
-            "mup_disable_hidden_lr_scaling": False,
-            "mup_width_multiplier": 1.0,
-            "mup_input_alpha": 1.0,
-            "mup_output_alpha": 1.0,
-            "completep_depth_alpha_enabled": True,
-            "completep_depth_multiplier": 1.0,
-            "completep_depth_alpha_exp": 1.0,
-            "completep_eps_scaling_enabled": False,
-        },
-        init_config={
-            "init_std": 0.02,
-            "emb_init_std": 0.02,  # Will default to init_std
-            "output_mult": None,  # No special output scaling
-            "hidden_init": "scaled_orthogonal",
-            "embed_init": "normal",
-            "output_init": "normal",
         },
     ),
     "125M": TransformerModelArgs(
@@ -199,7 +143,6 @@ llama3_mup_configs = {
         tie_word_embeddings=True,
         use_torch_layernorm=True,
         use_simple_silu_ffn=False,
-        use_torch_qk_layernorm=True,
         qk_norm=True,
         qk_norm_bias=False,
         torch_layernorm_bias=False,
@@ -224,137 +167,6 @@ llama3_mup_configs = {
             "init_std": 0.02,
             "emb_init_std": 0.02,  # Will default to init_std
             "output_mult": None,  # No special output scaling
-        },
-    ),
-    "125M_RMS": TransformerModelArgs(
-        norm_eps=1e-20,
-        dim=768,
-        n_layers=12,
-        n_heads=12,
-        vocab_size=50368,
-        rope_theta=10_000,
-        # FFN expansion ratio of 4x (4 * 768 = 3072)
-        ffn_dim_multiplier=None,
-        # MuP features
-        use_embedding_norm=True,
-        use_peri_norm=True,
-        tie_word_embeddings=True,
-        use_torch_layernorm=False,
-        use_simple_silu_ffn=False,
-        use_mlp_mid_norm=True,
-        use_torch_qk_layernorm=False,
-        qk_norm=True,
-        use_attention_value_norm=True,
-        use_attention_output_norm=True,
-        qk_norm_bias=False,
-        qk_norm_elementwise_affine=False,
-        torch_layernorm_bias=False,
-        torch_layernorm_elementwise_affine=False,
-        # Flex attention
-        use_flex_attn=True,
-        attn_mask_type="block_causal",
-        mup_config={
-            "mup_enabled": True,
-            "mup_disable_attention_scaling": True,
-            "mup_disable_hidden_lr_scaling": False,
-            "mup_width_multiplier": 3.0,
-            "mup_input_alpha": 1.0,
-            "mup_output_alpha": 1.0,
-            "completep_depth_alpha_enabled": True,
-            "completep_depth_multiplier": 3.0,
-            "completep_depth_alpha_exp": 1.0,
-            "completep_eps_scaling_enabled": False,
-        },
-        init_config={
-            "init_std": 0.02,
-            "emb_init_std": 0.02,  # Will default to init_std
-            "output_mult": None,  # No special output scaling
-            "hidden_init": "scaled_orthogonal",
-            "embed_init": "normal",
-            "output_init": "normal",
-        },
-    ),
-    "380M": TransformerModelArgs(
-        dim=1536,
-        n_layers=12,
-        n_heads=12,
-        vocab_size=50368,
-        rope_theta=10_000,
-        ffn_dim_multiplier=None,
-        use_embedding_norm=True,
-        use_peri_norm=True,
-        tie_word_embeddings=True,
-        use_torch_layernorm=True,
-        use_simple_silu_ffn=False,
-        use_torch_qk_layernorm=True,
-        qk_norm=True,
-        qk_norm_bias=False,
-        torch_layernorm_bias=False,
-        torch_layernorm_elementwise_affine=True,
-        qk_norm_elementwise_affine=True,
-        use_flex_attn=True,
-        attn_mask_type="block_causal",
-        mup_config={
-            "mup_enabled": True,
-            "mup_disable_attention_scaling": True,
-            "mup_disable_hidden_lr_scaling": False,
-            "mup_width_multiplier": 6.0,
-            "mup_input_alpha": 1.0,
-            "mup_output_alpha": 1.0,
-            "completep_depth_alpha_enabled": True,
-            "completep_depth_multiplier": 3.0,
-            "completep_depth_alpha_exp": 1.0,
-            "completep_eps_scaling_enabled": False,
-        },
-        init_config={
-            "init_std": 0.02,
-            "emb_init_std": 0.02,
-            "output_mult": None,
-        },
-    ),
-    "380M_RMS": TransformerModelArgs(
-        norm_eps=1e-20,
-        dim=1536,
-        n_layers=12,
-        n_heads=12,
-        vocab_size=50368,
-        rope_theta=10_000,
-        ffn_dim_multiplier=None,
-        use_embedding_norm=True,
-        use_peri_norm=True,
-        tie_word_embeddings=True,
-        use_torch_layernorm=False,
-        use_simple_silu_ffn=False,
-        use_mlp_mid_norm=True,
-        use_torch_qk_layernorm=False,
-        qk_norm=True,
-        use_attention_value_norm=True,
-        use_attention_output_norm=True,
-        qk_norm_bias=False,
-        qk_norm_elementwise_affine=False,
-        torch_layernorm_bias=False,
-        torch_layernorm_elementwise_affine=False,
-        use_flex_attn=True,
-        attn_mask_type="block_causal",
-        mup_config={
-            "mup_enabled": True,
-            "mup_disable_attention_scaling": True,
-            "mup_disable_hidden_lr_scaling": False,
-            "mup_width_multiplier": 6.0,
-            "mup_input_alpha": 1.0,
-            "mup_output_alpha": 1.0,
-            "completep_depth_alpha_enabled": True,
-            "completep_depth_multiplier": 3.0,
-            "completep_depth_alpha_exp": 1.0,
-            "completep_eps_scaling_enabled": False,
-        },
-        init_config={
-            "init_std": 0.02,
-            "emb_init_std": 0.02,
-            "output_mult": None,
-            "hidden_init": "scaled_orthogonal",
-            "embed_init": "normal",
-            "output_init": "normal",
         },
     ),
     "720M": TransformerModelArgs(
@@ -371,7 +183,6 @@ llama3_mup_configs = {
         tie_word_embeddings=True,
         use_torch_layernorm=True,
         use_simple_silu_ffn=False,
-        use_torch_qk_layernorm=True,
         qk_norm=True,
         qk_norm_bias=False,
         torch_layernorm_bias=False,
@@ -396,54 +207,6 @@ llama3_mup_configs = {
             "init_std": 0.02,
             "emb_init_std": 0.02,  # Will default to init_std
             "output_mult": None,  # No special output scaling
-        },
-    ),
-    "720M_RMS": TransformerModelArgs(
-        norm_eps=1e-20,
-        dim=2048,
-        n_layers=12,
-        n_heads=16,
-        vocab_size=50368,
-        rope_theta=10_000,
-        # FFN expansion ratio of 4x (4 * 768 = 3072)
-        ffn_dim_multiplier=None,
-        # MuP features
-        use_embedding_norm=True,
-        use_peri_norm=True,
-        tie_word_embeddings=True,
-        use_torch_layernorm=False,
-        use_simple_silu_ffn=False,
-        use_mlp_mid_norm=True,
-        use_torch_qk_layernorm=False,
-        qk_norm=True,
-        use_attention_value_norm=True,
-        use_attention_output_norm=True,
-        qk_norm_bias=False,
-        qk_norm_elementwise_affine=False,
-        torch_layernorm_bias=False,
-        torch_layernorm_elementwise_affine=False,
-        # Flex attention
-        use_flex_attn=True,
-        attn_mask_type="block_causal",
-        mup_config={
-            "mup_enabled": True,
-            "mup_disable_attention_scaling": True,
-            "mup_disable_hidden_lr_scaling": False,
-            "mup_width_multiplier": 8.0,
-            "mup_input_alpha": 1.0,
-            "mup_output_alpha": 1.0,
-            "completep_depth_alpha_enabled": True,
-            "completep_depth_multiplier": 3.0,
-            "completep_depth_alpha_exp": 1.0,
-            "completep_eps_scaling_enabled": False,
-        },
-        init_config={
-            "init_std": 0.02,
-            "emb_init_std": 0.02,  # Will default to init_std
-            "output_mult": None,  # No special output scaling
-            "hidden_init": "scaled_orthogonal",
-            "embed_init": "normal",
-            "output_init": "normal",
         },
     ),
     "1B": TransformerModelArgs(
@@ -460,7 +223,6 @@ llama3_mup_configs = {
         tie_word_embeddings=True,
         use_torch_layernorm=True,
         use_simple_silu_ffn=False,
-        use_torch_qk_layernorm=True,
         qk_norm=True,
         qk_norm_bias=False,
         torch_layernorm_bias=False,
@@ -487,62 +249,7 @@ llama3_mup_configs = {
             "output_mult": None,  # No special output scaling
         },
     ),
-    "1B_RMS": TransformerModelArgs(
-        norm_eps=1e-20,
-        dim=2048,
-        n_layers=24,
-        n_heads=16,
-        vocab_size=50368,
-        rope_theta=10_000,
-        # FFN expansion ratio of 4x (4 * 768 = 3072)
-        ffn_dim_multiplier=None,
-        # MuP features
-        use_embedding_norm=True,
-        use_peri_norm=True,
-        tie_word_embeddings=True,
-        use_torch_layernorm=False,
-        use_simple_silu_ffn=False,
-        use_mlp_mid_norm=True,
-        use_torch_qk_layernorm=False,
-        qk_norm=True,
-        use_attention_value_norm=True,
-        use_attention_output_norm=True,
-        qk_norm_bias=False,
-        qk_norm_elementwise_affine=False,
-        torch_layernorm_bias=False,
-        torch_layernorm_elementwise_affine=False,
-        # Flex attention
-        use_flex_attn=True,
-        attn_mask_type="block_causal",
-        mup_config={
-            "mup_enabled": True,
-            "mup_disable_attention_scaling": True,
-            "mup_disable_hidden_lr_scaling": False,
-            "mup_width_multiplier": 8.0,
-            "mup_input_alpha": 1.0,
-            "mup_output_alpha": 1.0,
-            "completep_depth_alpha_enabled": True,
-            "completep_depth_multiplier": 6.0,
-            "completep_depth_alpha_exp": 1.0,
-            "completep_eps_scaling_enabled": False,
-        },
-        init_config={
-            "init_std": 0.02,
-            "emb_init_std": 0.02,  # Will default to init_std
-            "output_mult": None,  # No special output scaling
-            "hidden_init": "scaled_orthogonal",
-            "embed_init": "normal",
-            "output_init": "normal",
-        },
-    ),
 }
-
-# Automatically generate `_scion` flavours that enable the activation scaling flag.
-for _name, _args in list(llama3_mup_configs.items()):
-    scion_name = f"{_name}_scion"
-    if scion_name in llama3_mup_configs:
-        continue
-    llama3_mup_configs[scion_name] = replace(_args, use_scion=True)
 
 
 def get_train_spec() -> TrainSpec:
