@@ -14,7 +14,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import timedelta
 from types import ModuleType
-from typing import Any, TYPE_CHECKING, Callable
+from typing import Any, TYPE_CHECKING
 
 import torch
 from torch import nn
@@ -33,7 +33,7 @@ if _MODULE_PROXY is None:
 _MODULE_PROXY.__dict__.update(globals())
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable, Iterator
+    from collections.abc import Callable, Iterable, Iterator
 
     from torch.optim import Optimizer
 
@@ -56,7 +56,7 @@ class ParameterFragmentConfig:
     backup_device: torch.device | None
     pin_memory: bool
     name_prefix: str
-    outer_optimizer: "DesLocOuterOptimizerConfig | None" = None
+    outer_optimizer: DesLocOuterOptimizerConfig | None = None
     log_outer_metrics: bool = False
     metrics_logger: Callable[[dict[str, float]], None] | None = None
     checkpoint_outer_optimizer: bool = True
@@ -88,7 +88,7 @@ class DesLocControllerConfig:
     pin_memory: bool
     name_prefix: str
     quorum_timeout_seconds: int
-    outer_optimizer: "DesLocOuterOptimizerConfig | None" = None
+    outer_optimizer: DesLocOuterOptimizerConfig | None = None
     log_outer_metrics: bool = False
     metrics_logger: Callable[[dict[str, float]], None] | None = None
     checkpoint_outer_optimizer: bool = True
@@ -105,7 +105,7 @@ class DesLocFTOptimizersConfig:
     desloc_config: DesLocConfig
     use_ft_optimizer: bool = True
     param_groups: list[dict[str, Any]] | None = None
-    outer_optimizer: "DesLocOuterOptimizerConfig | None" = None
+    outer_optimizer: DesLocOuterOptimizerConfig | None = None
 
 
 def _extract_local_tensor(tensor: torch.Tensor) -> torch.Tensor:
@@ -186,9 +186,13 @@ class _ParameterFragment(_BaseFragment):
             optimizer_cls = config.outer_optimizer.resolve_optimizer_cls()
             params = [p for p in self._model.parameters() if p.requires_grad]
             if not params:
-                msg = "DES-LOC outer optimizer requires at least one trainable parameter."
+                msg = (
+                    "DES-LOC outer optimizer requires at least one trainable parameter."
+                )
                 raise ValueError(msg)
-            self._outer_optimizer = optimizer_cls(params, **config.outer_optimizer.kwargs)
+            self._outer_optimizer = optimizer_cls(
+                params, **config.outer_optimizer.kwargs
+            )
 
         self._init_backup_storage()
         self.save_state()
@@ -347,6 +351,7 @@ class _ParameterFragment(_BaseFragment):
         )
 
         if self._outer_optimizer is not None and self._checkpoint_outer_optimizer:
+
             def load_outer(state_dict: dict[str, Any]) -> None:
                 self._outer_optimizer.load_state_dict(state_dict)
 

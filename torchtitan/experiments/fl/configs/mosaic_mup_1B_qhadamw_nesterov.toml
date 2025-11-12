@@ -49,8 +49,8 @@ checkpoint_outer_optimizer = false
 target = "SGD"
 
 [optimizer.desloc.outer_optimizer.kwargs]
-lr = 1.0          
-momentum = 0.9    
+lr = 1.0
+momentum = 0.9
 nesterov = true
 
 [fl_metrics.optimizer_monitor]

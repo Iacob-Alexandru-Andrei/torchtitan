@@ -13,9 +13,9 @@ from typing import Any, cast, Literal
 
 import torch
 
-from torchtitan.config import Optimizer as BaseOptimizer
-
 from torch.optim import Optimizer
+
+from torchtitan.config import Optimizer as BaseOptimizer
 
 MUON_ZEROpower_COEFFS = (3.4445, -4.7750, 2.0315)
 
@@ -51,7 +51,7 @@ class DesLocConfig:
     quorum_timeout_seconds: int = 60
     """Timeout (seconds) to wait for TorchFT quorum formation during DES-LOC sync."""
 
-    outer_optimizer: "DesLocOuterOptimizerConfig | None" = None
+    outer_optimizer: DesLocOuterOptimizerConfig | None = None
     """Optional optimizer to apply averaged pseudo-gradients to global parameters."""
 
     log_outer_metrics: bool = False
@@ -83,7 +83,7 @@ class DesLocConfig:
             return [int(v) for v in spec]
         return int(spec)
 
-    def normalized_outer_optimizer(self) -> "DesLocOuterOptimizerConfig | None":
+    def normalized_outer_optimizer(self) -> DesLocOuterOptimizerConfig | None:
         """Return a normalized outer optimizer configuration if provided."""
         outer = self.outer_optimizer
         if outer is None:
@@ -275,7 +275,7 @@ class MosaicOptimizerConfig(BaseOptimizer):
     def resolved_zeropower_coefficients(self) -> tuple[float, float, float]:
         """Return zeropower coefficients, defaulting to Muon constants."""
         if self.zeropower_coefficients is not None:
-            return cast(tuple[float, float, float], self.zeropower_coefficients)
+            return cast("tuple[float, float, float]", self.zeropower_coefficients)
         return MUON_ZEROpower_COEFFS
 
 
@@ -294,7 +294,9 @@ class DesLocOuterOptimizerConfig:
             raise ValueError(msg)
         if isinstance(target, type):
             if not issubclass(target, Optimizer):
-                msg = f"Configured outer optimizer class {target!r} is not an Optimizer."
+                msg = (
+                    f"Configured outer optimizer class {target!r} is not an Optimizer."
+                )
                 raise TypeError(msg)
             return target
 

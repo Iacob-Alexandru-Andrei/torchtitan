@@ -201,7 +201,9 @@ def test_configure_desloc_conflicting_method(monkeypatch):
 
 
 def test_desloc_outer_optimizer_applies_pseudogradients(monkeypatch):
-    monkeypatch.setattr("torchtitan.components.optimizer.has_torchft", True, raising=False)
+    monkeypatch.setattr(
+        "torchtitan.components.optimizer.has_torchft", True, raising=False
+    )
 
     class _DummyFTOptimizer:
         def __init__(self, _manager, _container) -> None:  # pragma: no cover - stub
