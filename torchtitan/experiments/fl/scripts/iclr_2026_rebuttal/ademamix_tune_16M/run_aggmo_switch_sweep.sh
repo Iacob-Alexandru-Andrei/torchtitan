@@ -127,9 +127,13 @@ RUN_INDEX_OFFSET=$((10#${RUN_INDEX_OFFSET}))
 
 ADEMA_NEW_VS_PAIRS=${ADEMA_NEW_VS_PAIRS:-"0.3,0.7 0.2,0.8 0.1,0.9 0.05,0.95 0.01,0.99 0.005,0.995 0.001,0.999"}
 ADEMA_SWITCH_SCALES=${ADEMA_SWITCH_SCALES:-"1 2 4 8"}
+BASE_VS=${BASE_VS:-"1.0 0.0"}
+BASE_BETAS=${BASE_BETAS:-"0.9 0.999 0.999"}
 
 read -r -a VS_PAIR_ARRAY <<< "${ADEMA_NEW_VS_PAIRS}"
 read -r -a SWITCH_SCALE_ARRAY <<< "${ADEMA_SWITCH_SCALES}"
+read -r -a BASE_VS_ARRAY <<< "${BASE_VS}"
+read -r -a BASE_BETAS_ARRAY <<< "${BASE_BETAS}"
 
 if (( ${#VS_PAIR_ARRAY[@]} == 0 )); then
   echo "ADEMA_NEW_VS_PAIRS must contain at least one pair." >&2
@@ -137,6 +141,14 @@ if (( ${#VS_PAIR_ARRAY[@]} == 0 )); then
 fi
 if (( ${#SWITCH_SCALE_ARRAY[@]} == 0 )); then
   echo "ADEMA_SWITCH_SCALES must contain at least one entry." >&2
+  exit 1
+fi
+if (( ${#BASE_VS_ARRAY[@]} == 0 )); then
+  echo "BASE_VS must contain at least one entry." >&2
+  exit 1
+fi
+if (( ${#BASE_BETAS_ARRAY[@]} == 0 )); then
+  echo "BASE_BETAS must contain at least one entry." >&2
   exit 1
 fi
 
@@ -151,7 +163,7 @@ TRAINING_ARGS_ESCAPED=$(serialize_training_args)
 read -r -a SBATCH_EXTRA_ARRAY <<< "${SBATCH_ADDITIONAL_ARGS}"
 if [[ -z "${SBATCH_ADDITIONAL_ARGS}" ]]; then
   SBATCH_EXTRA_ARRAY=()
-endif
+fi
 
 validate_vs_pair() {
   local raw_pair=$1
@@ -295,7 +307,7 @@ PY
 fi
 SWEEP_HASH=${SWEEP_HASH:0:8}
 
-GPU_IDS=${GPU_IDS:-"0"}
+GPU_IDS=${GPU_IDS:-""}
 RDZV_HOST=${RDZV_HOST:-"127.0.0.1"}
 RDZV_BASE_PORT=${RDZV_BASE_PORT:-46200}
 LIGHTHOUSE_HOST=${LIGHTHOUSE_HOST:-"127.0.0.1"}
@@ -304,20 +316,98 @@ PORT_STRIDE=${PORT_STRIDE:-4}
 LIGHTHOUSE_PROTOCOL=${LIGHTHOUSE_PROTOCOL:-"http"}
 POLL_INTERVAL_SEC=${POLL_INTERVAL_SEC:-5}
 
+declare -a GPU_ARRAY=()
+declare -i GPU_IDS_DEDUPED_COUNT=0
+GPU_IDS_AUTO_SOURCE=""
+
+detect_available_gpu_ids() {
+  if [[ -n "${CUDA_VISIBLE_DEVICES:-}" ]]; then
+    local normalized=${CUDA_VISIBLE_DEVICES//,/ }
+    local -a ids=()
+    read -r -a ids <<< "${normalized}"
+    if (( ${#ids[@]} > 0 )); then
+      GPU_IDS_AUTO_SOURCE="CUDA_VISIBLE_DEVICES"
+      printf "%s\n" "${ids[*]}"
+      return 0
+    fi
+  fi
+
+  if command -v nvidia-smi >/dev/null 2>&1; then
+    local -a ids=()
+    while IFS= read -r line; do
+      line=${line//$'\r'/}
+      line=${line//[[:space:]]/}
+      [[ -z "${line}" ]] && continue
+      ids+=("${line}")
+    done < <(nvidia-smi --query-gpu=index --format=csv,noheader 2>/dev/null)
+    if (( ${#ids[@]} > 0 )); then
+      GPU_IDS_AUTO_SOURCE="nvidia-smi"
+      printf "%s\n" "${ids[*]}"
+      return 0
+    fi
+  fi
+
+  GPU_IDS_AUTO_SOURCE=""
+  return 1
+}
+
+set_gpu_array_from_string() {
+  local raw="${1:-}"
+  local cleaned=${raw//,/ }
+  read -r -a parsed <<< "${cleaned}"
+  local -A seen=()
+  local -a unique=()
+  GPU_IDS_DEDUPED_COUNT=0
+
+  for token in "${parsed[@]}"; do
+    token=${token//[[:space:]]/}
+    [[ -z "${token}" ]] && continue
+    if [[ ! "${token}" =~ ^[0-9]+$ ]]; then
+      echo "GPU id '${token}' must be a non-negative integer. Provide GPU_IDS as digits or set GPU_IDS=auto." >&2
+      return 1
+    fi
+    if [[ -n "${seen[$token]-}" ]]; then
+      ((GPU_IDS_DEDUPED_COUNT++))
+      continue
+    fi
+    unique+=("${token}")
+    seen["$token"]=1
+  done
+
+  GPU_ARRAY=("${unique[@]}")
+  return 0
+}
+
 if [[ ! -f "${CONFIG_FILE}" ]]; then
   echo "Base config not found at ${CONFIG_FILE}" >&2
   exit 1
 fi
 
-declare -a GPU_ARRAY=()
-if [[ "${USE_SBATCH}" == "true" ]]; then
-  :
-else
-  read -r -a GPU_ARRAY <<< "${GPU_IDS}"
-  if [[ "${DRY_RUN}" != "true" && ${#GPU_ARRAY[@]} -eq 0 ]]; then
-    echo "No GPU ids provided via GPU_IDS." >&2
+GPU_IDS_EFFECTIVE="${GPU_IDS:-}"
+if [[ -z "${GPU_IDS_EFFECTIVE}" || "${GPU_IDS_EFFECTIVE,,}" == "auto" ]]; then
+  if ! GPU_IDS_EFFECTIVE=$(detect_available_gpu_ids); then
+    echo "GPU_IDS not provided (or set to 'auto') and automatic GPU detection failed. Set GPU_IDS explicitly." >&2
     exit 1
   fi
+else
+  GPU_IDS_AUTO_SOURCE=""
+fi
+
+if ! set_gpu_array_from_string "${GPU_IDS_EFFECTIVE}"; then
+  exit 1
+fi
+
+TOTAL_GPUS=${#GPU_ARRAY[@]}
+if [[ "${DRY_RUN}" != "true" && ${TOTAL_GPUS} -eq 0 ]]; then
+  echo "GPU_IDS resolved to zero GPUs; provide GPU ids or set GPU_IDS=auto." >&2
+  exit 1
+fi
+
+if [[ -n "${GPU_IDS_AUTO_SOURCE}" ]]; then
+  echo "Auto-detected ${TOTAL_GPUS} GPU id(s) via ${GPU_IDS_AUTO_SOURCE}: ${GPU_ARRAY[*]}." >&2
+fi
+if (( GPU_IDS_DEDUPED_COUNT > 0 )); then
+  echo "Removed ${GPU_IDS_DEDUPED_COUNT} duplicate GPU id(s); using GPU set: ${GPU_ARRAY[*]}." >&2
 fi
 
 declare -a GPU_PIDS=()
@@ -401,7 +491,7 @@ formatted_vs_arg() {
 }
 
 formatted_switch_steps_arg() {
-  printf '[%s]' "${SWITCH_APPLY_STEP}"
+  printf '%s' "${SWITCH_APPLY_STEP}"
 }
 
 submit_sbatch_job() {
@@ -469,15 +559,15 @@ uv run --no-sync torchrun \
   --optimizer.builder mosaic \
   --optimizer.name AggMoAdamW \
   --optimizer.lr "${BASE_LR}" \
-  --optimizer.vs "[1.0,0.0]" \
-  --optimizer.betas "[0.9,0.999,0.999]" \
+  --optimizer.vs "${BASE_VS_ARRAY[@]}" \
+  --optimizer.betas "${BASE_BETAS_ARRAY[@]}" \
   --training.global_batch_size 64 \
   --training.local_batch_size 64 \
-  --training.steps 12288 \
+  --training.steps 6144 \
   --lr_scheduler.switch_step "${WARMUP_SWITCH_STEP}" \
   --lr_scheduler.switch_scale "${switch_scale}" \
   --fl_metrics.hyperparameter_switch.steps "${switch_steps_arg}" \
-  --fl_metrics.hyperparameter_switch.new_vs "${new_vs_arg}" \
+  --fl_metrics.hyperparameter_switch.new_vs ${v1} ${v2} \
   --fl_metrics.hyperparameter_switch.reset_momenta "[\\"exp_avg_2\\"]" \
   --parallelism.data_parallel_replicate_degree 1 \
   ${TRAINING_ARGS_ESCAPED}
@@ -586,15 +676,15 @@ uv run --no-sync torchrun \
   --optimizer.builder mosaic \
   --optimizer.name AggMoAdamW \
   --optimizer.lr "${BASE_LR}" \
-  --optimizer.vs "[1.0,0.0]" \
-  --optimizer.betas "[0.9,0.999,0.999]" \
+  --optimizer.vs "${BASE_VS_ARRAY[@]}" \
+  --optimizer.betas "${BASE_BETAS_ARRAY[@]}" \
   --training.global_batch_size 64 \
   --training.local_batch_size 64 \
   --training.steps 12288 \
   --lr_scheduler.switch_step "${WARMUP_SWITCH_STEP}" \
   --lr_scheduler.switch_scale "${switch_scale}" \
   --fl_metrics.hyperparameter_switch.steps "${switch_steps_arg}" \
-  --fl_metrics.hyperparameter_switch.new_vs "${new_vs_arg}" \
+  --fl_metrics.hyperparameter_switch.new_vs ${v1} ${v2} \
   --fl_metrics.hyperparameter_switch.reset_momenta "[\"exp_avg_2\"]" \
   --parallelism.data_parallel_replicate_degree 1 \
   "${TRAINING_ARGS[@]}"

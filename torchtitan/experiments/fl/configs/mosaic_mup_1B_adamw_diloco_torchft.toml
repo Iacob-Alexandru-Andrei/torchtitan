@@ -88,7 +88,7 @@ new_betas = [0.9,0.99]
 # reset_momenta = ["exp_avg"]
 
 [training]
-local_batch_size = 8
+local_batch_size = 4
 global_batch_size = 1024
 seq_len = 2048
 max_norm = 0.1  # grad norm clipping
@@ -109,7 +109,7 @@ context_parallel_degree = 1
 enable = true
 keep_latest_k = 20
 folder = "checkpoints"
-interval = 1024
+interval = 512
 last_save_model_only = false
 export_dtype = "float32"
 async_mode = "async_with_pinned_mem"  # ["disabled", "async", "async_with_pinned_mem"]

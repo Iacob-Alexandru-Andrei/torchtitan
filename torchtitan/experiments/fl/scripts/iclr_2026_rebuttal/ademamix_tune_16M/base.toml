@@ -91,7 +91,7 @@ local_batch_size = 64
 global_batch_size = 64
 seq_len = 2048
 max_norm = 1.0  # grad norm clipping
-steps = 12288
+steps = 6144
 dataset = "c4_test"  # supported datasets: c4_test (2K), c4 (177M)
 
 
