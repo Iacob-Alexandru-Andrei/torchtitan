@@ -277,8 +277,10 @@ class AggMoAdamW(QHAdamW):
                 weight_decay=group["weight_decay"],
                 eps=group["eps"],
                 maximize=group["maximize"],
+                foreach=group["foreach"],
                 capturable=group["capturable"],
                 differentiable=group["differentiable"],
+                fused=group["fused"],
                 grad_scale=getattr(self, "grad_scale", None),
                 found_inf=getattr(self, "found_inf", None),
                 has_complex=has_complex,
@@ -334,7 +336,8 @@ class AggMoAdamW(QHAdamW):
             if weight_decay != 0 and decouple:
                 decay_factor = _compute_decay_factor(lr, initial_lr)
                 effective_weight_decay = decay_factor * weight_decay
-                step_tensor = step_tensor.add(param, alpha=effective_weight_decay)
+                scaling_factor = effective_weight_decay / (1 - effective_weight_decay)
+                step_tensor = step_tensor * (1 + scaling_factor) + param * scaling_factor
 
             for metric in self.metric_functions:
                 optimizer_metrics[f"{metric}/{name}"] = self.metric_functions[metric](

@@ -33,12 +33,9 @@ _WEIGHT_SUM_TOL = 1e-8
 
 
 def _build_moment_specs(vs: Sequence[float]) -> list[tuple[float, str]]:
-    """Return non-zero momentum weights and their associated state names."""
+    """Return momentum weights (including zero-weight buffers) and their state names."""
     moment_specs: list[tuple[float, str]] = []
-    for v in vs:
-        if v == 0.0:
-            continue
-        idx = len(moment_specs) + 1
+    for idx, v in enumerate(vs, start=1):
         name = "exp_avg" if idx == 1 else f"exp_avg_{idx}"
         moment_specs.append((float(v), name))
     return moment_specs
