@@ -5,7 +5,7 @@ set -euo pipefail
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 CONFIG_FILE=${CONFIG_FILE:-"${SCRIPT_DIR}/base.toml"}
 TRAIN_MODULE=${TRAIN_MODULE:-"torchtitan.experiments.fl.train"}
-RUN_PREFIX=${RUN_PREFIX:-"iclr2026-qhademamix"}
+RUN_PREFIX=${RUN_PREFIX:-"iclr2026-ademamix099_0999"}
 LOG_RANK=${LOG_RANK:-0}
 BASE_LR=${BASE_LR:-0.01}
 WARMUP_SWITCH_STEP=${WARMUP_SWITCH_STEP:-2048}
