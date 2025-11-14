@@ -83,7 +83,7 @@ switch_scale = 4.0
 enabled = true
 steps = [2049]
 new_vs = [0.1, 0.9]
-new_betas = [0.9,0.999, 0.999]
+new_betas = [0.99,0.999, 0.999]
 reset_momenta = ["exp_avg", "exp_avg_2"]
 
 [training]

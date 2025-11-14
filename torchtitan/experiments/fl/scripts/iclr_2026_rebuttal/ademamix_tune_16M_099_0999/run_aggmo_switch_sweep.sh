@@ -5,7 +5,7 @@ set -euo pipefail
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 CONFIG_FILE=${CONFIG_FILE:-"${SCRIPT_DIR}/base.toml"}
 TRAIN_MODULE=${TRAIN_MODULE:-"torchtitan.experiments.fl.train"}
-RUN_PREFIX=${RUN_PREFIX:-"iclr2026-qhademamix"}
+RUN_PREFIX=${RUN_PREFIX:-"iclr2026-ademamix"}
 LOG_RANK=${LOG_RANK:-0}
 BASE_LR=${BASE_LR:-0.01}
 WARMUP_SWITCH_STEP=${WARMUP_SWITCH_STEP:-2048}
@@ -125,8 +125,8 @@ if ! [[ "${RUN_INDEX_OFFSET}" =~ ^[0-9]+$ ]]; then
 fi
 RUN_INDEX_OFFSET=$((10#${RUN_INDEX_OFFSET}))
 
-ADEMA_NEW_VS_PAIRS=${ADEMA_NEW_VS_PAIRS:-"0.4,0.5 0.3,0.6 0.2,0.7 0.1,0.8 0.0,0.9 0.45,0.5 0.35,0.6 0.25,0.7 0.15,0.8 0.05,0.9 0.0,0.95"}
-ADEMA_SWITCH_SCALES=${ADEMA_SWITCH_SCALES:-"1 2 4 8 16"}
+ADEMA_NEW_VS_PAIRS=${ADEMA_NEW_VS_PAIRS:-"0.3,0.7 0.2,0.8 0.1,0.9 0.05,0.95 0.01,0.99 0.005,0.995 0.001,0.999"}
+ADEMA_SWITCH_SCALES=${ADEMA_SWITCH_SCALES:-"1 2 4 8"}
 BASE_VS=${BASE_VS:-"1.0 0.0"}
 BASE_BETAS=${BASE_BETAS:-"0.9 0.999 0.999"}
 
@@ -181,6 +181,8 @@ first = float("${first}")
 second = float("${second}")
 if not (0.0 <= first <= 1.0 and 0.0 <= second <= 1.0):
     raise SystemExit("vs entries must be within [0,1].")
+if abs((first + second) - 1.0) > 1e-6:
+    raise SystemExit("vs pair ${raw_pair} does not sum to 1.0.")
 PY
 }
 
@@ -560,8 +562,8 @@ uv run --no-sync torchrun \
   --optimizer.vs "${BASE_VS_ARRAY[@]}" \
   --optimizer.betas "${BASE_BETAS_ARRAY[@]}" \
   --training.global_batch_size 64 \
-  --training.local_batch_size 32 \
-  --training.steps 12288 \
+  --training.local_batch_size 64 \
+  --training.steps 6144 \
   --lr_scheduler.switch_step "${WARMUP_SWITCH_STEP}" \
   --lr_scheduler.switch_scale "${switch_scale}" \
   --fl_metrics.hyperparameter_switch.steps "${switch_steps_arg}" \
@@ -676,7 +678,7 @@ uv run --no-sync torchrun \
   --optimizer.vs "${BASE_VS_ARRAY[@]}" \
   --optimizer.betas "${BASE_BETAS_ARRAY[@]}" \
   --training.global_batch_size 64 \
-  --training.local_batch_size 32 \
+  --training.local_batch_size 64 \
   --training.steps 12288 \
   --lr_scheduler.switch_step "${WARMUP_SWITCH_STEP}" \
   --lr_scheduler.switch_scale "${switch_scale}" \
