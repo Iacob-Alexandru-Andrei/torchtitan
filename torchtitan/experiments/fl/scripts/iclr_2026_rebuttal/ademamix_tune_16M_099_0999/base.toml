@@ -84,10 +84,10 @@ enabled = true
 steps = [2049]
 new_vs = [0.1, 0.9]
 new_betas = [0.99,0.999, 0.999]
-reset_momenta = ["exp_avg", "exp_avg_2"]
+reset_momenta = ["exp_avg","exp_avg_2"]
 
 [training]
-local_batch_size = 64
+local_batch_size = 32
 global_batch_size = 64
 seq_len = 2048
 max_norm = 1.0  # grad norm clipping
@@ -119,7 +119,6 @@ enable = true
 bucket = "checkpoints"
 prefix = ""  # Root of bucket
 download_on_start = true
-resume_from_run_step = "16M-baseline-20251029-095728/step-2048"
 # run_uuid and remote_checkpoint_folder will be set via RUN_UUID environment variable
 
 [activation_checkpoint]
@@ -191,7 +190,7 @@ batching_method = "random"
 [mosaic_dataloader.dataset.train]
 split = "train"
 root_remote = "s3://smollm-corpus/shared"
-root_local = "/nfs-share/datasets/photon/dataset_cache/smollm-corpus-shared"
+root_local = "/home/ubuntu/nfs-share/datasets/photon/dataset_cache/smollm-corpus-shared"
 sampling_groups_mode = "grouped"  # set to "concatenate" to merge all sampling groups
 
 [mosaic_dataloader.dataset.train.streams.client_streams.stream_0]
@@ -696,7 +695,7 @@ streams = [
 # The validation samples are stored under the "train" split on disk.
 split = "train"
 root_remote = "s3://smollm-corpus/shared"
-root_local = "/nfs-share/datasets/photon/dataset_cache/smollm-corpus-shared"
+root_local = "/home/ubuntu/nfs-share/datasets/photon/dataset_cache/smollm-corpus-shared"
 # subset_num_samples = 512
 sampling_groups_mode = "grouped"
 
