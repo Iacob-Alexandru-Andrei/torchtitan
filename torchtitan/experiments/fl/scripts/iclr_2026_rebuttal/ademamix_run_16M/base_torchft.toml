@@ -145,7 +145,7 @@ sync_steps = 32
 semi_sync_method = "desloc"  # Options: "diloco", "local_sgd", or comment out for async quorum
 
 [validation]
-enable = true
+enable = false
 dataset = "c4_validation"
 local_batch_size = 4
 freq = 2048
