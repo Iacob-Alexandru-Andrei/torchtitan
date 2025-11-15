@@ -43,12 +43,12 @@ betas = [0.9, 0.999, 0.999]
 implementation = "for-loop"
 
 
-[optimizer.desloc]
-enabled = false
-param_sync_every = 32
-optimizer_sync_every = [32,32]
-backup_device = "cpu"
-pin_memory = true
+# [optimizer.desloc]
+# enabled = false
+# param_sync_every = 32
+# optimizer_sync_every = [32,32]
+# backup_device = "cpu"
+# pin_memory = true
 
 [fl_metrics.optimizer_monitor]
 interval = 16
@@ -77,23 +77,22 @@ decay_ratio = 0.0  # lr scheduler decay ratio, 80% of the train steps
 decay_type = "sqrt"
 min_lr_factor = 0.0
 switch_step = 2049
-switch_scale = 2.0
+switch_scale = 1.0
 
 [fl_metrics.hyperparameter_switch]
-enabled = true
+enabled = false
 steps = [2049]
 new_vs = [0.05, 0.95]
 new_betas = [0.9,0.999, 0.999]
 reset_momenta = ["exp_avg","exp_avg_2"]
 
 [training]
-local_batch_size = 32
+local_batch_size = 16
 global_batch_size = 64
 seq_len = 2048
 max_norm = 1.0  # grad norm clipping
 steps = 40960
 dataset = "c4_test"  # supported datasets: c4_test (2K), c4 (177M)
-
 
 [parallelism]
 data_parallel_replicate_degree = 1
@@ -118,7 +117,6 @@ enable = true
 bucket = "checkpoints"
 prefix = ""  # Root of bucket
 download_on_start = true
-resume_from_run_step = "iclr2026-adamw16m-20251115-020141/step-2048"
 # run_uuid and remote_checkpoint_folder will be set via RUN_UUID environment variable
 
 [activation_checkpoint]
@@ -145,9 +143,9 @@ sync_steps = 32
 semi_sync_method = "desloc"  # Options: "diloco", "local_sgd", or comment out for async quorum
 
 [validation]
-enable = true
+enable = false
 dataset = "c4_validation"
-local_batch_size = 4
+local_batch_size = 16
 freq = 2048
 steps = 32
 
