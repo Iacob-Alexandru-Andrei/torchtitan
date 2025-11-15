@@ -122,7 +122,7 @@ resume_from_run_step = "iclr2026-adamw16m-20251115-020141/step-2048"
 # run_uuid and remote_checkpoint_folder will be set via RUN_UUID environment variable
 
 [activation_checkpoint]
-mode = "selective"  # ["none", "selective", "full"]
+mode = "selective"  # ["none", "se lective", "full"]
 selective_ac_option = '2'  # 'int' = ac every positive int layer or 'op', ac based on ops policy
 
 [compile]
