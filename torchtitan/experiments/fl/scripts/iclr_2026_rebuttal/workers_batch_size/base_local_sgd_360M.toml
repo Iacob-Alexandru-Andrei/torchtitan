@@ -104,7 +104,7 @@ interval = 999999
 last_save_model_only = false
 export_dtype = "float32"
 async_mode = "async_with_pinned_mem"  # ["disabled", "async", "async_with_pinned_mem"]
-exclude_from_loading = ["dataloader"]
+# exclude_from_loading = ["dataloader"]
 
 [s3_checkpoint]
 enable = true
