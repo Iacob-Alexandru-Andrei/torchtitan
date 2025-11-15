@@ -112,7 +112,7 @@ interval = 2048
 last_save_model_only = false
 export_dtype = "float32"
 async_mode = "async_with_pinned_mem"  # ["disabled", "async", "async_with_pinned_mem"]
-exclude_from_loading = ["dataloader"]
+resume_from_run_step = "iclr2026-adamw16m-20251115-020141/step-2048"
 
 [s3_checkpoint]
 enable = true

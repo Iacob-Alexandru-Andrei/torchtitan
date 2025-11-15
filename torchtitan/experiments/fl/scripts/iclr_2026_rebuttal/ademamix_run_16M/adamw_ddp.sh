@@ -4,15 +4,17 @@
 set -euo pipefail
 
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
-REPO_ROOT=$(cd -- "${SCRIPT_DIR}/../../../../.." && pwd -P)
+REPO_ROOT=$(cd -- "${SCRIPT_DIR}/../../../../../.." && pwd -P)
 cd "${REPO_ROOT}"
+
+echo REPO_ROOT="${REPO_ROOT}"
 
 # Remove stale shared-memory artifacts owned by the current user.
 find /dev/shm -maxdepth 1 -user "${USER}" -exec rm -rf {} + 2>/dev/null || true
 
 export S3_ENDPOINT_URL=${S3_ENDPOINT_URL:-'http://taranaki.cl.cam.ac.uk:9000'}
 
-CONFIG_FILE=${CONFIG_FILE:-"${SCRIPT_DIR}/base.toml"}
+CONFIG_FILE=${CONFIG_FILE:-"${SCRIPT_DIR}/base_adamW.toml"}
 TRAIN_MODULE=${TRAIN_MODULE:-"torchtitan.experiments.fl.train"}
 NGPU=${NGPU:-4}
 LOG_RANK=${LOG_RANK:-0}
@@ -45,5 +47,4 @@ uv run --no-sync torchrun \
   --run_uuid "${RUN_UUID}" \
   --lr_scheduler.switch_step "${LR_SWITCH_STEP}" \
   --lr_scheduler.switch_scale "${ADAMW_SWITCH_SCALE}" \
-  --fl_metrics.hyperparameter_switch.enabled false \
   "${TRAINING_ARGS[@]}"

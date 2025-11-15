@@ -6,7 +6,7 @@ SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
 if [[ -n "${SLURM_SUBMIT_DIR:-}" ]]; then
   REPO_ROOT=$(cd -- "${SLURM_SUBMIT_DIR}" && pwd -P)
 else
-  REPO_ROOT=$(cd -- "${SCRIPT_DIR}/../../../../.." && pwd -P)
+  REPO_ROOT=$(cd -- "${SCRIPT_DIR}/../../../../../.." && pwd -P)
 fi
 cd "${REPO_ROOT}"
 export REPO_ROOT
