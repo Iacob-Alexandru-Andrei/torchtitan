@@ -145,7 +145,6 @@ for ((replica_id=0; replica_id<NGPU; replica_id++)); do
       --fault_tolerance.min_replica_size "${MIN_REPLICAS}" \
       --lr_scheduler.switch_step "${LR_SWITCH_STEP}" \
       --lr_scheduler.switch_scale "${ADEMAMIX_SWITCH_SCALE}" \
-      --fl_metrics.hyperparameter_switch.enabled true \
       --fl_metrics.hyperparameter_switch.steps "${LR_SWITCH_STEP}" \
       --fl_metrics.hyperparameter_switch.new_vs "${ADEMAMIX_NEW_VS_ARRAY[@]}" \
       --fl_metrics.hyperparameter_switch.new_betas "${ADEMAMIX_NEW_BETAS_ARRAY[@]}" \
