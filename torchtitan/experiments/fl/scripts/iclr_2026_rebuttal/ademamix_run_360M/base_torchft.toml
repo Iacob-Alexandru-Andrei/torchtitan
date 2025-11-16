@@ -87,7 +87,7 @@ new_betas = [0.9,0.999, 0.999]
 reset_momenta = ["exp_avg","exp_avg_2"]
 
 [training]
-local_batch_size = 32
+local_batch_size = 16
 global_batch_size = 256
 seq_len = 2048
 max_norm = 0.25  # grad norm clipping
