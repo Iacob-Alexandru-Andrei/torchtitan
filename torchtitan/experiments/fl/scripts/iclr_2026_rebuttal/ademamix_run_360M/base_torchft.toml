@@ -44,7 +44,7 @@ implementation = "for-loop"
 
 
 [optimizer.desloc]
-enabled = false
+enabled = true
 param_sync_every = 32
 optimizer_sync_every = [32,32]
 backup_device = "cpu"
@@ -135,7 +135,7 @@ precompute_float8_dynamic_scale_for_fsdp = false
 filter_fqns = ["output"]
 
 [fault_tolerance]
-enable = false
+enable = true
 process_group = "gloo"
 process_group_timeout_ms = 999999
 replica_id = 0
