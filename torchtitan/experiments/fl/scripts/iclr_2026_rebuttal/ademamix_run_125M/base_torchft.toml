@@ -136,7 +136,7 @@ filter_fqns = ["output"]
 
 [fault_tolerance]
 enable = true
-process_group = "gloo"
+process_group = "nccl"
 process_group_timeout_ms = 999999
 replica_id = 0
 group_size = 2
