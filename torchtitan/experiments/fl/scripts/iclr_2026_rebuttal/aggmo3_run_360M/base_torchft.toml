@@ -46,7 +46,7 @@ implementation = "for-loop"
 [optimizer.desloc]
 enabled = true
 param_sync_every = 32
-optimizer_sync_every = [32,32,32]
+optimizer_sync_every = [32,32,32,32]
 backup_device = "cpu"
 pin_memory = true
 
@@ -84,7 +84,7 @@ enabled = true
 steps = [2049]
 new_vs = [0.1,0.1, 0.8]
 new_betas = [0.9, 0.99,0.999,0.999]
-reset_momenta = ["exp_avg","exp_avg_2"]
+reset_momenta = ["exp_avg","exp_avg_2", "exp_avg_3"]
 
 [training]
 local_batch_size = 16
