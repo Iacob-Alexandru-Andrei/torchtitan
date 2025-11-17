@@ -38,8 +38,8 @@ builder = "mosaic"
 lr = 0.001
 eps = 1e-8
 weight_decay = 0.0
-vs = [1.0, 0.0]
-betas = [0.9, 0.999, 0.999]
+vs = [1.0, 0.0,0.0]
+betas = [0.9, 0.99, 0.999, 0.999]
 implementation = "for-loop"
 
 
@@ -82,8 +82,8 @@ switch_scale = 1.0
 [fl_metrics.hyperparameter_switch]
 enabled = false
 steps = [2049]
-new_vs = [0.05, 0.9]
-new_betas = [0.99,0.999, 0.999]
+new_vs = [0.1,0.1, 0.8]
+new_betas = [0.9, 0.99,0.999,0.999]
 reset_momenta = ["exp_avg","exp_avg_2"]
 
 [training]
