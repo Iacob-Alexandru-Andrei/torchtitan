@@ -28,7 +28,7 @@ read -r -a ADEMAMIX_NEW_BETAS_ARRAY <<< "${ADEMAMIX_NEW_BETAS}"
 read -r -a ADEMAMIX_RESET_MOMENTA_ARRAY <<< "${ADEMAMIX_RESET_MOMENTA}"
 
 TIMESTAMP=$(date +"%Y%m%d-%H%M%S")
-RUN_PREFIX=${RUN_PREFIX:-"iclr2026-qhademamix360M"}
+RUN_PREFIX=${RUN_PREFIX:-"iclr2026-agg3ademamix360M"}
 export RUN_UUID=${RUN_UUID:-"${RUN_PREFIX}-${TIMESTAMP}"}
 export WANDB_PROJECT=${WANDB_PROJECT:-"torchtitan_tune_N"}
 export WANDB_TEAM=${WANDB_TEAM:-"camlsys"}
