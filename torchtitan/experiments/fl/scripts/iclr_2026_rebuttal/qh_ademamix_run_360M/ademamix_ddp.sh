@@ -48,11 +48,4 @@ uv run --no-sync torchrun \
   --tee 3 \
   -m "${TRAIN_MODULE}" \
   --job.config_file "${CONFIG_FILE}" \
-  --run_uuid "${RUN_UUID}" \
-  --lr_scheduler.switch_step "${LR_SWITCH_STEP}" \
-  --lr_scheduler.switch_scale "${ADEMAMIX_SWITCH_SCALE}" \
-  --fl_metrics.hyperparameter_switch.steps "${LR_SWITCH_STEP}" \
-  --fl_metrics.hyperparameter_switch.new_vs "${ADEMAMIX_NEW_VS_ARRAY[@]}" \
-  --fl_metrics.hyperparameter_switch.new_betas "${ADEMAMIX_NEW_BETAS_ARRAY[@]}" \
-  --fl_metrics.hyperparameter_switch.reset_momenta "${ADEMAMIX_RESET_MOMENTA_ARRAY[@]}" \
-  "${TRAINING_ARGS[@]}"
+  --run_uuid "${RUN_UUID}" 

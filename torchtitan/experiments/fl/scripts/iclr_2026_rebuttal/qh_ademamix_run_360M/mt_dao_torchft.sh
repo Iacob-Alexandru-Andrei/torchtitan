@@ -142,13 +142,7 @@ for ((replica_id=0; replica_id<NGPU; replica_id++)); do
       --run_uuid "${RUN_UUID}" \
       --fault_tolerance.replica_id "${replica_id}" \
       --fault_tolerance.group_size "${NGPU}" \
-      --fault_tolerance.min_replica_size "${MIN_REPLICAS}" \
-      --lr_scheduler.switch_step "${LR_SWITCH_STEP}" \
-      --lr_scheduler.switch_scale "${ADEMAMIX_SWITCH_SCALE}" \
-      --fl_metrics.hyperparameter_switch.steps "${LR_SWITCH_STEP}" \
-      --fl_metrics.hyperparameter_switch.new_vs "${ADEMAMIX_NEW_VS_ARRAY[@]}" \
-      --fl_metrics.hyperparameter_switch.new_betas "${ADEMAMIX_NEW_BETAS_ARRAY[@]}" \
-      --fl_metrics.hyperparameter_switch.reset_momenta "${ADEMAMIX_RESET_MOMENTA_ARRAY[@]}" \
+      --fault_tolerance.min_replica_size "${MIN_REPLICAS}" 
       "${TRAINING_ARGS[@]}"
   ) > "${log_file}" 2>&1 &
   REPLICA_PIDS[$replica_id]=$!

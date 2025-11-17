@@ -19,7 +19,7 @@ RDZV_ENDPOINT=${RDZV_ENDPOINT:-"localhost:0"}
 
 LR_SWITCH_STEP=${LR_SWITCH_STEP:-2049}
 ADEMAMIX_SWITCH_SCALE=${ADEMAMIX_SWITCH_SCALE:-2.0}
-ADEMAMIX_NEW_VS=${ADEMAMIX_NEW_VS:-"0.05 0.95"}
+ADEMAMIX_NEW_VS=${ADEMAMIX_NEW_VS:-"0.05 0.9"}
 ADEMAMIX_NEW_BETAS=${ADEMAMIX_NEW_BETAS:-"0.9 0.999 0.999"}
 ADEMAMIX_RESET_MOMENTA=${ADEMAMIX_RESET_MOMENTA:-"exp_avg exp_avg_2"}
 
@@ -49,10 +49,3 @@ uv run --no-sync torchrun \
   -m "${TRAIN_MODULE}" \
   --job.config_file "${CONFIG_FILE}" \
   --run_uuid "${RUN_UUID}" \
-  --lr_scheduler.switch_step "${LR_SWITCH_STEP}" \
-  --lr_scheduler.switch_scale "${ADEMAMIX_SWITCH_SCALE}" \
-  --fl_metrics.hyperparameter_switch.steps "${LR_SWITCH_STEP}" \
-  --fl_metrics.hyperparameter_switch.new_vs "${ADEMAMIX_NEW_VS_ARRAY[@]}" \
-  --fl_metrics.hyperparameter_switch.new_betas "${ADEMAMIX_NEW_BETAS_ARRAY[@]}" \
-  --fl_metrics.hyperparameter_switch.reset_momenta "${ADEMAMIX_RESET_MOMENTA_ARRAY[@]}" \
-  "${TRAINING_ARGS[@]}"

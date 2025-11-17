@@ -33,7 +33,7 @@ LIGHTHOUSE_URL="http://${LIGHTHOUSE_HOST}:${LIGHTHOUSE_PORT}"
 
 LR_SWITCH_STEP=${LR_SWITCH_STEP:-2049}
 ADEMAMIX_SWITCH_SCALE=${ADEMAMIX_SWITCH_SCALE:-2.0}
-ADEMAMIX_NEW_VS=${ADEMAMIX_NEW_VS:-"0.05 0.95"}
+ADEMAMIX_NEW_VS=${ADEMAMIX_NEW_VS:-"0.05 0.9"}
 ADEMAMIX_NEW_BETAS=${ADEMAMIX_NEW_BETAS:-"0.9 0.999 0.999"}
 ADEMAMIX_RESET_MOMENTA=${ADEMAMIX_RESET_MOMENTA:-"exp_avg exp_avg_2"}
 
@@ -143,12 +143,6 @@ for ((replica_id=0; replica_id<NGPU; replica_id++)); do
       --fault_tolerance.replica_id "${replica_id}" \
       --fault_tolerance.group_size "${NGPU}" \
       --fault_tolerance.min_replica_size "${MIN_REPLICAS}" \
-      --lr_scheduler.switch_step "${LR_SWITCH_STEP}" \
-      --lr_scheduler.switch_scale "${ADEMAMIX_SWITCH_SCALE}" \
-      --fl_metrics.hyperparameter_switch.steps "${LR_SWITCH_STEP}" \
-      --fl_metrics.hyperparameter_switch.new_vs "${ADEMAMIX_NEW_VS_ARRAY[@]}" \
-      --fl_metrics.hyperparameter_switch.new_betas "${ADEMAMIX_NEW_BETAS_ARRAY[@]}" \
-      --fl_metrics.hyperparameter_switch.reset_momenta "${ADEMAMIX_RESET_MOMENTA_ARRAY[@]}" \
       "${TRAINING_ARGS[@]}"
   ) > "${log_file}" 2>&1 &
   REPLICA_PIDS[$replica_id]=$!

@@ -45,6 +45,3 @@ uv run --no-sync torchrun \
   -m "${TRAIN_MODULE}" \
   --job.config_file "${CONFIG_FILE}" \
   --run_uuid "${RUN_UUID}" \
-  --lr_scheduler.switch_step "${LR_SWITCH_STEP}" \
-  --lr_scheduler.switch_scale "${ADAMW_SWITCH_SCALE}" \
-  "${TRAINING_ARGS[@]}"
