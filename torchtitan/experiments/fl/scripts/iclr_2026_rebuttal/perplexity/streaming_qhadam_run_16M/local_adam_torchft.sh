@@ -182,7 +182,7 @@ if [[ "${USE_SBATCH}" == "true" && -n "${SLURM_JOB_ID:-}" ]]; then
   USE_SBATCH=false
 fi
 
-LOG_DIR="${REPO_ROOT}/outputs/torchft_logs"
+LOG_DIR="${REPO_ROOT}/outputs/local_adam_logs"
 mkdir -p "${LOG_DIR}"
 LIGHTHOUSE_LOG_FILE="${LOG_DIR}/lighthouse.log"
 
