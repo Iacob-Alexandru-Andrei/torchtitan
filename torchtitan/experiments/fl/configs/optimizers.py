@@ -59,6 +59,9 @@ class DesLocStreamingConfig:
     custom_fragments: tuple[tuple[str, ...], ...] | list[list[str]] | None = None
     """Optional explicit fragment specification (list of name globs per fragment)."""
 
+    optimizer_state_schedule: Literal["aligned", "staggered"] = "aligned"
+    """How optimizer states are scheduled relative to parameter fragments."""
+
 
 @dataclass
 class DesLocConfig:

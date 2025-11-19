@@ -1597,9 +1597,11 @@ class StreamingDesLocController:
         self._inner_step = 0
         self._state_cursor = 0
         self._optimizer_state_log_emitted = False
+        self._optimizer_state_schedule = streaming.optimizer_state_schedule
 
         self._state_fragments_per_fragment: list[list[_StreamingOptimizerStateFragment]] = []
         self._is_opt_init = False
+        self._fragments_synced_this_step: set[int] = set()
 
         self._register_state_dict_functions()
         self._log_parameter_fragment_assignments()
@@ -1774,6 +1776,7 @@ class StreamingDesLocController:
         )
         fragment.perform_sync()
         entry.pending = False
+        self._fragments_synced_this_step.add(fragment.fragment_id)
         entry.advance(self._sync_window)
 
     def _step_pre_hook(
@@ -1796,12 +1799,20 @@ class StreamingDesLocController:
         self._inner_step += 1
         self._drive_fragment_schedule()
 
-        if not self._fragments:
+        if not self._fragments or not self._state_fragments_per_fragment:
+            self._fragments_synced_this_step.clear()
             return
 
-        fragment_idx = self._state_cursor
-        self._sync_state_fragments(fragment_idx)
-        self._state_cursor = (self._state_cursor + 1) % len(self._fragments)
+        synced_fragments = tuple(self._fragments_synced_this_step)
+        self._fragments_synced_this_step.clear()
+
+        if self._optimizer_state_schedule == "aligned":
+            for fragment_idx in synced_fragments:
+                self._aligned_state_sync(fragment_idx)
+            return
+
+        if not synced_fragments:
+            self._drive_staggered_state_schedule()
 
     def _resolve_optimizer_sync_intervals(self, state_keys: Iterable[str]) -> list[int]:
         keys = list(state_keys)
@@ -1903,15 +1914,25 @@ class StreamingDesLocController:
         self._is_opt_init = True
         self._log_optimizer_state_fragment_assignments()
 
-    def _sync_state_fragments(self, fragment_idx: int) -> None:
+    def _sync_state_fragments(self, fragment_idx: int, *, limit_one: bool = False) -> None:
         if not self._state_fragments_per_fragment:
+            return
+        if fragment_idx >= len(self._state_fragments_per_fragment):
             return
 
         candidates = self._state_fragments_per_fragment[fragment_idx]
-        ready = [fragment for fragment in candidates if fragment.tick()]
-        if not ready:
-            return
+        ready: list[_StreamingOptimizerStateFragment] = []
+        for fragment in candidates:
+            if fragment.tick():
+                ready.append(fragment)
+                if limit_one:
+                    break
 
+        self._execute_state_sync_batch(ready)
+
+    def _execute_state_sync_batch(self, fragments: list[_StreamingOptimizerStateFragment]) -> None:
+        if not fragments:
+            return
         try:
             self._manager.start_quorum(
                 allow_heal=False,
@@ -1924,16 +1945,47 @@ class StreamingDesLocController:
                 self._quorum_timeout.total_seconds(),
             )
             self._manager.report_error(err)
-            for fragment in ready:
+            for fragment in fragments:
                 fragment.restore_state()
                 fragment.reset()
             return
 
-        for fragment in ready:
+        for fragment in fragments:
             fragment.prepare_sync()
-        for fragment in ready:
+        for fragment in fragments:
             fragment.perform_sync()
             fragment.reset()
+
+    def _aligned_state_sync(self, fragment_idx: int) -> None:
+        if not self._state_fragments_per_fragment:
+            return
+        if fragment_idx >= len(self._state_fragments_per_fragment):
+            return
+
+        states = self._state_fragments_per_fragment[fragment_idx]
+        if not states:
+            return
+
+        fragment = self._fragments[fragment_idx]
+        offset = fragment.fragment_sync_offset
+        current_step = self._inner_step
+        if current_step < offset:
+            return
+
+        ready: list[_StreamingOptimizerStateFragment] = []
+        for state_fragment in states:
+            interval = max(1, state_fragment.sync_every)
+            if (current_step - offset) % interval == 0:
+                ready.append(state_fragment)
+
+        self._execute_state_sync_batch(ready)
+
+    def _drive_staggered_state_schedule(self) -> None:
+        if not self._state_fragments_per_fragment or not self._fragments:
+            return
+        fragment_idx = self._state_cursor
+        self._sync_state_fragments(fragment_idx, limit_one=True)
+        self._state_cursor = (self._state_cursor + 1) % len(self._fragments)
 
     def _log_optimizer_state_fragment_assignments(self) -> None:
         if self._optimizer_state_log_emitted:

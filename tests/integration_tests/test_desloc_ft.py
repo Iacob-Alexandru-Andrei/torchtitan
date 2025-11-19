@@ -81,6 +81,7 @@ class _TestStreamingConfig:
     fragment_strategy: str = "strided"
     fragment_sync_offsets: list[int] | None = None
     custom_fragments: list[list[str]] | None = None
+    optimizer_state_schedule: str = "aligned"
 
 
 class _TestDeslocConfig:
