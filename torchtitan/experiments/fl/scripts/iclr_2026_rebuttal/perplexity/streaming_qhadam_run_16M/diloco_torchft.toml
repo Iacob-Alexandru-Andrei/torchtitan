@@ -61,7 +61,7 @@ update_alpha = 0.5
 target = "SGD"
 
 [optimizer.desloc.outer_optimizer.kwargs]
-lr = 1.0          
+lr = 0.4          
 momentum = 0.9   
 nesterov = true
 
