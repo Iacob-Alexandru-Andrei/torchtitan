@@ -1,331 +1,1116 @@
-#!/usr/bin/env bash
-# Launch the AdeMaMix TorchFT (\"mt_dao\") experiment with TorchFT replicas.
-set -euo pipefail
 
-SCRIPT_PATH=$(realpath "${BASH_SOURCE[0]}")
-SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
-USE_SBATCH=${USE_SBATCH:-false}
-DRY_RUN=${DRY_RUN:-false}
-SBATCH_CPUS_PER_TASK=${SBATCH_CPUS_PER_TASK:-32}
-SBATCH_GPUS_PER_TASK=${SBATCH_GPUS_PER_TASK:-4}
-SBATCH_MEM=${SBATCH_MEM:-}
-SBATCH_TIME=${SBATCH_TIME:-}
-SBATCH_PARTITION=${SBATCH_PARTITION:-}
-SBATCH_ACCOUNT=${SBATCH_ACCOUNT:-}
-SBATCH_QOS=${SBATCH_QOS:-}
-SBATCH_CONSTRAINT=${SBATCH_CONSTRAINT:-}
-SBATCH_COMMENT=${SBATCH_COMMENT:-}
-SBATCH_NODE=${SBATCH_NODE:-}
-SBATCH_LOG_DIR=${SBATCH_LOG_DIR:-"${SCRIPT_DIR}/logs"}
-SBATCH_ADDITIONAL_ARGS=${SBATCH_ADDITIONAL_ARGS:-}
 
-usage() {
-  cat <<'EOF'
-Usage: mt_dao_torchft.sh [--sbatch|--no-sbatch] [--dry-run] [-- ...training args...]
-EOF
-}
 
-normalize_bool() {
-  local value="${1:-}"
-  case "${value,,}" in
-    true|1|yes|on) echo "true" ;;
-    false|0|no|off|"") echo "false" ;;
-    *) echo "${value,,}" ;;
-  esac
-}
 
-serialize_command() {
-  if (( $# == 0 )); then
-    echo ""
-    return
-  fi
-  local args=("$@")
-  local serialized
-  serialized=$(printf '%q' "${args[0]}")
-  for ((i=1; i<${#args[@]}; i++)); do
-    serialized+=" $(printf '%q' "${args[i]}")"
-  done
-  printf '%s' "${serialized}"
-}
 
-POSITIONAL_ARGS=()
-while [[ $# -gt 0 ]]; do
-  case "$1" in
-    --sbatch)
-      USE_SBATCH=true
-      shift
-      ;;
-    --no-sbatch)
-      USE_SBATCH=false
-      shift
-      ;;
-    --dry-run)
-      DRY_RUN=true
-      shift
-      ;;
-    -h|--help)
-      usage
-      exit 0
-      ;;
-    --)
-      shift
-      POSITIONAL_ARGS+=("$@")
-      break
-      ;;
-    *)
-      POSITIONAL_ARGS+=("$1")
-      shift
-      ;;
-  esac
-done
 
-USE_SBATCH=$(normalize_bool "${USE_SBATCH}")
-DRY_RUN=$(normalize_bool "${DRY_RUN}")
-if [[ -n "${SLURM_SUBMIT_DIR:-}" ]]; then
-  REPO_ROOT=$(cd -- "${SLURM_SUBMIT_DIR}" && pwd -P)
-else
-  REPO_ROOT=$(cd -- "${SCRIPT_DIR}/../../../../../../.." && pwd -P)
-fi
-cd "${REPO_ROOT}"
-export REPO_ROOT
+[job]
+dump_folder = "./outputs"
+description = "Llama 3 debug training with Mosaic streaming"
+print_args = false
 
-# Remove stale shared-memory artifacts owned by the current user.
-find /dev/shm -maxdepth 1 -user "${USER}" -exec rm -rf {} + 2>/dev/null || true
+[profiling]
+enable_profiling = false
+save_traces_folder = "profile_trace"
+profile_freq = 10
+enable_memory_snapshot = false
+save_memory_snapshot_folder = "memory_snapshot"
 
-export S3_ENDPOINT_URL=${S3_ENDPOINT_URL:-'http://taranaki.cl.cam.ac.uk:9000'}
-if [[ -z "${PYTHONPATH:-}" ]]; then
-  export PYTHONPATH="${REPO_ROOT}"
-else
-  export PYTHONPATH="${REPO_ROOT}:${PYTHONPATH}"
-fi
+[metrics]
+log_freq = 1
+disable_color_printing = false
+enable_tensorboard = false
+save_tb_folder = "tb"
+enable_wandb = true
+save_for_all_ranks = true
 
-CONFIG_FILE=${CONFIG_FILE:-"${SCRIPT_DIR}/base_torchft.toml"}
-TRAIN_MODULE=${TRAIN_MODULE:-"torchtitan.experiments.fl.train"}
-NGPU=${NGPU:-4}
-MIN_REPLICAS=${MIN_REPLICAS:-${NGPU}}
-QUORUM_TICK_MS=${QUORUM_TICK_MS:-100}
+[model]
+name = "mosaic_llama3_mup"
+flavor = "16M"
+# test folder with tokenizer.json, for debug purpose only
+hf_assets_path = "./tests/assets/tokenizer"
+# converters = ["float8"]
 
-LIGHTHOUSE_HOST=${LIGHTHOUSE_HOST:-"localhost"}
-LIGHTHOUSE_PORT=${LIGHTHOUSE_PORT:-29510}
-LIGHTHOUSE_URL="http://${LIGHTHOUSE_HOST}:${LIGHTHOUSE_PORT}"
 
-LR_SWITCH_STEP=${LR_SWITCH_STEP:-2049}
-ADEMAMIX_SWITCH_SCALE=${ADEMAMIX_SWITCH_SCALE:-2.0}
-ADEMAMIX_NEW_VS=${ADEMAMIX_NEW_VS:-"0.95"}
-ADEMAMIX_NEW_BETAS=${ADEMAMIX_NEW_BETAS:-"0.9 0.999"}
-ADEMAMIX_RESET_MOMENTA=${ADEMAMIX_RESET_MOMENTA:-"exp_avg exp_avg_2"}
+[optimizer]
+name = "QHAdamW"
+builder = "mosaic"
+lr = 0.001
+eps = 1e-8
+weight_decay = 0.0
+vs = [1.0]
+betas = [0.9, 0.999]
+implementation = "for-loop"
 
-read -r -a ADEMAMIX_NEW_VS_ARRAY <<< "${ADEMAMIX_NEW_VS}"
-read -r -a ADEMAMIX_NEW_BETAS_ARRAY <<< "${ADEMAMIX_NEW_BETAS}"
-read -r -a ADEMAMIX_RESET_MOMENTA_ARRAY <<< "${ADEMAMIX_RESET_MOMENTA}"
 
-TRAINING_ARGS=("${POSITIONAL_ARGS[@]}")
+# [optimizer.desloc]
+# enabled = false
+# param_sync_every = 32
+# optimizer_sync_every = [32,32]
+# backup_device = "cpu"
+# pin_memory = true
 
-if [[ "${USE_SBATCH}" == "true" && -z "${SLURM_JOB_ID:-}" ]]; then
-  mkdir -p "${SBATCH_LOG_DIR}"
-  declare -a sbatch_opts
-  job_name="mt-dao"
-  sbatch_opts+=(--parsable "-c" "${SBATCH_CPUS_PER_TASK}" "--gres=gpu:${SBATCH_GPUS_PER_TASK}" "--job-name=${job_name}")
-  [[ -n "${SBATCH_MEM}" ]] && sbatch_opts+=("--mem=${SBATCH_MEM}")
-  [[ -n "${SBATCH_TIME}" ]] && sbatch_opts+=("--time=${SBATCH_TIME}")
-  [[ -n "${SBATCH_PARTITION}" ]] && sbatch_opts+=("--partition=${SBATCH_PARTITION}")
-  [[ -n "${SBATCH_ACCOUNT}" ]] && sbatch_opts+=("--account=${SBATCH_ACCOUNT}")
-  [[ -n "${SBATCH_QOS}" ]] && sbatch_opts+=("--qos=${SBATCH_QOS}")
-  [[ -n "${SBATCH_CONSTRAINT}" ]] && sbatch_opts+=("--constraint=${SBATCH_CONSTRAINT}")
-  [[ -n "${SBATCH_COMMENT}" ]] && sbatch_opts+=("--comment=${SBATCH_COMMENT}")
-  [[ -n "${SBATCH_NODE}" ]] && sbatch_opts+=("--nodelist=${SBATCH_NODE}")
-  sbatch_opts+=("--output=${SBATCH_LOG_DIR}/%j-mtdao.out" "--error=${SBATCH_LOG_DIR}/%j-mtdao.err")
-  read -r -a sbatch_extra_array <<< "${SBATCH_ADDITIONAL_ARGS}"
-  sbatch_opts+=("${sbatch_extra_array[@]:-}")
+[fl_metrics.optimizer_monitor]
+interval = 16
+only_global = false
+log_metrics = true
 
-  child_cmd=("${SCRIPT_PATH}" "--no-sbatch")
-  [[ "${DRY_RUN}" == "true" ]] && child_cmd+=("--dry-run")
-  if (( ${#TRAINING_ARGS[@]} )); then
-    child_cmd+=("--")
-    child_cmd+=("${TRAINING_ARGS[@]}")
-  fi
-  CHILD_CMD_ESCAPED=$(serialize_command "${child_cmd[@]}")
+[fl_metrics.activation_monitor]
+interval = 16
+ignore_module_types = ["dropout", "ln"]
 
-  SBATCH_JOB_BODY=$(cat <<EOF
-#!/usr/bin/env bash
-set -euo pipefail
-echo "==================================================================="
-echo "STARTING SBATCH JOB: ${job_name} (ID: \$SLURM_JOB_ID)"
-echo "Node: \$(hostname) at \$(date)"
-echo "Command: ${CHILD_CMD_ESCAPED}"
-echo "==================================================================="
-export USE_SBATCH=false
-${CHILD_CMD_ESCAPED}
-echo "JOB FINISHED: \$(date)"
-EOF
-)
+[fl_metrics.lr_monitor]
+enabled = true
+interval = 16
 
-  if [[ "${DRY_RUN}" == "true" ]]; then
-    printf '[MT-DAO] sbatch %s <<EOF\n%s\nEOF\n' "${sbatch_opts[*]}" "${SBATCH_JOB_BODY}"
-    exit 0
-  fi
+[fl_metrics.betas_monitor]
+enabled = true
+interval = 16
 
-  job_id=$(sbatch "${sbatch_opts[@]}" <<EOF
-${SBATCH_JOB_BODY}
-EOF
-)
-  status=$?
-  if (( status != 0 )); then
-    echo "Failed to submit sbatch job (exit ${status})." >&2
-    exit "${status}"
-  fi
-  echo "[MT-DAO] Submitted job ${job_id}"
-  exit 0
-fi
+[fl_metrics.vs_monitor]
+enabled = true
+interval = 16
 
-if [[ "${USE_SBATCH}" == "true" && -n "${SLURM_JOB_ID:-}" ]]; then
-  USE_SBATCH=false
-fi
+[lr_scheduler]
+warmup_steps = 2048  # lr scheduler warm up, normally 20% of the train steps
+decay_ratio = 0.0  # lr scheduler decay ratio, 80% of the train steps
+decay_type = "sqrt"
+min_lr_factor = 0.0
+switch_step = 2049
+switch_scale = 2.0
 
-LOG_DIR="${REPO_ROOT}/outputs/torchft_logs"
-mkdir -p "${LOG_DIR}"
-LIGHTHOUSE_LOG_FILE="${LOG_DIR}/lighthouse.log"
+[fl_metrics.hyperparameter_switch]
+enabled = true
+steps = [2049]
+new_vs = [0.95]
+new_betas = [0.9,0.999]
+reset_momenta = ["exp_avg","exp_avg_2"]
 
-TIMESTAMP=$(date +"%Y%m%d-%H%M%S")
-RUN_PREFIX=${RUN_PREFIX:-"iclr2026-qhmtdao16m"}
-export RUN_UUID=${RUN_UUID:-"${RUN_PREFIX}-${TIMESTAMP}"}
-export WANDB_PROJECT=${WANDB_PROJECT:-"torchtitan_streaming"}
-export WANDB_TEAM=${WANDB_TEAM:-"camlsys"}
-export WANDB_RUN_NAME="${RUN_UUID}"
-export TORCHTITAN_WANDB_BASE_RUN_NAME="${RUN_UUID}"
-export TORCHTITAN_FORCE_WANDB_WORKER_SUFFIX=${TORCHTITAN_FORCE_WANDB_WORKER_SUFFIX:-1}
+[training]
+local_batch_size = 16
+global_batch_size = 64
+seq_len = 2048
+max_norm = 1.0  # grad norm clipping
+steps = 40960
+dataset = "c4_test"  # supported datasets: c4_test (2K), c4 (177M)
 
-echo "=========================================="
-echo "TorchFT AdeMaMix Launch"
-echo "=========================================="
-echo "Repo root: ${REPO_ROOT}"
-echo "Config   : ${CONFIG_FILE}"
-echo "Replicas : ${NGPU}"
-echo "Lighthouse: ${LIGHTHOUSE_URL}"
-echo "Log dir  : ${LOG_DIR}"
-echo "=========================================="
 
-declare -a REPLICA_PIDS=()
-LIGHTHOUSE_PID=""
+[parallelism]
+data_parallel_replicate_degree = 1
+data_parallel_shard_degree = -1
+fsdp_reshard_after_forward = "default" # default / never / always
+tensor_parallel_degree = 1
+enable_async_tensor_parallel = false
+pipeline_parallel_degree = 1
+context_parallel_degree = 1
 
-cleanup() {
-  set +e
-  for pid in "${REPLICA_PIDS[@]:-}"; do
-    if [[ -n "${pid}" ]] && kill -0 "${pid}" 2>/dev/null; then
-      kill "${pid}" 2>/dev/null || true
-      wait "${pid}" 2>/dev/null || true
-    fi
-  done
-  if [[ -n "${LIGHTHOUSE_PID}" ]] && kill -0 "${LIGHTHOUSE_PID}" 2>/dev/null; then
-    kill "${LIGHTHOUSE_PID}" 2>/dev/null || true
-    wait "${LIGHTHOUSE_PID}" 2>/dev/null || true
-  fi
-  set -e
-}
-trap cleanup EXIT INT TERM
+[checkpoint]
+enable = true
+keep_latest_k = 20
+folder = "checkpoints"
+interval = 2048
+last_save_model_only = false
+export_dtype = "float32"
+async_mode = "async_with_pinned_mem"  # ["disabled", "async", "async_with_pinned_mem"]
 
-echo "[Lighthouse] starting at ${LIGHTHOUSE_URL}"
-uv run --no-sync torchft_lighthouse \
-  --min_replicas "${MIN_REPLICAS}" \
-  --quorum_tick_ms "${QUORUM_TICK_MS}" \
-  --bind "${LIGHTHOUSE_HOST}:${LIGHTHOUSE_PORT}" \
-  > "${LIGHTHOUSE_LOG_FILE}" 2>&1 &
-LIGHTHOUSE_PID=$!
-sleep 2
-if ! kill -0 "${LIGHTHOUSE_PID}" 2>/dev/null; then
-  echo "ERROR: torchft_lighthouse failed to start. Check ${LIGHTHOUSE_LOG_FILE}" >&2
-  exit 1
-fi
-echo "Lighthouse PID: ${LIGHTHOUSE_PID}"
+[s3_checkpoint]
+enable = true
+bucket = "checkpoints"
+prefix = ""  # Root of bucket
+download_on_start = true
+resume_from_run_step = "iclr2026-adamw16m-20251115-020141/step-2048"
+# run_uuid and remote_checkpoint_folder will be set via RUN_UUID environment variable
 
-export TORCHFT_LIGHTHOUSE="${LIGHTHOUSE_URL}"
+[activation_checkpoint]
+mode = "selective"  # ["none", "selective", "full"]
+selective_ac_option = '2'  # 'int' = ac every positive int layer or 'op', ac based on ops policy
 
-AVAILABLE_GPUS=()
-if [[ -n "${CUDA_VISIBLE_DEVICES:-}" ]]; then
-  IFS=',' read -r -a AVAILABLE_GPUS <<< "${CUDA_VISIBLE_DEVICES}"
-else
-  for ((i=0; i<NGPU; i++)); do
-    AVAILABLE_GPUS+=("${i}")
-  done
-fi
+[compile]
+enable=false
+components = ["model", "loss"]
 
-if (( ${#AVAILABLE_GPUS[@]} < NGPU )); then
-  echo "ERROR: Requested ${NGPU} replicas but only ${#AVAILABLE_GPUS[@]} GPU(s) available." >&2
-  exit 1
-fi
+[quantize.linear.float8]
+enable_fsdp_float8_all_gather = false
+precompute_float8_dynamic_scale_for_fsdp = false
+filter_fqns = ["output"]
 
-REPLICA_GPUS=("${AVAILABLE_GPUS[@]:0:NGPU}")
-for ((i=0; i<NGPU; i++)); do
-  echo "Replica ${i} -> GPU ${REPLICA_GPUS[$i]}"
-done
+[fault_tolerance]
+enable = false
+process_group = "gloo"
+process_group_timeout_ms = 999999
+replica_id = 0
+group_size = 2
+min_replica_size = 2
+sync_steps = 32
+semi_sync_method = "desloc"  # Options: "diloco", "local_sgd", or comment out for async quorum
 
-for ((replica_id=0; replica_id<NGPU; replica_id++)); do
-  gpu_id="${REPLICA_GPUS[$replica_id]}"
-  log_file="${LOG_DIR}/replica_${replica_id}.log"
-  echo "[Replica ${replica_id}] logging to ${log_file}"
+[validation]
+enable = false
+dataset = "c4_validation"
+local_batch_size = 4
+freq = 2048
+steps = 32
 
-  (
-    set -euo pipefail
-    cd "${REPO_ROOT}"
-    export CUDA_VISIBLE_DEVICES="${gpu_id}"
-    export PYTORCH_ALLOC_CONF="expandable_segments:True"
-    rdzv_port=$((29600 + replica_id))
-    uv run --no-sync torchrun \
-      --nproc_per_node=1 \
-      --rdzv_backend=c10d \
-      --rdzv_endpoint="localhost:${rdzv_port}" \
-      --role rank \
-      --tee 3 \
-      -m "${TRAIN_MODULE}" \
-      --job.config_file "${CONFIG_FILE}" \
-      --run_uuid "${RUN_UUID}" \
-      --fault_tolerance.replica_id "${replica_id}" \
-      --fault_tolerance.group_size "${NGPU}" \
-      --fault_tolerance.min_replica_size "${MIN_REPLICAS}" \
-      --lr_scheduler.switch_step "${LR_SWITCH_STEP}" \
-      --lr_scheduler.switch_scale "${ADEMAMIX_SWITCH_SCALE}" \
-      --fl_metrics.hyperparameter_switch.steps "${LR_SWITCH_STEP}" \
-      --fl_metrics.hyperparameter_switch.new_vs "${ADEMAMIX_NEW_VS_ARRAY[@]}" \
-      --fl_metrics.hyperparameter_switch.new_betas "${ADEMAMIX_NEW_BETAS_ARRAY[@]}" \
-      --fl_metrics.hyperparameter_switch.reset_momenta "${ADEMAMIX_RESET_MOMENTA_ARRAY[@]}" \
-      "${TRAINING_ARGS[@]}"
-  ) > "${log_file}" 2>&1 &
-  REPLICA_PIDS[$replica_id]=$!
-  sleep 1
-done
+[unigram_metric]
+enable = true
+download_missing = true
+allow_failures = false
+ignore_index = -100
+num_attempts = 1
 
-echo ""
-echo "Lighthouse log: tail -f ${LIGHTHOUSE_LOG_FILE}"
-for ((i=0; i<NGPU; i++)); do
-  echo "Replica ${i} log: tail -f ${LOG_DIR}/replica_${i}.log"
-done
-echo ""
 
-set +e
-REPLICA_EXIT=0
-for ((replica_id=0; replica_id<NGPU; replica_id++)); do
-  pid=${REPLICA_PIDS[$replica_id]}
-  if wait "${pid}"; then
-    echo "Replica ${replica_id} completed successfully."
-  else
-    status=$?
-    echo "Replica ${replica_id} exited with status ${status}."
-    REPLICA_EXIT=${status}
-  fi
-done
-set -e
+[mosaic_tokenizer]
+name = "HuggingFaceTB/SmolLM-1.7B"
 
-if [[ -n "${LIGHTHOUSE_PID}" ]] && kill -0 "${LIGHTHOUSE_PID}" 2>/dev/null; then
-  echo "Stopping lighthouse..."
-  kill "${LIGHTHOUSE_PID}" 2>/dev/null || true
-  wait "${LIGHTHOUSE_PID}" 2>/dev/null || true
-  LIGHTHOUSE_PID=""
-fi
+[mosaic_tokenizer.kwargs]
+model_max_length = 2048
 
-if (( REPLICA_EXIT == 0 )); then
-  echo "All replicas completed successfully!"
-else
-  echo "Some replicas failed. Check logs in ${LOG_DIR}/"
-fi
+# Mosaic-specific configurations are now at the root level
+[mosaic_dataloader]
+name = "text"
+num_workers = 0
+# prefetch_factor = 2
+pin_memory = true
+persistent_workers = false
+isolate_grouped_streams = true
 
-exit "${REPLICA_EXIT}"
+[mosaic_dataloader.dataset.common]
+max_seq_len = 2048
+download_retry = 2
+download_timeout = 60
+keep_zip = false
+partition_algo = "relaxed"
+shuffle = true
+shuffle_algo = "py1e"
+shuffle_seed = 9176
+sampling_method = "balanced"
+sampling_granularity = 1
+batching_method = "random"
+
+[mosaic_dataloader.dataset.train]
+split = "train"
+root_remote = "s3://smollm-corpus/shared"
+root_local = "/home/ubuntu/nfs-share/datasets/photon/dataset_cache/smollm-corpus-shared"
+sampling_groups_mode = "grouped"  # set to "concatenate" to merge all sampling groups
+
+[mosaic_dataloader.dataset.train.streams.client_streams.stream_0]
+local = "fineweb_edu_dedup/client_0"
+remote = "fineweb_edu_dedup/client_0"
+proportion = 70
+
+[mosaic_dataloader.dataset.train.streams.client_streams.stream_1]
+local = "fineweb_edu_dedup/client_1"
+remote = "fineweb_edu_dedup/client_1"
+proportion = 70
+
+[mosaic_dataloader.dataset.train.streams.client_streams.stream_2]
+local = "fineweb_edu_dedup/client_2"
+remote = "fineweb_edu_dedup/client_2"
+proportion = 70
+
+[mosaic_dataloader.dataset.train.streams.client_streams.stream_3]
+local = "fineweb_edu_dedup/client_3"
+remote = "fineweb_edu_dedup/client_3"
+proportion = 70
+
+[mosaic_dataloader.dataset.train.streams.client_streams.stream_4]
+local = "cosmo/client_0"
+remote = "cosmo/client_0"
+proportion = 10
+
+
+[mosaic_dataloader.dataset.train.streams.client_streams.stream_5]
+local = "cosmo/client_1"
+remote = "cosmo/client_1"
+proportion = 10
+
+[mosaic_dataloader.dataset.train.streams.client_streams.stream_6]
+local = "cosmo/client_2"
+remote = "cosmo/client_2"
+proportion = 10
+
+[mosaic_dataloader.dataset.train.streams.client_streams.stream_7]
+local = "cosmo/client_3"
+remote = "cosmo/client_3"
+proportion = 10
+
+[mosaic_dataloader.dataset.train.streams.client_streams.stream_8]
+local = "python_edu/client_0"
+remote = "python_edu/client_0"
+proportion = 10
+
+[mosaic_dataloader.dataset.train.streams.client_streams.stream_9]
+local = "python_edu/client_1"
+remote = "python_edu/client_1"
+proportion = 10
+
+[mosaic_dataloader.dataset.train.streams.client_streams.stream_10]
+local = "python_edu/client_2"
+remote = "python_edu/client_2"
+proportion = 10
+
+[mosaic_dataloader.dataset.train.streams.client_streams.stream_11]
+local = "python_edu/client_3"
+remote = "python_edu/client_3"
+proportion = 10
+
+[mosaic_dataloader.dataset.train.streams.client_streams.stream_12]
+local = "fine_math_4plus/client_0"
+remote = "fine_math_4plus/client_0"
+proportion = 5
+
+[mosaic_dataloader.dataset.train.streams.client_streams.stream_13]
+local = "fine_math_4plus/client_1"
+remote = "fine_math_4plus/client_1"
+proportion = 5
+
+[mosaic_dataloader.dataset.train.streams.client_streams.stream_14]
+local = "fine_math_4plus/client_2"
+remote = "fine_math_4plus/client_2"
+proportion = 5
+
+[mosaic_dataloader.dataset.train.streams.client_streams.stream_15]
+local = "fine_math_4plus/client_3"
+remote = "fine_math_4plus/client_3"
+proportion = 5
+
+
+[mosaic_dataloader.dataset.train.streams.client_streams.stream_16]
+local = "infiwebmath_4plus/client_0"
+remote = "infiwebmath_4plus/client_0"
+proportion = 5
+
+[mosaic_dataloader.dataset.train.streams.client_streams.stream_17]
+local = "infiwebmath_4plus/client_1"
+remote = "infiwebmath_4plus/client_1"
+proportion = 5
+
+[mosaic_dataloader.dataset.train.streams.client_streams.stream_18]
+local = "infiwebmath_4plus/client_2"
+remote = "infiwebmath_4plus/client_2"
+proportion = 5
+
+[mosaic_dataloader.dataset.train.streams.client_streams.stream_19]
+local = "infiwebmath_4plus/client_3"
+remote = "infiwebmath_4plus/client_3"
+proportion = 5
+
+[mosaic_dataloader.dataset.train.streams.client_streams.stream_20]
+local = "fineweb_edu_dedup/client_4"
+remote = "fineweb_edu_dedup/client_4"
+proportion = 70
+
+[mosaic_dataloader.dataset.train.streams.client_streams.stream_21]
+local = "fineweb_edu_dedup/client_5"
+remote = "fineweb_edu_dedup/client_5"
+proportion = 70
+
+[mosaic_dataloader.dataset.train.streams.client_streams.stream_22]
+local = "fineweb_edu_dedup/client_6"
+remote = "fineweb_edu_dedup/client_6"
+proportion = 70
+
+[mosaic_dataloader.dataset.train.streams.client_streams.stream_23]
+local = "fineweb_edu_dedup/client_7"
+remote = "fineweb_edu_dedup/client_7"
+proportion = 70
+
+[mosaic_dataloader.dataset.train.streams.client_streams.stream_24]
+local = "cosmo/client_4"
+remote = "cosmo/client_4"
+proportion = 10
+
+[mosaic_dataloader.dataset.train.streams.client_streams.stream_25]
+local = "cosmo/client_5"
+remote = "cosmo/client_5"
+proportion = 10
+
+[mosaic_dataloader.dataset.train.streams.client_streams.stream_26]
+local = "cosmo/client_6"
+remote = "cosmo/client_6"
+proportion = 10
+
+[mosaic_dataloader.dataset.train.streams.client_streams.stream_27]
+local = "cosmo/client_7"
+remote = "cosmo/client_7"
+proportion = 10
+
+[mosaic_dataloader.dataset.train.streams.client_streams.stream_28]
+local = "python_edu/client_4"
+remote = "python_edu/client_4"
+proportion = 10
+
+[mosaic_dataloader.dataset.train.streams.client_streams.stream_29]
+local = "python_edu/client_5"
+remote = "python_edu/client_5"
+proportion = 10
+
+[mosaic_dataloader.dataset.train.streams.client_streams.stream_30]
+local = "python_edu/client_6"
+remote = "python_edu/client_6"
+proportion = 10
+
+[mosaic_dataloader.dataset.train.streams.client_streams.stream_31]
+local = "python_edu/client_7"
+remote = "python_edu/client_7"
+proportion = 10
+
+[mosaic_dataloader.dataset.train.streams.client_streams.stream_32]
+local = "fine_math_4plus/client_4"
+remote = "fine_math_4plus/client_4"
+proportion = 5
+
+[mosaic_dataloader.dataset.train.streams.client_streams.stream_33]
+local = "fine_math_4plus/client_5"
+remote = "fine_math_4plus/client_5"
+proportion = 5
+
+[mosaic_dataloader.dataset.train.streams.client_streams.stream_34]
+local = "fine_math_4plus/client_6"
+remote = "fine_math_4plus/client_6"
+proportion = 5
+
+[mosaic_dataloader.dataset.train.streams.client_streams.stream_35]
+local = "fine_math_4plus/client_7"
+remote = "fine_math_4plus/client_7"
+proportion = 5
+
+[mosaic_dataloader.dataset.train.streams.client_streams.stream_36]
+local = "infiwebmath_4plus/client_4"
+remote = "infiwebmath_4plus/client_4"
+proportion = 5
+
+[mosaic_dataloader.dataset.train.streams.client_streams.stream_37]
+local = "infiwebmath_4plus/client_5"
+remote = "infiwebmath_4plus/client_5"
+proportion = 5
+
+[mosaic_dataloader.dataset.train.streams.client_streams.stream_38]
+local = "infiwebmath_4plus/client_6"
+remote = "infiwebmath_4plus/client_6"
+proportion = 5
+
+[mosaic_dataloader.dataset.train.streams.client_streams.stream_39]
+local = "infiwebmath_4plus/client_7"
+remote = "infiwebmath_4plus/client_7"
+proportion = 5
+
+[mosaic_dataloader.dataset.train.streams.client_streams.stream_40]
+local = "fineweb_edu_dedup/client_8"
+remote = "fineweb_edu_dedup/client_8"
+proportion = 70
+
+[mosaic_dataloader.dataset.train.streams.client_streams.stream_41]
+local = "fineweb_edu_dedup/client_9"
+remote = "fineweb_edu_dedup/client_9"
+proportion = 70
+
+[mosaic_dataloader.dataset.train.streams.client_streams.stream_42]
+local = "fineweb_edu_dedup/client_10"
+remote = "fineweb_edu_dedup/client_10"
+proportion = 70
+
+[mosaic_dataloader.dataset.train.streams.client_streams.stream_43]
+local = "fineweb_edu_dedup/client_11"
+remote = "fineweb_edu_dedup/client_11"
+proportion = 70
+
+[mosaic_dataloader.dataset.train.streams.client_streams.stream_44]
+local = "cosmo/client_8"
+remote = "cosmo/client_8"
+proportion = 10
+
+[mosaic_dataloader.dataset.train.streams.client_streams.stream_45]
+local = "cosmo/client_9"
+remote = "cosmo/client_9"
+proportion = 10
+
+[mosaic_dataloader.dataset.train.streams.client_streams.stream_46]
+local = "cosmo/client_10"
+remote = "cosmo/client_10"
+proportion = 10
+
+[mosaic_dataloader.dataset.train.streams.client_streams.stream_47]
+local = "cosmo/client_11"
+remote = "cosmo/client_11"
+proportion = 10
+
+[mosaic_dataloader.dataset.train.streams.client_streams.stream_48]
+local = "python_edu/client_8"
+remote = "python_edu/client_8"
+proportion = 10
+
+[mosaic_dataloader.dataset.train.streams.client_streams.stream_49]
+local = "python_edu/client_9"
+remote = "python_edu/client_9"
+proportion = 10
+
+[mosaic_dataloader.dataset.train.streams.client_streams.stream_50]
+local = "python_edu/client_10"
+remote = "python_edu/client_10"
+proportion = 10
+
+[mosaic_dataloader.dataset.train.streams.client_streams.stream_51]
+local = "python_edu/client_11"
+remote = "python_edu/client_11"
+proportion = 10
+
+[mosaic_dataloader.dataset.train.streams.client_streams.stream_52]
+local = "fine_math_4plus/client_8"
+remote = "fine_math_4plus/client_8"
+proportion = 5
+
+[mosaic_dataloader.dataset.train.streams.client_streams.stream_53]
+local = "fine_math_4plus/client_9"
+remote = "fine_math_4plus/client_9"
+proportion = 5
+
+[mosaic_dataloader.dataset.train.streams.client_streams.stream_54]
+local = "fine_math_4plus/client_10"
+remote = "fine_math_4plus/client_10"
+proportion = 5
+
+[mosaic_dataloader.dataset.train.streams.client_streams.stream_55]
+local = "fine_math_4plus/client_11"
+remote = "fine_math_4plus/client_11"
+proportion = 5
+
+[mosaic_dataloader.dataset.train.streams.client_streams.stream_56]
+local = "infiwebmath_4plus/client_8"
+remote = "infiwebmath_4plus/client_8"
+proportion = 5
+
+[mosaic_dataloader.dataset.train.streams.client_streams.stream_57]
+local = "infiwebmath_4plus/client_9"
+remote = "infiwebmath_4plus/client_9"
+proportion = 5
+
+[mosaic_dataloader.dataset.train.streams.client_streams.stream_58]
+local = "infiwebmath_4plus/client_10"
+remote = "infiwebmath_4plus/client_10"
+proportion = 5
+
+[mosaic_dataloader.dataset.train.streams.client_streams.stream_59]
+local = "infiwebmath_4plus/client_11"
+remote = "infiwebmath_4plus/client_11"
+proportion = 5
+
+[mosaic_dataloader.dataset.train.streams.client_streams.stream_60]
+local = "fineweb_edu_dedup/client_12"
+remote = "fineweb_edu_dedup/client_12"
+proportion = 70
+
+[mosaic_dataloader.dataset.train.streams.client_streams.stream_61]
+local = "fineweb_edu_dedup/client_13"
+remote = "fineweb_edu_dedup/client_13"
+proportion = 70
+
+[mosaic_dataloader.dataset.train.streams.client_streams.stream_62]
+local = "fineweb_edu_dedup/client_14"
+remote = "fineweb_edu_dedup/client_14"
+proportion = 70
+
+[mosaic_dataloader.dataset.train.streams.client_streams.stream_63]
+local = "fineweb_edu_dedup/client_15"
+remote = "fineweb_edu_dedup/client_15"
+proportion = 70
+
+[mosaic_dataloader.dataset.train.streams.client_streams.stream_64]
+local = "cosmo/client_12"
+remote = "cosmo/client_12"
+proportion = 10
+
+[mosaic_dataloader.dataset.train.streams.client_streams.stream_65]
+local = "cosmo/client_13"
+remote = "cosmo/client_13"
+proportion = 10
+
+[mosaic_dataloader.dataset.train.streams.client_streams.stream_66]
+local = "cosmo/client_14"
+remote = "cosmo/client_14"
+proportion = 10
+
+[mosaic_dataloader.dataset.train.streams.client_streams.stream_67]
+local = "cosmo/client_15"
+remote = "cosmo/client_15"
+proportion = 10
+
+[mosaic_dataloader.dataset.train.streams.client_streams.stream_68]
+local = "python_edu/client_12"
+remote = "python_edu/client_12"
+proportion = 10
+
+[mosaic_dataloader.dataset.train.streams.client_streams.stream_69]
+local = "python_edu/client_13"
+remote = "python_edu/client_13"
+proportion = 10
+
+[mosaic_dataloader.dataset.train.streams.client_streams.stream_70]
+local = "python_edu/client_14"
+remote = "python_edu/client_14"
+proportion = 10
+
+[mosaic_dataloader.dataset.train.streams.client_streams.stream_71]
+local = "python_edu/client_15"
+remote = "python_edu/client_15"
+proportion = 10
+
+[mosaic_dataloader.dataset.train.streams.client_streams.stream_72]
+local = "fine_math_4plus/client_12"
+remote = "fine_math_4plus/client_12"
+proportion = 5
+
+[mosaic_dataloader.dataset.train.streams.client_streams.stream_73]
+local = "fine_math_4plus/client_13"
+remote = "fine_math_4plus/client_13"
+proportion = 5
+
+[mosaic_dataloader.dataset.train.streams.client_streams.stream_74]
+local = "fine_math_4plus/client_14"
+remote = "fine_math_4plus/client_14"
+proportion = 5
+
+[mosaic_dataloader.dataset.train.streams.client_streams.stream_75]
+local = "fine_math_4plus/client_15"
+remote = "fine_math_4plus/client_15"
+proportion = 5
+
+[mosaic_dataloader.dataset.train.streams.client_streams.stream_76]
+local = "infiwebmath_4plus/client_12"
+remote = "infiwebmath_4plus/client_12"
+proportion = 5
+
+[mosaic_dataloader.dataset.train.streams.client_streams.stream_77]
+local = "infiwebmath_4plus/client_13"
+remote = "infiwebmath_4plus/client_13"
+proportion = 5
+
+[mosaic_dataloader.dataset.train.streams.client_streams.stream_78]
+local = "infiwebmath_4plus/client_14"
+remote = "infiwebmath_4plus/client_14"
+proportion = 5
+
+[mosaic_dataloader.dataset.train.streams.client_streams.stream_79]
+local = "infiwebmath_4plus/client_15"
+remote = "infiwebmath_4plus/client_15"
+proportion = 5
+
+[mosaic_dataloader.dataset.train.sampling_groups.group_0]
+streams = [
+    "stream_0",
+    "stream_1",
+    "stream_2",
+    "stream_3",
+    "stream_4",
+    "stream_5",
+    "stream_6",
+    "stream_7",
+    "stream_8",
+    "stream_9",
+    "stream_10",
+    "stream_11",
+    "stream_12",
+    "stream_13",
+    "stream_14",
+    "stream_15",
+    "stream_16",
+    "stream_17",
+    "stream_18",
+    "stream_19",
+]
+
+[mosaic_dataloader.dataset.train.sampling_groups.group_1]
+streams = [
+    "stream_20",
+    "stream_21",
+    "stream_22",
+    "stream_23",
+    "stream_24",
+    "stream_25",
+    "stream_26",
+    "stream_27",
+    "stream_28",
+    "stream_29",
+    "stream_30",
+    "stream_31",
+    "stream_32",
+    "stream_33",
+    "stream_34",
+    "stream_35",
+    "stream_36",
+    "stream_37",
+    "stream_38",
+    "stream_39",
+]
+
+[mosaic_dataloader.dataset.train.sampling_groups.group_2]
+streams = [
+    "stream_40",
+    "stream_41",
+    "stream_42",
+    "stream_43",
+    "stream_44",
+    "stream_45",
+    "stream_46",
+    "stream_47",
+    "stream_48",
+    "stream_49",
+    "stream_50",
+    "stream_51",
+    "stream_52",
+    "stream_53",
+    "stream_54",
+    "stream_55",
+    "stream_56",
+    "stream_57",
+    "stream_58",
+    "stream_59",
+]
+
+[mosaic_dataloader.dataset.train.sampling_groups.group_3]
+streams = [
+    "stream_60",
+    "stream_61",
+    "stream_62",
+    "stream_63",
+    "stream_64",
+    "stream_65",
+    "stream_66",
+    "stream_67",
+    "stream_68",
+    "stream_69",
+    "stream_70",
+    "stream_71",
+    "stream_72",
+    "stream_73",
+    "stream_74",
+    "stream_75",
+    "stream_76",
+    "stream_77",
+    "stream_78",
+    "stream_79",
+]
+
+[mosaic_dataloader.dataset.val]
+# The validation samples are stored under the "train" split on disk.
+split = "train"
+root_remote = "s3://smollm-corpus/shared"
+root_local = "/home/ubuntu/nfs-share/datasets/photon/dataset_cache/smollm-corpus-shared"
+# subset_num_samples = 512
+sampling_groups_mode = "grouped"
+
+[mosaic_dataloader.dataset.val.streams.client_streams.stream_0]
+local = "fineweb_edu_dedup/client_0"
+remote = "fineweb_edu_dedup/client_0"
+proportion = 70
+
+[mosaic_dataloader.dataset.val.streams.client_streams.stream_1]
+local = "fineweb_edu_dedup/client_1"
+remote = "fineweb_edu_dedup/client_1"
+proportion = 70
+
+[mosaic_dataloader.dataset.val.streams.client_streams.stream_2]
+local = "fineweb_edu_dedup/client_2"
+remote = "fineweb_edu_dedup/client_2"
+proportion = 70
+
+[mosaic_dataloader.dataset.val.streams.client_streams.stream_3]
+local = "fineweb_edu_dedup/client_3"
+remote = "fineweb_edu_dedup/client_3"
+proportion = 70
+
+[mosaic_dataloader.dataset.val.streams.client_streams.stream_4]
+local = "cosmo/client_0"
+remote = "cosmo/client_0"
+proportion = 10
+
+[mosaic_dataloader.dataset.val.streams.client_streams.stream_5]
+local = "cosmo/client_1"
+remote = "cosmo/client_1"
+proportion = 10
+
+[mosaic_dataloader.dataset.val.streams.client_streams.stream_6]
+local = "cosmo/client_2"
+remote = "cosmo/client_2"
+proportion = 10
+
+[mosaic_dataloader.dataset.val.streams.client_streams.stream_7]
+local = "cosmo/client_3"
+remote = "cosmo/client_3"
+proportion = 10
+
+[mosaic_dataloader.dataset.val.streams.client_streams.stream_8]
+local = "python_edu/client_0"
+remote = "python_edu/client_0"
+proportion = 10
+
+[mosaic_dataloader.dataset.val.streams.client_streams.stream_9]
+local = "python_edu/client_1"
+remote = "python_edu/client_1"
+proportion = 10
+
+[mosaic_dataloader.dataset.val.streams.client_streams.stream_10]
+local = "python_edu/client_2"
+remote = "python_edu/client_2"
+proportion = 10
+
+[mosaic_dataloader.dataset.val.streams.client_streams.stream_11]
+local = "python_edu/client_3"
+remote = "python_edu/client_3"
+proportion = 10
+
+[mosaic_dataloader.dataset.val.streams.client_streams.stream_12]
+local = "fine_math_4plus/client_0"
+remote = "fine_math_4plus/client_0"
+proportion = 5
+
+[mosaic_dataloader.dataset.val.streams.client_streams.stream_13]
+local = "fine_math_4plus/client_1"
+remote = "fine_math_4plus/client_1"
+proportion = 5
+
+[mosaic_dataloader.dataset.val.streams.client_streams.stream_14]
+local = "fine_math_4plus/client_2"
+remote = "fine_math_4plus/client_2"
+proportion = 5
+
+[mosaic_dataloader.dataset.val.streams.client_streams.stream_15]
+local = "fine_math_4plus/client_3"
+remote = "fine_math_4plus/client_3"
+proportion = 5
+
+[mosaic_dataloader.dataset.val.streams.client_streams.stream_16]
+local = "infiwebmath_4plus/client_0"
+remote = "infiwebmath_4plus/client_0"
+proportion = 5
+
+[mosaic_dataloader.dataset.val.streams.client_streams.stream_17]
+local = "infiwebmath_4plus/client_1"
+remote = "infiwebmath_4plus/client_1"
+proportion = 5
+
+[mosaic_dataloader.dataset.val.streams.client_streams.stream_18]
+local = "infiwebmath_4plus/client_2"
+remote = "infiwebmath_4plus/client_2"
+proportion = 5
+
+[mosaic_dataloader.dataset.val.streams.client_streams.stream_19]
+local = "infiwebmath_4plus/client_3"
+remote = "infiwebmath_4plus/client_3"
+proportion = 5
+
+[mosaic_dataloader.dataset.val.streams.client_streams.stream_20]
+local = "fineweb_edu_dedup/client_4"
+remote = "fineweb_edu_dedup/client_4"
+proportion = 70
+
+[mosaic_dataloader.dataset.val.streams.client_streams.stream_21]
+local = "fineweb_edu_dedup/client_5"
+remote = "fineweb_edu_dedup/client_5"
+proportion = 70
+
+[mosaic_dataloader.dataset.val.streams.client_streams.stream_22]
+local = "fineweb_edu_dedup/client_6"
+remote = "fineweb_edu_dedup/client_6"
+proportion = 70
+
+[mosaic_dataloader.dataset.val.streams.client_streams.stream_23]
+local = "fineweb_edu_dedup/client_7"
+remote = "fineweb_edu_dedup/client_7"
+proportion = 70
+
+[mosaic_dataloader.dataset.val.streams.client_streams.stream_24]
+local = "cosmo/client_4"
+remote = "cosmo/client_4"
+proportion = 10
+
+[mosaic_dataloader.dataset.val.streams.client_streams.stream_25]
+local = "cosmo/client_5"
+remote = "cosmo/client_5"
+proportion = 10
+
+[mosaic_dataloader.dataset.val.streams.client_streams.stream_26]
+local = "cosmo/client_6"
+remote = "cosmo/client_6"
+proportion = 10
+
+[mosaic_dataloader.dataset.val.streams.client_streams.stream_27]
+local = "cosmo/client_7"
+remote = "cosmo/client_7"
+proportion = 10
+
+[mosaic_dataloader.dataset.val.streams.client_streams.stream_28]
+local = "python_edu/client_4"
+remote = "python_edu/client_4"
+proportion = 10
+
+[mosaic_dataloader.dataset.val.streams.client_streams.stream_29]
+local = "python_edu/client_5"
+remote = "python_edu/client_5"
+proportion = 10
+
+[mosaic_dataloader.dataset.val.streams.client_streams.stream_30]
+local = "python_edu/client_6"
+remote = "python_edu/client_6"
+proportion = 10
+
+[mosaic_dataloader.dataset.val.streams.client_streams.stream_31]
+local = "python_edu/client_7"
+remote = "python_edu/client_7"
+proportion = 10
+
+[mosaic_dataloader.dataset.val.streams.client_streams.stream_32]
+local = "fine_math_4plus/client_4"
+remote = "fine_math_4plus/client_4"
+proportion = 5
+
+[mosaic_dataloader.dataset.val.streams.client_streams.stream_33]
+local = "fine_math_4plus/client_5"
+remote = "fine_math_4plus/client_5"
+proportion = 5
+
+[mosaic_dataloader.dataset.val.streams.client_streams.stream_34]
+local = "fine_math_4plus/client_6"
+remote = "fine_math_4plus/client_6"
+proportion = 5
+
+[mosaic_dataloader.dataset.val.streams.client_streams.stream_35]
+local = "fine_math_4plus/client_7"
+remote = "fine_math_4plus/client_7"
+proportion = 5
+
+[mosaic_dataloader.dataset.val.streams.client_streams.stream_36]
+local = "infiwebmath_4plus/client_4"
+remote = "infiwebmath_4plus/client_4"
+proportion = 5
+
+[mosaic_dataloader.dataset.val.streams.client_streams.stream_37]
+local = "infiwebmath_4plus/client_5"
+remote = "infiwebmath_4plus/client_5"
+proportion = 5
+
+[mosaic_dataloader.dataset.val.streams.client_streams.stream_38]
+local = "infiwebmath_4plus/client_6"
+remote = "infiwebmath_4plus/client_6"
+proportion = 5
+
+[mosaic_dataloader.dataset.val.streams.client_streams.stream_39]
+local = "infiwebmath_4plus/client_7"
+remote = "infiwebmath_4plus/client_7"
+proportion = 5
+
+[mosaic_dataloader.dataset.val.streams.client_streams.stream_40]
+local = "fineweb_edu_dedup/client_8"
+remote = "fineweb_edu_dedup/client_8"
+proportion = 70
+
+[mosaic_dataloader.dataset.val.streams.client_streams.stream_41]
+local = "fineweb_edu_dedup/client_9"
+remote = "fineweb_edu_dedup/client_9"
+proportion = 70
+
+[mosaic_dataloader.dataset.val.streams.client_streams.stream_42]
+local = "fineweb_edu_dedup/client_10"
+remote = "fineweb_edu_dedup/client_10"
+proportion = 70
+
+[mosaic_dataloader.dataset.val.streams.client_streams.stream_43]
+local = "fineweb_edu_dedup/client_11"
+remote = "fineweb_edu_dedup/client_11"
+proportion = 70
+
+[mosaic_dataloader.dataset.val.streams.client_streams.stream_44]
+local = "cosmo/client_8"
+remote = "cosmo/client_8"
+proportion = 10
+
+[mosaic_dataloader.dataset.val.streams.client_streams.stream_45]
+local = "cosmo/client_9"
+remote = "cosmo/client_9"
+proportion = 10
+
+[mosaic_dataloader.dataset.val.streams.client_streams.stream_46]
+local = "cosmo/client_10"
+remote = "cosmo/client_10"
+proportion = 10
+
+[mosaic_dataloader.dataset.val.streams.client_streams.stream_47]
+local = "cosmo/client_11"
+remote = "cosmo/client_11"
+proportion = 10
+
+[mosaic_dataloader.dataset.val.streams.client_streams.stream_48]
+local = "python_edu/client_8"
+remote = "python_edu/client_8"
+proportion = 10
+
+[mosaic_dataloader.dataset.val.streams.client_streams.stream_49]
+local = "python_edu/client_9"
+remote = "python_edu/client_9"
+proportion = 10
+
+[mosaic_dataloader.dataset.val.streams.client_streams.stream_50]
+local = "python_edu/client_10"
+remote = "python_edu/client_10"
+proportion = 10
+
+[mosaic_dataloader.dataset.val.streams.client_streams.stream_51]
+local = "python_edu/client_11"
+remote = "python_edu/client_11"
+proportion = 10
+
+[mosaic_dataloader.dataset.val.streams.client_streams.stream_52]
+local = "fine_math_4plus/client_8"
+remote = "fine_math_4plus/client_8"
+proportion = 5
+
+[mosaic_dataloader.dataset.val.streams.client_streams.stream_53]
+local = "fine_math_4plus/client_9"
+remote = "fine_math_4plus/client_9"
+proportion = 5
+
+[mosaic_dataloader.dataset.val.streams.client_streams.stream_54]
+local = "fine_math_4plus/client_10"
+remote = "fine_math_4plus/client_10"
+proportion = 5
+
+[mosaic_dataloader.dataset.val.streams.client_streams.stream_55]
+local = "fine_math_4plus/client_11"
+remote = "fine_math_4plus/client_11"
+proportion = 5
+
+[mosaic_dataloader.dataset.val.streams.client_streams.stream_56]
+local = "infiwebmath_4plus/client_8"
+remote = "infiwebmath_4plus/client_8"
+proportion = 5
+
+[mosaic_dataloader.dataset.val.streams.client_streams.stream_57]
+local = "infiwebmath_4plus/client_9"
+remote = "infiwebmath_4plus/client_9"
+proportion = 5
+
+[mosaic_dataloader.dataset.val.streams.client_streams.stream_58]
+local = "infiwebmath_4plus/client_10"
+remote = "infiwebmath_4plus/client_10"
+proportion = 5
+
+[mosaic_dataloader.dataset.val.streams.client_streams.stream_59]
+local = "infiwebmath_4plus/client_11"
+remote = "infiwebmath_4plus/client_11"
+proportion = 5
+
+[mosaic_dataloader.dataset.val.streams.client_streams.stream_60]
+local = "fineweb_edu_dedup/client_12"
+remote = "fineweb_edu_dedup/client_12"
+proportion = 70
+
+[mosaic_dataloader.dataset.val.streams.client_streams.stream_61]
+local = "fineweb_edu_dedup/client_13"
+remote = "fineweb_edu_dedup/client_13"
+proportion = 70
+
+[mosaic_dataloader.dataset.val.streams.client_streams.stream_62]
+local = "fineweb_edu_dedup/client_14"
+remote = "fineweb_edu_dedup/client_14"
+proportion = 70
+
+[mosaic_dataloader.dataset.val.streams.client_streams.stream_63]
+local = "fineweb_edu_dedup/client_15"
+remote = "fineweb_edu_dedup/client_15"
+proportion = 70
+
+[mosaic_dataloader.dataset.val.streams.client_streams.stream_64]
+local = "cosmo/client_12"
+remote = "cosmo/client_12"
+proportion = 10
+
+[mosaic_dataloader.dataset.val.streams.client_streams.stream_65]
+local = "cosmo/client_13"
+remote = "cosmo/client_13"
+proportion = 10
+
+[mosaic_dataloader.dataset.val.streams.client_streams.stream_66]
+local = "cosmo/client_14"
+remote = "cosmo/client_14"
+proportion = 10
+
+[mosaic_dataloader.dataset.val.streams.client_streams.stream_67]
+local = "cosmo/client_15"
+remote = "cosmo/client_15"
+proportion = 10
+
+[mosaic_dataloader.dataset.val.streams.client_streams.stream_68]
+local = "python_edu/client_12"
+remote = "python_edu/client_12"
+proportion = 10
+
+[mosaic_dataloader.dataset.val.streams.client_streams.stream_69]
+local = "python_edu/client_13"
+remote = "python_edu/client_13"
+proportion = 10
+
+[mosaic_dataloader.dataset.val.streams.client_streams.stream_70]
+local = "python_edu/client_14"
+remote = "python_edu/client_14"
+proportion = 10
+
+[mosaic_dataloader.dataset.val.streams.client_streams.stream_71]
+local = "python_edu/client_15"
+remote = "python_edu/client_15"
+proportion = 10
+
+[mosaic_dataloader.dataset.val.streams.client_streams.stream_72]
+local = "fine_math_4plus/client_12"
+remote = "fine_math_4plus/client_12"
+proportion = 5
+
+[mosaic_dataloader.dataset.val.streams.client_streams.stream_73]
+local = "fine_math_4plus/client_13"
+remote = "fine_math_4plus/client_13"
+proportion = 5
+
+[mosaic_dataloader.dataset.val.streams.client_streams.stream_74]
+local = "fine_math_4plus/client_14"
+remote = "fine_math_4plus/client_14"
+proportion = 5
+
+[mosaic_dataloader.dataset.val.streams.client_streams.stream_75]
+local = "fine_math_4plus/client_15"
+remote = "fine_math_4plus/client_15"
+proportion = 5
+
+[mosaic_dataloader.dataset.val.streams.client_streams.stream_76]
+local = "infiwebmath_4plus/client_12"
+remote = "infiwebmath_4plus/client_12"
+proportion = 5
+
+[mosaic_dataloader.dataset.val.streams.client_streams.stream_77]
+local = "infiwebmath_4plus/client_13"
+remote = "infiwebmath_4plus/client_13"
+proportion = 5
+
+[mosaic_dataloader.dataset.val.streams.client_streams.stream_78]
+local = "infiwebmath_4plus/client_14"
+remote = "infiwebmath_4plus/client_14"
+proportion = 5
+
+[mosaic_dataloader.dataset.val.streams.client_streams.stream_79]
+local = "infiwebmath_4plus/client_15"
+remote = "infiwebmath_4plus/client_15"
+proportion = 5
+
+[mosaic_dataloader.dataset.val.sampling_groups.group_0]
+streams = ["stream_0", "stream_1", "stream_2", "stream_3", "stream_4", "stream_5", "stream_6", "stream_7", "stream_8", "stream_9", "stream_10", "stream_11", "stream_12", "stream_13", "stream_14", "stream_15", "stream_16", "stream_17", "stream_18", "stream_19"]
+
+[mosaic_dataloader.dataset.val.sampling_groups.group_1]
+streams = ["stream_20", "stream_21", "stream_22", "stream_23", "stream_24", "stream_25", "stream_26", "stream_27", "stream_28", "stream_29", "stream_30", "stream_31", "stream_32", "stream_33", "stream_34", "stream_35", "stream_36", "stream_37", "stream_38", "stream_39"]
+
+[mosaic_dataloader.dataset.val.sampling_groups.group_2]
+streams = ["stream_40", "stream_41", "stream_42", "stream_43", "stream_44", "stream_45", "stream_46", "stream_47", "stream_48", "stream_49", "stream_50", "stream_51", "stream_52", "stream_53", "stream_54", "stream_55", "stream_56", "stream_57", "stream_58", "stream_59"]
+
+[mosaic_dataloader.dataset.val.sampling_groups.group_3]
+streams = ["stream_60", "stream_61", "stream_62", "stream_63", "stream_64", "stream_65", "stream_66", "stream_67", "stream_68", "stream_69", "stream_70", "stream_71", "stream_72", "stream_73", "stream_74", "stream_75", "stream_76", "stream_77", "stream_78", "stream_79"]
+
+
+
+

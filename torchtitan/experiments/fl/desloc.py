@@ -383,6 +383,16 @@ def _component_key_from_name(param_name: str) -> str:
     return param_name.split(".")[0]
 
 
+def _format_fragment_membership(names: Sequence[str], limit: int = 8) -> str:
+    """Return a short string describing which tensors belong to a fragment."""
+    if not names:
+        return "none"
+    if len(names) <= limit:
+        return ", ".join(names)
+    remaining = len(names) - limit
+    return f"{', '.join(names[:limit])}, ... (+{remaining} more)"
+
+
 class _BaseFragment:
     def __init__(self, sync_every: int) -> None:
         if sync_every <= 0:
@@ -862,6 +872,13 @@ class _StreamingOptimizerStateFragment(_BaseFragment):
         else:
             self.restore_state()
         self._averaged_state_tensors.clear()
+        logger.info(
+            "DES-LOC streaming optimizer state '%s' fragment=%s sync complete (commit=%s, manager_step=%s)",
+            self.state_key,
+            self._fragment_id,
+            should_commit,
+            self._manager.current_step(),
+        )
 
     def _apply_states(self) -> None:
         with torch.no_grad():
@@ -1254,6 +1271,13 @@ class _StreamingParameterFragment:
         self._grads.clear()
         self._averaged_parameters.clear()
 
+        logger.info(
+            "DES-LOC streaming parameter fragment=%s sync complete (commit=%s, manager_step=%s)",
+            self._fragment_id,
+            should_commit,
+            self._manager.current_step(),
+        )
+
         return should_commit
 
 
@@ -1550,6 +1574,13 @@ class StreamingDesLocController:
                 checkpoint_outer_optimizer=(
                     self._checkpoint_outer_optimizer and outer_checkpoint_flags[idx]
                 ),
+            )
+            param_names = fragment.parameter_names
+            logger.info(
+                "DES-LOC streaming parameter fragment=%s initialized with %d parameters: %s",
+                idx,
+                len(param_names),
+                _format_fragment_membership(param_names),
             )
             prepare_step = max(offset - self._fragment_sync_delay, 0)
             schedule_entry = _StreamingFragmentSchedule(
@@ -1858,6 +1889,14 @@ class StreamingDesLocController:
                     should_quantize=self._streaming_cfg.should_quantize,
                 )
                 fragment = _StreamingOptimizerStateFragment(fragment_config)
+                param_names = fragment.parameter_names
+                logger.info(
+                    "DES-LOC streaming optimizer state '%s' fragment=%s initialized with %d parameters: %s",
+                    key,
+                    fragment_idx,
+                    len(param_names),
+                    _format_fragment_membership(param_names),
+                )
                 fragment.register_state_dict_fn()
                 self._state_fragments_per_fragment[fragment_idx].append(fragment)
 
