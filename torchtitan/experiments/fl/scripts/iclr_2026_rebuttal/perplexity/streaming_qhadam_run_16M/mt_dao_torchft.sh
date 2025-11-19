@@ -106,7 +106,7 @@ MIN_REPLICAS=${MIN_REPLICAS:-${NGPU}}
 QUORUM_TICK_MS=${QUORUM_TICK_MS:-100}
 
 LIGHTHOUSE_HOST=${LIGHTHOUSE_HOST:-"localhost"}
-LIGHTHOUSE_PORT=${LIGHTHOUSE_PORT:-29510}
+LIGHTHOUSE_PORT=${LIGHTHOUSE_PORT:-29530}
 LIGHTHOUSE_URL="http://${LIGHTHOUSE_HOST}:${LIGHTHOUSE_PORT}"
 
 LR_SWITCH_STEP=${LR_SWITCH_STEP:-2049}
@@ -269,7 +269,7 @@ for ((replica_id=0; replica_id<NGPU; replica_id++)); do
     cd "${REPO_ROOT}"
     export CUDA_VISIBLE_DEVICES="${gpu_id}"
     export PYTORCH_ALLOC_CONF="expandable_segments:True"
-    rdzv_port=$((29600 + replica_id))
+    rdzv_port=$((29800 + replica_id))
     uv run --no-sync torchrun \
       --nproc_per_node=1 \
       --rdzv_backend=c10d \
