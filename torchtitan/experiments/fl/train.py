@@ -29,7 +29,7 @@ from typing import Any
 import torch
 from torch import nn
 
-from torchtitan.experiments.fl.configs import MosaicConfigManager
+from torchtitan.experiments.fl.configs import MosaicConfigManager, MosaicJobConfig
 from torchtitan.experiments.fl.ft_override import configure_desloc
 from torchtitan.experiments.fl.ft_utils import ensure_torchft_init_sync
 from torchtitan.experiments.fl.s3_checkpoint import (
@@ -442,6 +442,39 @@ def _maybe_update_wandb_run_name(
         logger.warning("Failed to update WandB run name: %s", exc)
 
 
+def _run_eval_only(trainer: Trainer, job_config: MosaicJobConfig) -> None:
+    """Load the requested checkpoint and run a single validation pass."""
+    if not job_config.validation.enable:
+        raise RuntimeError(
+            "Eval-only mode requires validation.enable=True to build a validator."
+        )
+
+    validator = getattr(trainer, "validator", None)
+    if validator is None:
+        raise RuntimeError(
+            "Validation is enabled but the validator is unavailable; cannot run eval_only."
+        )
+
+    logger.info("[EvalOnly] Loading checkpoint before validation.")
+    logger.info(
+        "[EvalOnly][RESUME DEBUG] load_step=%s | folder=%s",
+        job_config.checkpoint.load_step,
+        job_config.checkpoint.folder,
+    )
+    loaded = trainer.checkpointer.load(step=job_config.checkpoint.load_step)
+    logger.info(
+        "[EvalOnly][RESUME DEBUG] loaded=%s | trainer.step=%s",
+        loaded,
+        trainer.step,
+    )
+    trainer._apply_pending_hyperparameter_switches_on_resume()
+
+    logger.info("[EvalOnly] Running validation at step %s.", trainer.step)
+    with trainer.loss_fn.no_rescale():
+        validator.validate(trainer.model_parts, trainer.step)
+    logger.info("[EvalOnly] Validation completed, exiting without training.")
+
+
 def main() -> None:  # noqa: C901, PLR0912, PLR0915
     """The main entry point for the Mosaic training script.
 
@@ -635,7 +668,10 @@ def main() -> None:  # noqa: C901, PLR0912, PLR0915
                     )
                 if s3_checkpointing_active and torch.distributed.is_initialized():
                     torch.distributed.barrier()
-                trainer.train()
+                if job_config.eval_only:
+                    _run_eval_only(trainer, job_config)
+                else:
+                    trainer.train()
     finally:
         for manager in {m for m in (s3_manager, download_manager) if m is not None}:
             manager.close()

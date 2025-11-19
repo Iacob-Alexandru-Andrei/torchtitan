@@ -11,7 +11,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, TYPE_CHECKING
 
-from torchtitan.components.validate import BaseValidator, Validator
+from torchtitan.components.validate import (
+    BaseValidator,
+    Validator,
+    _resolve_eos_id,
+)
 from torchtitan.experiments.fl.dataloader.dataloader import (
     build_mosaic_validation_dataloader,
 )
@@ -66,6 +70,7 @@ class MosaicValidator(Validator):
         self.pp_schedule = request.pp_schedule
         self.pp_has_first_stage = request.pp_has_first_stage
         self.pp_has_last_stage = request.pp_has_last_stage
+        self._eos_id = _resolve_eos_id(request.tokenizer)
 
         if self.job_config.validation.steps == -1:
             logger.warning(

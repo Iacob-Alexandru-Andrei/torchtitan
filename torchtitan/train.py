@@ -36,6 +36,20 @@ from torchtitan.tools.profiling import (
 from torchtitan.experiments.fl.callbacks import CallbackStepContext
 
 
+class _EvalOnlyNoOpDataLoader:
+    """No-op dataloader used when eval_only skips training data builds."""
+
+    def state_dict(self) -> dict[str, Any]:
+        return {}
+
+    def load_state_dict(self, state_dict: dict[str, Any]) -> None:  # noqa: D401
+        """Eval-only placeholder; no state to restore."""
+        _ = state_dict
+
+    def __iter__(self):
+        raise RuntimeError("Eval-only runs do not provide a training dataloader.")
+
+
 class Trainer(torch.distributed.checkpoint.stateful.Stateful):
     # core configs
     job_config: JobConfig
@@ -140,12 +154,18 @@ class Trainer(torch.distributed.checkpoint.stateful.Stateful):
             else None
         )
 
-        self.dataloader = self.train_spec.build_dataloader_fn(
-            dp_world_size=dp_degree,
-            dp_rank=dp_rank,
-            tokenizer=self.tokenizer,
-            job_config=job_config,
-        )
+        if job_config.eval_only:
+            logger.info(
+                "Eval-only configuration detected; skipping training dataloader build."
+            )
+            self.dataloader = _EvalOnlyNoOpDataLoader()
+        else:
+            self.dataloader = self.train_spec.build_dataloader_fn(
+                dp_world_size=dp_degree,
+                dp_rank=dp_rank,
+                tokenizer=self.tokenizer,
+                job_config=job_config,
+            )
 
         # build model (using meta init)
         model_args = self.train_spec.model_args[job_config.model.flavor]

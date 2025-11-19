@@ -32,6 +32,7 @@ from torchtitan.experiments.fl.optimizers import (
     AggMoAdopt,
     DecoupledAdamW,
     GaLore,
+    Muon,
     QHAdamW,
     QHADOPT,
     Scion,
@@ -92,6 +93,7 @@ _MOSAIC_OPTIMIZER_CLASSES: dict[str, type[Optimizer]] = {
     "ScionQH": QHScion,
     "ScionAggMo": ScionAggMo,
     "GaLore": GaLore,
+    "Muon": Muon,
 }
 
 _ALL_OPTIMIZER_CLASSES: dict[str, type[Optimizer]] = {
@@ -152,6 +154,16 @@ def _normalize_mosaic_optimizer_config(
         if name == "ScionAggMo":
             extra_kwargs["betas"] = config.scion_momentums
             extra_kwargs["weights"] = config.scion_weights
+    if name == "Muon":
+        extra_kwargs.update(
+            {
+                "norm": config.norm,
+                "norm_kwargs": config.norm_kwargs or {},
+                "zeropower_coeffs": config.resolved_zeropower_coefficients(),
+                "betas": (config.beta1,),
+                "nesterov": config.muon_nesterov,
+            }
+        )
 
     return config, extra_kwargs
 
@@ -159,6 +171,13 @@ def _normalize_mosaic_optimizer_config(
 def _build_optimizer_kwargs(config: MosaicOptimizerConfig, extra_kwargs: dict[str, Any]) -> dict[str, Any]:
     if config.name in {"Scion", "ScionLight", "ScionQH", "ScionAggMo"}:
         kwargs: dict[str, Any] = {"lr": config.lr}
+        kwargs.update(extra_kwargs)
+        return kwargs
+    if config.name == "Muon":
+        kwargs = {
+            "lr": config.lr,
+            "weight_decay": config.weight_decay,
+        }
         kwargs.update(extra_kwargs)
         return kwargs
     if config.name == "GaLore":
@@ -249,6 +268,7 @@ def _build_desloc_container(request: DeslocContainerRequest) -> OptimizersContai
         use_ft_optimizer=ft_manager.use_async_quorum,
         param_groups=request.base.param_groups,
         outer_optimizer=outer_optimizer,
+        streaming=request.desloc_cfg.resolved_streaming() if hasattr(request.desloc_cfg, "resolved_streaming") else None,
     )
     return DesLocFTOptimizersContainer(desloc_config)
 

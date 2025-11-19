@@ -23,10 +23,12 @@ from torchtitan.experiments.fl.lr_scheduler import build_fl_lr_schedulers
 from torchtitan.experiments.fl.models.llama3_mup.infra.parallelize import (
     parallelize_llama_mup,
 )
-from torchtitan.experiments.fl.models.llama3_mup.model.mup_args import (
+from torchtitan.experiments.fl.models.llama3_mup_disco.model.mup_args import (
     TransformerModelArgs,
 )
-from torchtitan.experiments.fl.models.llama3_mup.model.mup_model import Transformer
+from torchtitan.experiments.fl.models.llama3_mup_disco.model.mup_model import (
+    Transformer,
+)
 from torchtitan.experiments.fl.models.llama3_mup.model.state_dict_adapter import (
     Llama3MuPStateDictAdapter,
 )
@@ -95,28 +97,24 @@ def build_mup_optimizers(
     )
 
 
-llama3_mup_configs = {
+llama3_mup_configs: dict[str, TransformerModelArgs] = {
     "16M": TransformerModelArgs(
         dim=256,
         n_layers=4,
         n_heads=4,
         vocab_size=50368,
         rope_theta=10_000,
-        # FFN expansion ratio of 4x (4 * 768 = 3072)
         ffn_dim_multiplier=None,
-        # MuP features
         use_embedding_norm=True,
         use_peri_norm=True,
         tie_word_embeddings=True,
         use_torch_layernorm=True,
         use_simple_silu_ffn=False,
-        use_torch_qk_layernorm=True,
         qk_norm=True,
         qk_norm_bias=False,
         qk_norm_elementwise_affine=True,
         torch_layernorm_bias=False,
         torch_layernorm_elementwise_affine=True,
-        # Flex attention
         use_flex_attn=True,
         attn_mask_type="block_causal",
         mup_config={
@@ -133,37 +131,34 @@ llama3_mup_configs = {
         },
         init_config={
             "init_std": 0.02,
-            "emb_init_std": 0.02,  # Will default to init_std
-            "output_mult": None,  # No special output scaling
+            "emb_init_std": 0.02,
+            "output_mult": None,
         },
     ),
-    "16M_RMS": TransformerModelArgs(
-        norm_eps=1e-20,
+    "16M_scion": TransformerModelArgs(
         dim=256,
         n_layers=4,
         n_heads=4,
         vocab_size=50368,
         rope_theta=10_000,
-        # FFN expansion ratio of 4x (4 * 768 = 3072)
         ffn_dim_multiplier=None,
-        # MuP features
         use_embedding_norm=True,
         use_peri_norm=True,
         tie_word_embeddings=True,
         use_torch_layernorm=False,
-        use_simple_silu_ffn=False,
-        use_mlp_mid_norm=True,
-        use_torch_qk_layernorm=False,
-        qk_norm=True,
-        use_attention_value_norm=True,
-        use_attention_output_norm=True,
-        qk_norm_bias=False,
-        qk_norm_elementwise_affine=False,
+        layernorm_impl="rms",
         torch_layernorm_bias=False,
         torch_layernorm_elementwise_affine=False,
-        # Flex attention
+        use_simple_silu_ffn=False,
+        qk_norm=True,
+        qk_norm_bias=False,
+        qk_norm_elementwise_affine=False,
+        use_torch_qk_layernorm=False,
+        qk_layernorm_impl="rms",
         use_flex_attn=True,
         attn_mask_type="block_causal",
+        use_disco=False,
+        use_scion=True,
         mup_config={
             "mup_enabled": True,
             "mup_disable_attention_scaling": True,
@@ -178,11 +173,50 @@ llama3_mup_configs = {
         },
         init_config={
             "init_std": 0.02,
-            "emb_init_std": 0.02,  # Will default to init_std
-            "output_mult": None,  # No special output scaling
-            "hidden_init": "scaled_orthogonal",
-            "embed_init": "normal",
-            "output_init": "normal",
+            "emb_init_std": 0.02,
+            "output_mult": None,
+        },
+    ),
+     "16M_scion_torch": TransformerModelArgs(
+        dim=256,
+        n_layers=4,
+        n_heads=4,
+        vocab_size=50368,
+        rope_theta=10_000,
+        ffn_dim_multiplier=None,
+        use_embedding_norm=True,
+        use_peri_norm=True,
+        tie_word_embeddings=True,
+        use_torch_layernorm=True,
+        layernorm_impl="torch",
+        torch_layernorm_bias=False,
+        torch_layernorm_elementwise_affine=True,
+        use_simple_silu_ffn=False,
+        qk_norm=True,
+        qk_norm_bias=False,
+        qk_norm_elementwise_affine=True,
+        use_torch_qk_layernorm=True,
+        qk_layernorm_impl="torch",
+        use_flex_attn=True,
+        attn_mask_type="block_causal",
+        use_disco=False,
+        use_scion=True,
+        mup_config={
+            "mup_enabled": True,
+            "mup_disable_attention_scaling": True,
+            "mup_disable_hidden_lr_scaling": False,
+            "mup_width_multiplier": 1.0,
+            "mup_input_alpha": 1.0,
+            "mup_output_alpha": 1.0,
+            "completep_depth_alpha_enabled": True,
+            "completep_depth_multiplier": 1.0,
+            "completep_depth_alpha_exp": 1.0,
+            "completep_eps_scaling_enabled": False,
+        },
+        init_config={
+            "init_std": 0.02,
+            "emb_init_std": 0.02,
+            "output_mult": None,
         },
     ),
     "125M": TransformerModelArgs(
@@ -191,21 +225,17 @@ llama3_mup_configs = {
         n_heads=12,
         vocab_size=50368,
         rope_theta=10_000,
-        # FFN expansion ratio of 4x (4 * 768 = 3072)
         ffn_dim_multiplier=None,
-        # MuP features
         use_embedding_norm=True,
         use_peri_norm=True,
         tie_word_embeddings=True,
         use_torch_layernorm=True,
         use_simple_silu_ffn=False,
-        use_torch_qk_layernorm=True,
         qk_norm=True,
         qk_norm_bias=False,
+        qk_norm_elementwise_affine=True,
         torch_layernorm_bias=False,
         torch_layernorm_elementwise_affine=True,
-        qk_norm_elementwise_affine=True,
-        # Flex attention
         use_flex_attn=True,
         attn_mask_type="block_causal",
         mup_config={
@@ -222,37 +252,34 @@ llama3_mup_configs = {
         },
         init_config={
             "init_std": 0.02,
-            "emb_init_std": 0.02,  # Will default to init_std
-            "output_mult": None,  # No special output scaling
+            "emb_init_std": 0.02,
+            "output_mult": None,
         },
     ),
-    "125M_RMS": TransformerModelArgs(
-        norm_eps=1e-20,
+    "125M_scion": TransformerModelArgs(
         dim=768,
         n_layers=12,
         n_heads=12,
         vocab_size=50368,
         rope_theta=10_000,
-        # FFN expansion ratio of 4x (4 * 768 = 3072)
         ffn_dim_multiplier=None,
-        # MuP features
         use_embedding_norm=True,
         use_peri_norm=True,
         tie_word_embeddings=True,
         use_torch_layernorm=False,
-        use_simple_silu_ffn=False,
-        use_mlp_mid_norm=True,
-        use_torch_qk_layernorm=False,
-        qk_norm=True,
-        use_attention_value_norm=True,
-        use_attention_output_norm=True,
-        qk_norm_bias=False,
-        qk_norm_elementwise_affine=False,
+        layernorm_impl="rms",
         torch_layernorm_bias=False,
         torch_layernorm_elementwise_affine=False,
-        # Flex attention
+        use_simple_silu_ffn=False,
+        qk_norm=True,
+        qk_norm_bias=False,
+        qk_norm_elementwise_affine=False,
+        use_torch_qk_layernorm=False,
+        qk_layernorm_impl="rms",
         use_flex_attn=True,
         attn_mask_type="block_causal",
+        use_disco=False,
+        use_scion=True,
         mup_config={
             "mup_enabled": True,
             "mup_disable_attention_scaling": True,
@@ -267,17 +294,14 @@ llama3_mup_configs = {
         },
         init_config={
             "init_std": 0.02,
-            "emb_init_std": 0.02,  # Will default to init_std
-            "output_mult": None,  # No special output scaling
-            "hidden_init": "scaled_orthogonal",
-            "embed_init": "normal",
-            "output_init": "normal",
+            "emb_init_std": 0.02,
+            "output_mult": None,
         },
     ),
-    "380M": TransformerModelArgs(
-        dim=1536,
-        n_layers=12,
-        n_heads=12,
+    "360M": TransformerModelArgs(
+        dim=1024,
+        n_layers=24,
+        n_heads=16,
         vocab_size=50368,
         rope_theta=10_000,
         ffn_dim_multiplier=None,
@@ -286,23 +310,22 @@ llama3_mup_configs = {
         tie_word_embeddings=True,
         use_torch_layernorm=True,
         use_simple_silu_ffn=False,
-        use_torch_qk_layernorm=True,
         qk_norm=True,
         qk_norm_bias=False,
+        qk_norm_elementwise_affine=True,
         torch_layernorm_bias=False,
         torch_layernorm_elementwise_affine=True,
-        qk_norm_elementwise_affine=True,
         use_flex_attn=True,
         attn_mask_type="block_causal",
         mup_config={
             "mup_enabled": True,
             "mup_disable_attention_scaling": True,
             "mup_disable_hidden_lr_scaling": False,
-            "mup_width_multiplier": 6.0,
+            "mup_width_multiplier": 4.0,
             "mup_input_alpha": 1.0,
             "mup_output_alpha": 1.0,
             "completep_depth_alpha_enabled": True,
-            "completep_depth_multiplier": 3.0,
+            "completep_depth_multiplier": 6.0,
             "completep_depth_alpha_exp": 1.0,
             "completep_eps_scaling_enabled": False,
         },
@@ -312,11 +335,10 @@ llama3_mup_configs = {
             "output_mult": None,
         },
     ),
-    "380M_RMS": TransformerModelArgs(
-        norm_eps=1e-20,
-        dim=1536,
-        n_layers=12,
-        n_heads=12,
+    "360M_scion": TransformerModelArgs(
+        dim=1024,
+        n_layers=24,
+        n_heads=16,
         vocab_size=50368,
         rope_theta=10_000,
         ffn_dim_multiplier=None,
@@ -324,27 +346,28 @@ llama3_mup_configs = {
         use_peri_norm=True,
         tie_word_embeddings=True,
         use_torch_layernorm=False,
-        use_simple_silu_ffn=False,
-        use_mlp_mid_norm=True,
-        use_torch_qk_layernorm=False,
-        qk_norm=True,
-        use_attention_value_norm=True,
-        use_attention_output_norm=True,
-        qk_norm_bias=False,
-        qk_norm_elementwise_affine=False,
+        layernorm_impl="rms",
         torch_layernorm_bias=False,
         torch_layernorm_elementwise_affine=False,
+        use_simple_silu_ffn=False,
+        qk_norm=True,
+        qk_norm_bias=False,
+        qk_norm_elementwise_affine=False,
+        use_torch_qk_layernorm=False,
+        qk_layernorm_impl="rms",
         use_flex_attn=True,
         attn_mask_type="block_causal",
+        use_disco=False,
+        use_scion=True,
         mup_config={
             "mup_enabled": True,
             "mup_disable_attention_scaling": True,
             "mup_disable_hidden_lr_scaling": False,
-            "mup_width_multiplier": 6.0,
+            "mup_width_multiplier": 4.0,
             "mup_input_alpha": 1.0,
             "mup_output_alpha": 1.0,
             "completep_depth_alpha_enabled": True,
-            "completep_depth_multiplier": 3.0,
+            "completep_depth_multiplier": 6.0,
             "completep_depth_alpha_exp": 1.0,
             "completep_eps_scaling_enabled": False,
         },
@@ -352,9 +375,6 @@ llama3_mup_configs = {
             "init_std": 0.02,
             "emb_init_std": 0.02,
             "output_mult": None,
-            "hidden_init": "scaled_orthogonal",
-            "embed_init": "normal",
-            "output_init": "normal",
         },
     ),
     "720M": TransformerModelArgs(
@@ -363,21 +383,17 @@ llama3_mup_configs = {
         n_heads=16,
         vocab_size=50368,
         rope_theta=10_000,
-        # FFN expansion ratio of 4x (4 * 768 = 3072)
         ffn_dim_multiplier=None,
-        # MuP features
         use_embedding_norm=True,
         use_peri_norm=True,
         tie_word_embeddings=True,
         use_torch_layernorm=True,
         use_simple_silu_ffn=False,
-        use_torch_qk_layernorm=True,
         qk_norm=True,
         qk_norm_bias=False,
+        qk_norm_elementwise_affine=True,
         torch_layernorm_bias=False,
         torch_layernorm_elementwise_affine=True,
-        qk_norm_elementwise_affine=True,
-        # Flex attention
         use_flex_attn=True,
         attn_mask_type="block_causal",
         mup_config={
@@ -394,37 +410,34 @@ llama3_mup_configs = {
         },
         init_config={
             "init_std": 0.02,
-            "emb_init_std": 0.02,  # Will default to init_std
-            "output_mult": None,  # No special output scaling
+            "emb_init_std": 0.02,
+            "output_mult": None,
         },
     ),
-    "720M_RMS": TransformerModelArgs(
-        norm_eps=1e-20,
+    "720M_scion": TransformerModelArgs(
         dim=2048,
         n_layers=12,
         n_heads=16,
         vocab_size=50368,
         rope_theta=10_000,
-        # FFN expansion ratio of 4x (4 * 768 = 3072)
         ffn_dim_multiplier=None,
-        # MuP features
         use_embedding_norm=True,
         use_peri_norm=True,
         tie_word_embeddings=True,
         use_torch_layernorm=False,
-        use_simple_silu_ffn=False,
-        use_mlp_mid_norm=True,
-        use_torch_qk_layernorm=False,
-        qk_norm=True,
-        use_attention_value_norm=True,
-        use_attention_output_norm=True,
-        qk_norm_bias=False,
-        qk_norm_elementwise_affine=False,
+        layernorm_impl="rms",
         torch_layernorm_bias=False,
         torch_layernorm_elementwise_affine=False,
-        # Flex attention
+        use_simple_silu_ffn=False,
+        qk_norm=True,
+        qk_norm_bias=False,
+        qk_norm_elementwise_affine=False,
+        use_torch_qk_layernorm=False,
+        qk_layernorm_impl="rms",
         use_flex_attn=True,
         attn_mask_type="block_causal",
+        use_disco=False,
+        use_scion=True,
         mup_config={
             "mup_enabled": True,
             "mup_disable_attention_scaling": True,
@@ -439,11 +452,8 @@ llama3_mup_configs = {
         },
         init_config={
             "init_std": 0.02,
-            "emb_init_std": 0.02,  # Will default to init_std
-            "output_mult": None,  # No special output scaling
-            "hidden_init": "scaled_orthogonal",
-            "embed_init": "normal",
-            "output_init": "normal",
+            "emb_init_std": 0.02,
+            "output_mult": None,
         },
     ),
     "1B": TransformerModelArgs(
@@ -452,21 +462,17 @@ llama3_mup_configs = {
         n_heads=16,
         vocab_size=50368,
         rope_theta=10_000,
-        # FFN expansion ratio of 4x (4 * 768 = 3072)
         ffn_dim_multiplier=None,
-        # MuP features
         use_embedding_norm=True,
         use_peri_norm=True,
         tie_word_embeddings=True,
         use_torch_layernorm=True,
         use_simple_silu_ffn=False,
-        use_torch_qk_layernorm=True,
         qk_norm=True,
         qk_norm_bias=False,
+        qk_norm_elementwise_affine=True,
         torch_layernorm_bias=False,
         torch_layernorm_elementwise_affine=True,
-        qk_norm_elementwise_affine=True,
-        # Flex attention
         use_flex_attn=True,
         attn_mask_type="block_causal",
         mup_config={
@@ -483,37 +489,34 @@ llama3_mup_configs = {
         },
         init_config={
             "init_std": 0.02,
-            "emb_init_std": 0.02,  # Will default to init_std
-            "output_mult": None,  # No special output scaling
+            "emb_init_std": 0.02,
+            "output_mult": None,
         },
     ),
-    "1B_RMS": TransformerModelArgs(
-        norm_eps=1e-20,
+    "1B_scion": TransformerModelArgs(
         dim=2048,
         n_layers=24,
         n_heads=16,
         vocab_size=50368,
         rope_theta=10_000,
-        # FFN expansion ratio of 4x (4 * 768 = 3072)
         ffn_dim_multiplier=None,
-        # MuP features
         use_embedding_norm=True,
         use_peri_norm=True,
         tie_word_embeddings=True,
         use_torch_layernorm=False,
-        use_simple_silu_ffn=False,
-        use_mlp_mid_norm=True,
-        use_torch_qk_layernorm=False,
-        qk_norm=True,
-        use_attention_value_norm=True,
-        use_attention_output_norm=True,
-        qk_norm_bias=False,
-        qk_norm_elementwise_affine=False,
+        layernorm_impl="rms",
         torch_layernorm_bias=False,
         torch_layernorm_elementwise_affine=False,
-        # Flex attention
+        use_simple_silu_ffn=False,
+        qk_norm=True,
+        qk_norm_bias=False,
+        qk_norm_elementwise_affine=False,
+        use_torch_qk_layernorm=False,
+        qk_layernorm_impl="rms",
         use_flex_attn=True,
         attn_mask_type="block_causal",
+        use_disco=False,
+        use_scion=True,
         mup_config={
             "mup_enabled": True,
             "mup_disable_attention_scaling": True,
@@ -528,21 +531,11 @@ llama3_mup_configs = {
         },
         init_config={
             "init_std": 0.02,
-            "emb_init_std": 0.02,  # Will default to init_std
-            "output_mult": None,  # No special output scaling
-            "hidden_init": "scaled_orthogonal",
-            "embed_init": "normal",
-            "output_init": "normal",
+            "emb_init_std": 0.02,
+            "output_mult": None,
         },
     ),
 }
-
-# Automatically generate `_scion` flavours that enable the activation scaling flag.
-for _name, _args in list(llama3_mup_configs.items()):
-    scion_name = f"{_name}_scion"
-    if scion_name in llama3_mup_configs:
-        continue
-    llama3_mup_configs[scion_name] = replace(_args, use_scion=True)
 
 
 def get_train_spec() -> TrainSpec:

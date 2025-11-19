@@ -7,34 +7,33 @@
 
 from dataclasses import replace
 
-from torchtitan.protocols.train_spec import register_train_spec, TrainSpec
+from torchtitan.protocols.train_spec import register_train_spec
 
 from .llama3_mup.train_configs import get_train_spec as get_llama3_mup_train_spec
-
-
-# Register the base Llama3 MuP spec (without Mosaic streaming)
-def _get_llama3_mup_spec() -> TrainSpec:
-    """Get the base Llama3 MuP training specification.
-
-    This version uses standard HuggingFace datasets.
-    """
-    spec = get_llama3_mup_train_spec()
-    return replace(spec, name="llama3_mup")
-
-
-register_train_spec(_get_llama3_mup_spec())
-
-
-# Import Mosaic adapters after the base spec is registered to avoid circular dependency issues.
-from .mosaic_llama3 import get_train_spec as get_mosaic_llama3_train_spec  # noqa: E402
-from .mosaic_llama3_mup import (  # noqa: E402
-    get_train_spec as get_mosaic_llama3_mup_train_spec,
+from .llama3_mup_disco.train_configs import (
+    get_train_spec as get_llama3_mup_disco_train_spec,
 )
 
-# Register the Mosaic Llama3 spec
-get_mosaic_llama3_train_spec()
+
+def _register_base_specs() -> None:
+    """Register base (non-Mosaic) TrainSpecs."""
+    register_train_spec(get_llama3_mup_train_spec())
+    register_train_spec(get_llama3_mup_disco_train_spec())
 
 
-# Register the Mosaic Llama3 MuP spec and alias it for the Scion flavor.
-_mosaic_llama3_mup_spec = get_mosaic_llama3_mup_train_spec()
-register_train_spec(replace(_mosaic_llama3_mup_spec, name="mosaic_llama3_mup_scion"))
+def _register_mosaic_specs() -> None:
+    """Register Mosaic-enabled TrainSpecs after base specs exist."""
+    from .mosaic_llama3 import get_train_spec as get_mosaic_llama3_train_spec
+    from .mosaic_llama3_mup import get_train_spec as get_mosaic_llama3_mup_train_spec
+    from .mosaic_llama3_mup_disco import (
+        get_train_spec as get_mosaic_llama3_mup_disco_train_spec,
+    )
+
+    get_mosaic_llama3_train_spec()
+    get_mosaic_llama3_mup_train_spec()
+    disco_spec = get_mosaic_llama3_mup_disco_train_spec()
+    register_train_spec(replace(disco_spec, name="mosaic_llama3_mup_scion"))
+
+
+_register_base_specs()
+_register_mosaic_specs()

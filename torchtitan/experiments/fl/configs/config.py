@@ -12,6 +12,8 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from typing import Any, Literal, TypeVar
 
+from tyro.conf import Suppress
+
 from torchtitan.components.ft.config import FaultTolerance as FTFaultTolerance
 
 from torchtitan.config import JobConfig
@@ -78,7 +80,7 @@ class MosaicTokenizerConfig:
         },
     )
     # python-explicit-any
-    kwargs: dict[str, Any] = field(
+    kwargs: Suppress[dict[str, Any]] = field(
         default_factory=dict,
         metadata={
             "help": "Keyword arguments forwarded to the tokenizer constructor (HuggingFace or llm-foundry).",
@@ -133,7 +135,7 @@ class MosaicDataLoaderConfig:
         },
     )
     # python-explicit-any
-    dataset: dict[str, Any] = field(
+    dataset: Suppress[dict[str, Any]] = field(
         default_factory=dict,
         metadata={
             "help": "Nested configuration forwarded to Mosaic's StreamingDataset/StreamingTextDataset constructors.",
@@ -170,14 +172,14 @@ class MosaicDataLoaderConfig:
         },
     )
     # python-explicit-any
-    split_overrides: dict[str, dict[str, Any]] = field(
+    split_overrides: Suppress[dict[str, dict[str, Any]]] = field(
         default_factory=dict,
         metadata={
             "help": "Per-split overrides (e.g. 'train', 'val') applied on top of the common DataLoader settings.",
         },
     )
     # python-explicit-any
-    extras: dict[str, Any] = field(
+    extras: Suppress[dict[str, Any]] = field(
         default_factory=dict,
         metadata={
             "help": "Additional configuration keys preserved for downstream consumers."
@@ -605,7 +607,7 @@ class UnigramMetricConfig:
         metadata={"help": "Number of attempts when downloading missing unigram files."},
     )
     # python-explicit-any
-    client_config: dict[str, Any] = field(
+    client_config: Suppress[dict[str, Any]] = field(
         default_factory=dict,
         metadata={
             "help": "Optional boto client configuration used when fetching unigram files from S3."
@@ -642,7 +644,7 @@ class S3CheckpointingConfig:
         },
     )
     # python-explicit-any
-    client_config: dict[str, Any] = field(
+    client_config: Suppress[dict[str, Any]] = field(
         default_factory=dict,
         metadata={
             "help": "Optional boto client configuration forwarded to the RemoteUploaderDownloader backend."

@@ -14,7 +14,7 @@ from .desloc_outer import DES_LOC_OUTER
 from .qhadamw import QHAdamW
 from .qhadopt import QHADOPT
 from .galore import GaLore
-from .scion import Scion, ScionAggMo, ScionLight, QHScion
+from .scion import Muon, Scion, ScionAggMo, ScionLight, QHScion
 
 __all__ = [
     "ADOPT",
@@ -29,4 +29,5 @@ __all__ = [
     "ScionAggMo",
     "QHScion",
     "ScionLight",
+    "Muon",
 ]

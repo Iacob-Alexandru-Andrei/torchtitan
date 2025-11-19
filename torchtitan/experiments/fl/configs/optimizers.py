@@ -11,6 +11,8 @@ import importlib
 from dataclasses import dataclass, field
 from typing import Any, cast, Literal
 
+from tyro.conf import Suppress
+
 import torch
 
 from torch.optim import Optimizer
@@ -86,7 +88,7 @@ class DesLocConfig:
     checkpoint_outer_optimizer: bool = True
     """Whether to include the DES-LOC outer optimizer state in checkpoints."""
 
-    streaming: DesLocStreamingConfig | dict[str, Any] | None = None
+    streaming: Suppress[DesLocStreamingConfig | dict[str, Any] | None] = None
     """Optional configuration for streaming DES-LOC."""
 
     def resolved_backup_device(self) -> torch.device | None:
@@ -191,7 +193,7 @@ class MosaicOptimizerConfig(BaseOptimizer):
     norm: str = "Auto"
     """Norm backend to use with Scion optimizers."""
 
-    norm_kwargs: dict[str, Any] | None = None
+    norm_kwargs: Suppress[dict[str, Any] | None] = None
     """Additional keyword arguments for the selected norm backend."""
 
     scale: float = 1.0
@@ -199,6 +201,9 @@ class MosaicOptimizerConfig(BaseOptimizer):
 
     unconstrained: bool = False
     """Disable the multiplicative shrinkage used by Scion when True."""
+
+    muon_nesterov: bool = True
+    """Whether Muon uses Nesterov-style momentum blending."""
 
     scion_v: float | None = None
     """Quasi-hyperbolic mixing parameter for :class:`ScionQH`."""
@@ -218,7 +223,7 @@ class MosaicOptimizerConfig(BaseOptimizer):
     scion_hidden_norm: str | None = "spectral"
     """Norm applied to Scion transformer body buckets when `use_scion` is true."""
 
-    scion_hidden_norm_kwargs: dict[str, Any] | None = field(
+    scion_hidden_norm_kwargs: Suppress[dict[str, Any] | None] = field(
         default_factory=lambda: {"backend": "newtonschulz5", "backend_steps": 5}
     )
     """Optional kwargs used with the Scion transformer body norm."""
@@ -226,7 +231,9 @@ class MosaicOptimizerConfig(BaseOptimizer):
     scion_output_norm: str | None = "sign"
     """Norm applied to Scion embedding/output buckets when `use_scion` is true."""
 
-    scion_output_norm_kwargs: dict[str, Any] | None = field(default_factory=dict)
+    scion_output_norm_kwargs: Suppress[dict[str, Any] | None] = field(
+        default_factory=dict
+    )
     """Optional kwargs used with the Scion embedding/output norm."""
 
     zeropower_coefficients: tuple[float, float, float] | list[float] | None = None

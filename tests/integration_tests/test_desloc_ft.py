@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from importlib import util as importlib_util
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
+from typing import Any
 
 import pytest
 import torch
@@ -54,6 +55,9 @@ class _DummyManager:
     def register_state_dict_fn(self, key: str, load_fn, save_fn) -> None:
         self._state_dict_registry[key] = (load_fn, save_fn)
 
+    def current_step(self) -> int:
+        return 0
+
 
 @dataclass(frozen=True)
 class _TestOuterOptimizerConfig:
@@ -62,6 +66,17 @@ class _TestOuterOptimizerConfig:
 
     def resolve_optimizer_cls(self):
         return getattr(torch.optim, self.target)
+
+
+@dataclass
+class _TestStreamingConfig:
+    enabled: bool = False
+    fragments: int = 1
+    sync_delay: int = 0
+    update_alpha: float = 0.0
+    use_bucketization: bool = False
+    bucket_cap_mb: float | None = None
+    should_quantize: bool = False
 
 
 class _TestDeslocConfig:
@@ -76,6 +91,8 @@ class _TestDeslocConfig:
         quorum_timeout_seconds: int = 60,
         outer_optimizer: _TestOuterOptimizerConfig | None = None,
         checkpoint_outer_optimizer: bool = True,
+        streaming: _TestStreamingConfig | dict[str, Any] | None = None,
+        log_outer_metrics: bool = False,
     ) -> None:
         self.enabled = enabled
         self.param_sync_every = param_sync_every
@@ -85,6 +102,10 @@ class _TestDeslocConfig:
         self.quorum_timeout_seconds = quorum_timeout_seconds
         self.outer_optimizer = outer_optimizer
         self.checkpoint_outer_optimizer = checkpoint_outer_optimizer
+        self.streaming = (
+            _TestStreamingConfig(**streaming) if isinstance(streaming, dict) else streaming
+        )
+        self.log_outer_metrics = log_outer_metrics
 
     def resolved_backup_device(self) -> torch.device | None:
         return None if self.backup_device is None else torch.device(self.backup_device)
@@ -94,6 +115,12 @@ class _TestDeslocConfig:
 
     def normalized_outer_optimizer(self):
         return self.outer_optimizer
+
+    def resolved_streaming(self):
+        cfg = self.streaming
+        if cfg is None or not cfg.enabled:
+            return None
+        return cfg
 
 
 def _build_job_config(**overrides):
@@ -108,6 +135,7 @@ def _build_job_config(**overrides):
 stub_optimizers = ModuleType("torchtitan.experiments.fl.configs.optimizers")
 stub_optimizers.DesLocConfig = _TestDeslocConfig
 stub_optimizers.DesLocOuterOptimizerConfig = _TestOuterOptimizerConfig
+stub_optimizers.DesLocStreamingConfig = _TestStreamingConfig
 sys.modules.setdefault("torchtitan.experiments.fl.configs.optimizers", stub_optimizers)
 
 _DESLOC_SPEC = importlib_util.spec_from_file_location(
@@ -256,3 +284,26 @@ def test_desloc_outer_optimizer_applies_pseudogradients(monkeypatch):
     expected = original + 0.5 * (local_value - original)
     assert torch.allclose(param.data, expected)
     assert param.grad is None
+
+
+def test_streaming_desloc_uses_streaming_controller():
+    streaming_cfg = _TestStreamingConfig(enabled=True, fragments=2)
+    desloc_cfg = _TestDeslocConfig(param_sync_every=4, streaming=streaming_cfg)
+    dummy_manager = _DummyManager()
+    model = nn.Linear(2, 2, bias=False)
+    outer_optimizer = optim.SGD(model.parameters(), lr=0.2)
+
+    container = desloc_module.DesLocFTOptimizersContainer(
+        desloc_module.DesLocFTOptimizersConfig(
+            model_parts=[model],
+            optimizer_cls=optim.SGD,
+            optimizer_kwargs={"lr": 0.1},
+            ft_manager=dummy_manager,
+            desloc_config=desloc_cfg,
+            outer_optimizer=outer_optimizer,
+        )
+    )
+
+    controller = container._desloc_controllers[0]
+    assert isinstance(controller, desloc_module.StreamingDesLocController)
+    assert controller._fragments[0]._outer_optimizer is outer_optimizer

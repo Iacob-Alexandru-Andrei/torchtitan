@@ -4,7 +4,7 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 
-from typing import Generator
+from typing import Any, Generator
 
 import torch
 import torch.nn as nn
@@ -16,6 +16,7 @@ from torchtitan.components.tokenizer import BaseTokenizer
 from torchtitan.config import JobConfig
 from torchtitan.datasets.hf_datasets import build_hf_validation_dataloader
 from torchtitan.distributed import ParallelDims, utils as dist_utils
+from torchtitan.models.attention import init_attention_mask
 from torchtitan.tools import utils
 from torchtitan.tools.logging import logger
 
@@ -75,6 +76,7 @@ class Validator(BaseValidator):
         self.pp_schedule = pp_schedule
         self.pp_has_first_stage = pp_has_first_stage
         self.pp_has_last_stage = pp_has_last_stage
+        self._eos_id = _resolve_eos_id(tokenizer)
 
         if self.job_config.validation.steps == -1:
             logger.warning(
@@ -107,6 +109,8 @@ class Validator(BaseValidator):
                 input_dict[k] = v.to(device_type)
             inputs = input_dict["input"]
             labels = labels.to(device_type)
+
+            init_attention_mask(inputs, self._eos_id)
 
             optional_context_parallel_ctx = (
                 dist_utils.create_context_parallel_ctx(
@@ -204,3 +208,32 @@ def build_validator(
         pp_has_first_stage=pp_has_first_stage,
         pp_has_last_stage=pp_has_last_stage,
     )
+
+
+def _resolve_eos_id(tokenizer: BaseTokenizer) -> int | None:
+    """Best-effort resolver mirroring Trainer._resolve_eos_id."""
+
+    def _first_int(value: Any) -> int | None:
+        if isinstance(value, int):
+            return value
+        if isinstance(value, (list, tuple)) and value:
+            head = value[0]
+            return head if isinstance(head, int) else None
+        return None
+
+    eos_id = _first_int(getattr(tokenizer, "eos_id", None))
+    if eos_id is not None:
+        return eos_id
+
+    eos_id = _first_int(getattr(tokenizer, "eos_token_id", None))
+    if eos_id is not None:
+        return eos_id
+
+    eos_token = getattr(tokenizer, "eos_token", None)
+    convert = getattr(tokenizer, "convert_tokens_to_ids", None)
+    if eos_token is not None and callable(convert):
+        eos_id = _first_int(convert(eos_token))
+        if eos_id is not None:
+            return eos_id
+
+    return None
