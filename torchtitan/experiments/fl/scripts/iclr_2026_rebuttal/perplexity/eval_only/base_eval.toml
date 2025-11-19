@@ -1,5 +1,5 @@
 [job]
-dump_folder = "./outputs"
+dump_folder = "/local/scratch/photon/outputs"
 description = "Eval-only perplexity run"
 print_args = true
 

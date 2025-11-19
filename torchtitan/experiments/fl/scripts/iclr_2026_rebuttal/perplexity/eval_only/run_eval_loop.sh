@@ -60,6 +60,7 @@ USE_SBATCH=${USE_SBATCH:-true}
 DRY_RUN=${DRY_RUN:-false}
 SBATCH_CPUS_PER_TASK=${SBATCH_CPUS_PER_TASK:-8}
 SBATCH_GPUS_PER_TASK=${SBATCH_GPUS_PER_TASK:-1}
+SBATCH_MAX_CHAINS=${SBATCH_MAX_CHAINS:-1}
 SBATCH_MEM=${SBATCH_MEM:-}
 SBATCH_TIME=${SBATCH_TIME:-}
 SBATCH_PARTITION=${SBATCH_PARTITION:-}
@@ -84,6 +85,7 @@ Environment variables:
   VAL_STEPS             Validation steps (default: 32).
   USE_SBATCH            true/false (default: true).
   DRY_RUN               true/false (default: false).
+  SBATCH_MAX_CHAINS     Number of sbatch dependency chains (default: 2).
   SBATCH_*              Mirrors fields from other sweep scripts (CPUs, GPUs, etc.).
 
 Example:
@@ -128,6 +130,11 @@ normalize_bool() {
 
 USE_SBATCH=$(normalize_bool "${USE_SBATCH}")
 DRY_RUN=$(normalize_bool "${DRY_RUN}")
+
+if ! [[ "${SBATCH_MAX_CHAINS}" =~ ^[0-9]+$ ]] || (( SBATCH_MAX_CHAINS < 1 )); then
+  echo "SBATCH_MAX_CHAINS must be a positive integer (got ${SBATCH_MAX_CHAINS})." >&2
+  exit 1
+fi
 
 serialize_csv() {
   local IFS=','
@@ -249,6 +256,13 @@ read -r -a SBATCH_EXTRA_ARRAY <<< "${SBATCH_ADDITIONAL_ARGS}"
 if [[ -z "${SBATCH_ADDITIONAL_ARGS}" ]]; then
   SBATCH_EXTRA_ARRAY=()
 fi
+declare -a SBATCH_CHAIN_LAST_IDS=()
+declare -a SBATCH_JOB_IDS=()
+if [[ "${USE_SBATCH}" == "true" ]]; then
+  for ((chain_idx = 0; chain_idx < SBATCH_MAX_CHAINS; ++chain_idx)); do
+    SBATCH_CHAIN_LAST_IDS[chain_idx]=''
+  done
+fi
 
 run_steps_locally() {
   local model_size=$1
@@ -282,6 +296,8 @@ submit_sbatch_run_job() {
   local step_values=$5
   local step_indices=$6
   local pending_steps=$7
+   local dependency_job=${8:-}
+   local chain_index=${9:-0}
 
   local job_name="eval-${model_size}-${job_idx}"
   local sbatch_opts=(--parsable "-c" "${SBATCH_CPUS_PER_TASK}" "--gres=gpu:${SBATCH_GPUS_PER_TASK}" "--job-name=${job_name}")
@@ -293,27 +309,33 @@ submit_sbatch_run_job() {
   [[ -n "${SBATCH_CONSTRAINT}" ]] && sbatch_opts+=("--constraint=${SBATCH_CONSTRAINT}")
   [[ -n "${SBATCH_COMMENT}" ]] && sbatch_opts+=("--comment=${SBATCH_COMMENT}")
   [[ -n "${SBATCH_NODE}" ]] && sbatch_opts+=("--nodelist=${SBATCH_NODE}")
+  [[ -n "${dependency_job}" ]] && sbatch_opts+=("--dependency=afterany:${dependency_job}")
   sbatch_opts+=("--output=${SBATCH_LOG_DIR}/%j-${job_name}.out" "--error=${SBATCH_LOG_DIR}/%j-${job_name}.err")
   sbatch_opts+=("${SBATCH_EXTRA_ARRAY[@]}")
 
-  MODEL_SIZE="${model_size}" \
-  RUN_UUID="${run_uuid}" \
-  STEP_VALUES="${step_values}" \
-  STEP_INDICES="${step_indices}" \
-  TOTAL_STEPS="${TOTAL_STEPS}" \
-  JOB_IDX="${job_idx}" \
-  TOTAL_JOBS="${total_jobs}" \
-  PENDING_STEPS="${pending_steps}" \
-  RUN_ONCE_SCRIPT="${RUN_ONCE_SCRIPT}" \
-  VAL_BATCH_SIZE="${VAL_BATCH_SIZE}" \
-  VAL_STEPS="${VAL_STEPS}" \
-  sbatch "${sbatch_opts[@]}" <<'EOF'
+  local job_id
+  if ! job_id=$(
+    MODEL_SIZE="${model_size}" \
+    RUN_UUID="${run_uuid}" \
+    STEP_VALUES="${step_values}" \
+    STEP_INDICES="${step_indices}" \
+    TOTAL_STEPS="${TOTAL_STEPS}" \
+    JOB_IDX="${job_idx}" \
+    TOTAL_JOBS="${total_jobs}" \
+    PENDING_STEPS="${pending_steps}" \
+    RUN_ONCE_SCRIPT="${RUN_ONCE_SCRIPT}" \
+    VAL_BATCH_SIZE="${VAL_BATCH_SIZE}" \
+    VAL_STEPS="${VAL_STEPS}" \
+    CHAIN_INDEX="${chain_index}" \
+    CHAIN_DEPENDENCY="${dependency_job}" \
+    sbatch "${sbatch_opts[@]}" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
 echo "==================================================================="
 echo "Eval run ${JOB_IDX}/${TOTAL_JOBS} | Model ${MODEL_SIZE} | Run ${RUN_UUID}"
 echo "Node: $(hostname) | Time: $(date)"
 echo "Evaluating ${PENDING_STEPS} checkpoint(s) sequentially on this worker."
+echo "Chain index: ${CHAIN_INDEX:-0} | Dependency: ${CHAIN_DEPENDENCY:-none}"
 echo "==================================================================="
 IFS=',' read -r -a steps <<< "${STEP_VALUES}"
 IFS=',' read -r -a step_indices <<< "${STEP_INDICES}"
@@ -330,13 +352,24 @@ for idx in "${!steps[@]}"; do
     --val-steps "${VAL_STEPS}"
 done
 EOF
+  ); then
+    echo "Failed to submit sbatch job ${job_name}." >&2
+    return 1
+  fi
+
+  echo "${job_id}"
 }
 
 total_jobs=${#RUN_MODELS[@]}
-dispatch_mode=$([[ "${USE_SBATCH}" == "true" ]] && echo "sbatch (per-run)" || echo "local")
+if [[ "${USE_SBATCH}" == "true" ]]; then
+  dispatch_mode="sbatch (per-run, ${SBATCH_MAX_CHAINS} chain(s))"
+else
+  dispatch_mode="local"
+fi
 echo "Dispatching ${total_jobs} eval run(s) (${TOTAL_STEPS} checkpoint(s) per run) via ${dispatch_mode}."
 
 job_counter=0
+sbatch_dispatched=0
 for spec in "${RUN_MODELS[@]}"; do
   read -r model_size run_uuid <<<"${spec}"
   if [[ -z "${model_size}" || -z "${run_uuid}" ]]; then
@@ -368,8 +401,39 @@ for spec in "${RUN_MODELS[@]}"; do
     continue
   fi
   if [[ "${USE_SBATCH}" == "true" ]]; then
-    submit_sbatch_run_job "${model_size}" "${run_uuid}" "${job_counter}" "${total_jobs}" "${steps_csv}" "${indices_csv}" "${pending_count}"
+    chain_index=$((sbatch_dispatched % SBATCH_MAX_CHAINS))
+    dependency_job=${SBATCH_CHAIN_LAST_IDS[chain_index]:-}
+    if [[ -n "${dependency_job}" ]]; then
+      echo "[EvalLoop][SBATCH chain ${chain_index}] Queue ${model_size} | ${run_uuid} after job ${dependency_job}." >&2
+    else
+      echo "[EvalLoop][SBATCH chain ${chain_index}] Queue ${model_size} | ${run_uuid} (no dependency)." >&2
+    fi
+    if ! job_id=$(submit_sbatch_run_job "${model_size}" "${run_uuid}" "${job_counter}" "${total_jobs}" "${steps_csv}" "${indices_csv}" "${pending_count}" "${dependency_job}" "${chain_index}"); then
+      echo "Failed to submit sbatch job for ${model_size} | ${run_uuid}. Aborting." >&2
+      exit 1
+    fi
+    SBATCH_CHAIN_LAST_IDS[chain_index]="${job_id}"
+    SBATCH_JOB_IDS+=("${job_id}")
+    ((++sbatch_dispatched))
   else
     run_steps_locally "${model_size}" "${run_uuid}" "${job_counter}" "${total_jobs}" "${steps_csv}" "${indices_csv}"
   fi
 done
+
+if [[ "${DRY_RUN}" == "true" ]]; then
+  echo "[EvalLoop] Dry run complete; reviewed ${job_counter} run(s)." >&2
+elif [[ "${USE_SBATCH}" == "true" ]]; then
+  submitted_jobs=${#SBATCH_JOB_IDS[@]}
+  echo "[EvalLoop] Submitted ${submitted_jobs} sbatch job(s) across ${SBATCH_MAX_CHAINS} chain(s)." >&2
+  for ((chain_idx = 0; chain_idx < SBATCH_MAX_CHAINS; ++chain_idx)); do
+    last_id=${SBATCH_CHAIN_LAST_IDS[chain_idx]:-}
+    if [[ -n "${last_id}" ]]; then
+      status_msg="last job ${last_id}"
+    else
+      status_msg="no jobs queued"
+    fi
+    echo "  - Chain ${chain_idx}: ${status_msg}" >&2
+  done
+else
+  echo "[EvalLoop] Completed ${job_counter} run(s) locally." >&2
+fi

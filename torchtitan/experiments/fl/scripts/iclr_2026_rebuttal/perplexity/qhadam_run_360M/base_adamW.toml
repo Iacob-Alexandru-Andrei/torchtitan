@@ -82,7 +82,7 @@ switch_scale = 1.0
 [fl_metrics.hyperparameter_switch]
 enabled = false
 steps = [2049]
-new_vs = [0.05, 0.95]
+new_vs = [0.00, 0.95]
 new_betas = [0.9,0.999, 0.999]
 reset_momenta = ["exp_avg","exp_avg_2"]
 
