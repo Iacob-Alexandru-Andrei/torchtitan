@@ -99,7 +99,7 @@ else
   export PYTHONPATH="${REPO_ROOT}:${PYTHONPATH}"
 fi
 
-CONFIG_FILE=${CONFIG_FILE:-"${SCRIPT_DIR}/mt_dao_torchft.toml"}
+CONFIG_FILE=${CONFIG_FILE:-"${SCRIPT_DIR}/local_adam_torchft.toml"}
 TRAIN_MODULE=${TRAIN_MODULE:-"torchtitan.experiments.fl.train"}
 NGPU=${NGPU:-4}
 MIN_REPLICAS=${MIN_REPLICAS:-${NGPU}}
@@ -187,7 +187,7 @@ mkdir -p "${LOG_DIR}"
 LIGHTHOUSE_LOG_FILE="${LOG_DIR}/lighthouse.log"
 
 TIMESTAMP=$(date +"%Y%m%d-%H%M%S")
-RUN_PREFIX=${RUN_PREFIX:-"iclr2026-strmtdao16M"}
+RUN_PREFIX=${RUN_PREFIX:-"iclr2026-strlocaladam16M"}
 export RUN_UUID=${RUN_UUID:-"${RUN_PREFIX}-${TIMESTAMP}"}
 export WANDB_PROJECT=${WANDB_PROJECT:-"torchtitan_streaming"}
 export WANDB_TEAM=${WANDB_TEAM:-"camlsys"}
