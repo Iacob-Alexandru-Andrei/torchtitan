@@ -116,6 +116,7 @@ class DesLocControllerConfig:
     log_outer_metrics: bool = False
     metrics_logger: Callable[[dict[str, float]], None] | None = None
     checkpoint_outer_optimizer: bool = True
+    disable_optimizer_state_sync: bool = False
 
 
 @dataclass(frozen=True)
@@ -1362,6 +1363,7 @@ class DesLocController:
         self._name_prefix = config.name_prefix
         self._raw_optimizer_sync_config = config.optimizer_sync_every
         self._quorum_timeout = timedelta(seconds=max(1, config.quorum_timeout_seconds))
+        self._optimizer_state_sync_enabled = not config.disable_optimizer_state_sync
 
         param_fragment_cfg = ParameterFragmentConfig(
             manager=config.manager,
@@ -1385,7 +1387,7 @@ class DesLocController:
 
         self._fragments: list[_BaseFragment] = [self._param_fragment]
         self._allreduce_work: list[Any] = []
-        self._is_opt_init = False
+        self._is_opt_init = not self._optimizer_state_sync_enabled
 
         self._hook = config.optimizer.register_step_post_hook(self._step_post_hook)
 
@@ -1446,6 +1448,9 @@ class DesLocController:
             raise ValueError(msg)
 
     def _lazy_init_optimizer_fragments(self) -> None:
+        if not self._optimizer_state_sync_enabled:
+            self._is_opt_init = True
+            return
         state_sets = set()
         for state in self._optimizer.state.values():
             for key, value in state.items():
@@ -1557,6 +1562,7 @@ class StreamingDesLocController:
         self._metrics_logger = config.metrics_logger
         self._checkpoint_outer_optimizer = config.checkpoint_outer_optimizer
         self._streaming_cfg = streaming
+        self._optimizer_state_sync_enabled = not config.disable_optimizer_state_sync
 
         fragment_strategy = getattr(streaming, "fragment_strategy", "strided")
         custom_fragments = getattr(streaming, "custom_fragments", None)
@@ -1659,7 +1665,7 @@ class StreamingDesLocController:
         self._optimizer_state_schedule = streaming.optimizer_state_schedule
 
         self._state_fragments_per_fragment: list[list[_StreamingOptimizerStateFragment]] = []
-        self._is_opt_init = False
+        self._is_opt_init = not self._optimizer_state_sync_enabled
         self._fragments_synced_this_step: set[int] = set()
         self._pending_aligned_state_frags: dict[int, list[tuple[_StreamingOptimizerStateFragment, int]]] = {}
 
@@ -1842,6 +1848,8 @@ class StreamingDesLocController:
         entry.advance(self._sync_window)
 
     def _maybe_prepare_aligned_state_sync(self, fragment_idx: int) -> None:
+        if not self._optimizer_state_sync_enabled:
+            return
         if self._optimizer_state_schedule != "aligned":
             return
         commit_step = self._inner_step + self._fragment_sync_delay
@@ -1860,6 +1868,8 @@ class StreamingDesLocController:
         self._pending_aligned_state_frags[fragment_idx] = entries
 
     def _drive_aligned_state_completion(self) -> None:
+        if not self._optimizer_state_sync_enabled:
+            return
         if self._optimizer_state_schedule != "aligned":
             return
         if not self._pending_aligned_state_frags:
@@ -1995,6 +2005,10 @@ class StreamingDesLocController:
             raise ValueError(msg)
 
     def _lazy_init_optimizer_fragments(self) -> None:
+        if not self._optimizer_state_sync_enabled:
+            self._state_fragments_per_fragment = [[] for _ in self._fragments]
+            self._is_opt_init = True
+            return
         state_sets: set[str] = set()
         for state in self._optimizer.state.values():
             for key, value in state.items():
@@ -2048,6 +2062,8 @@ class StreamingDesLocController:
         self._log_optimizer_state_fragment_assignments()
 
     def _sync_state_fragments(self, fragment_idx: int, *, limit_one: bool = False) -> None:
+        if not self._optimizer_state_sync_enabled:
+            return
         if not self._state_fragments_per_fragment:
             return
         if fragment_idx >= len(self._state_fragments_per_fragment):
@@ -2091,6 +2107,8 @@ class StreamingDesLocController:
             fragment.reset()
 
     def _drive_staggered_state_schedule(self) -> None:
+        if not self._optimizer_state_sync_enabled:
+            return
         if not self._state_fragments_per_fragment or not self._fragments:
             return
         fragment_idx = self._state_cursor
@@ -2174,6 +2192,7 @@ class DesLocFTOptimizersContainer(FTOptimizersContainer):
                 log_outer_metrics=desloc_config.log_outer_metrics,
                 metrics_logger=None,
                 checkpoint_outer_optimizer=desloc_config.checkpoint_outer_optimizer,
+                disable_optimizer_state_sync=desloc_config.disable_optimizer_state_sync,
             )
             if streaming_cfg is not None:
                 controller = StreamingDesLocController(controller_config, streaming_cfg)

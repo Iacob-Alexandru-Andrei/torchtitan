@@ -103,6 +103,9 @@ class DesLocConfig:
     checkpoint_outer_optimizer: bool = True
     """Whether to include the DES-LOC outer optimizer state in checkpoints."""
 
+    disable_optimizer_state_sync: bool = False
+    """When True, never synchronize optimizer state tensors (parameters still sync)."""
+
     streaming: Suppress[DesLocStreamingConfig | dict[str, Any] | None] = None
     """Optional configuration for streaming DES-LOC."""
 

@@ -49,6 +49,7 @@ param_sync_every = 128
 optimizer_sync_every = 999999  # disable optimizer state sync by default
 backup_device = "cpu"
 pin_memory = true
+disable_optimizer_state_sync = true
 
 [optimizer.desloc.streaming]
 enabled = true
@@ -1126,7 +1127,6 @@ streams = ["stream_40", "stream_41", "stream_42", "stream_43", "stream_44", "str
 
 [mosaic_dataloader.dataset.val.sampling_groups.group_3]
 streams = ["stream_60", "stream_61", "stream_62", "stream_63", "stream_64", "stream_65", "stream_66", "stream_67", "stream_68", "stream_69", "stream_70", "stream_71", "stream_72", "stream_73", "stream_74", "stream_75", "stream_76", "stream_77", "stream_78", "stream_79"]
-
 
 
 
