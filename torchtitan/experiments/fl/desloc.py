@@ -350,10 +350,6 @@ def _group_parameters_for_striding(
     return groups
 
 
-def _contains_layer_params(partition: list[tuple[str, nn.Parameter]]) -> bool:
-    return any(_extract_layer_index(name) is not None for name, _ in partition)
-
-
 def _extract_layer_index(param_name: str) -> int | None:
     token = "layers."
     idx = param_name.find(token)
@@ -372,6 +368,40 @@ def _extract_layer_index(param_name: str) -> int | None:
         return int("".join(digits))
     except ValueError:  # pragma: no cover - defensive
         return None
+
+
+def _contains_layer_params(partition: list[tuple[str, nn.Parameter]]) -> bool:
+    return any(name.startswith("layers.") for name, _ in partition)
+
+
+def _merge_non_layer_partition(
+    partitions: list[list[tuple[str, nn.Parameter]]],
+) -> list[list[tuple[str, nn.Parameter]]]:
+    non_layer_idx = next(
+        (
+            idx
+            for idx, partition in enumerate(partitions)
+            if partition and not _contains_layer_params(partition)
+        ),
+        None,
+    )
+    if non_layer_idx is None:
+        return partitions
+
+    target_idx = next(
+        (
+            idx
+            for idx, partition in enumerate(partitions)
+            if idx != non_layer_idx and _contains_layer_params(partition)
+        ),
+        None,
+    )
+    if target_idx is None:
+        return partitions
+
+    partitions[target_idx] = partitions[non_layer_idx] + partitions[target_idx]
+    del partitions[non_layer_idx]
+    return partitions
 
 
 def _component_key_from_name(param_name: str) -> str:
@@ -1517,11 +1547,13 @@ class StreamingDesLocController:
             msg = "DES-LOC streaming requires at least one model parameter."
             raise ValueError(msg)
 
-        layer_fragment_indices = [
-            idx for idx, partition in enumerate(partitions) if _contains_layer_params(partition)
-        ]
-        if not layer_fragment_indices:
-            layer_fragment_indices = list(range(len(partitions)))
+        if not streaming.separate_non_layer_fragment:
+            before_len = len(partitions)
+            partitions = _merge_non_layer_partition(partitions)
+            if len(partitions) < before_len:
+                logger.info("DES-LOC streaming merged non-layer parameters into fragment 0.")
+
+        layer_fragment_indices = list(range(len(partitions)))
 
         layer_fragment_count = len(layer_fragment_indices)
         num_fragments = len(partitions)

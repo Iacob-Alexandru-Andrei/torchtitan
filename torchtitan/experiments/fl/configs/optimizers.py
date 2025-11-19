@@ -62,6 +62,9 @@ class DesLocStreamingConfig:
     optimizer_state_schedule: Literal["aligned", "staggered"] = "aligned"
     """How optimizer states are scheduled relative to parameter fragments."""
 
+    separate_non_layer_fragment: bool = False
+    """If True the non-layer parameters remain in their own fragment; otherwise they merge into the first layer fragment."""
+
 
 @dataclass
 class DesLocConfig:

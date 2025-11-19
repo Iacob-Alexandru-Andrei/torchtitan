@@ -82,6 +82,7 @@ class _TestStreamingConfig:
     fragment_sync_offsets: list[int] | None = None
     custom_fragments: list[list[str]] | None = None
     optimizer_state_schedule: str = "aligned"
+    separate_non_layer_fragment: bool = False
 
 
 class _TestDeslocConfig:
