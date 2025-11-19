@@ -50,6 +50,7 @@ optimizer_sync_every = 999999  # disable optimizer state sync by default
 backup_device = "cpu"
 pin_memory = true
 disable_optimizer_state_sync = true
+log_outer_metrics = true
 
 [optimizer.desloc.streaming]
 enabled = true
@@ -65,6 +66,7 @@ target = "SGD"
 lr = 0.4          
 momentum = 0.9   
 nesterov = true
+
 
 
 [fl_metrics.optimizer_monitor]
@@ -94,10 +96,10 @@ decay_ratio = 0.0  # lr scheduler decay ratio, 80% of the train steps
 decay_type = "sqrt"
 min_lr_factor = 0.0
 switch_step = 2049
-switch_scale = 2.0
+switch_scale = 1.0
 
 [fl_metrics.hyperparameter_switch]
-enabled = true
+enabled = false
 steps = [2049]
 new_vs = [0.00, 0.95]
 new_betas = [0.9,0.999, 0.999]
