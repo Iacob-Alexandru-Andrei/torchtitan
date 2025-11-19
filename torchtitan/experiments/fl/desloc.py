@@ -743,6 +743,7 @@ class _StreamingOptimizerStateFragment(_BaseFragment):
         self._backup_device = config.backup_device
         self._pin_memory = config.pin_memory
         self._should_quantize = config.should_quantize
+        self._current_sync_step: int | None = None
 
         self._original_state_tensors: dict[str, torch.Tensor] = {}
         self._averaged_state_tensors: list[tuple[str, torch.Tensor]] = []
@@ -760,6 +761,9 @@ class _StreamingOptimizerStateFragment(_BaseFragment):
 
         self._init_backup_storage()
         self.save_state()
+
+    def set_step_context(self, step: int) -> None:
+        self._current_sync_step = step
 
     @property
     def fragment_id(self) -> int:
@@ -805,6 +809,14 @@ class _StreamingOptimizerStateFragment(_BaseFragment):
         assert not self._allreduce_work
         if self._stream is not None:
             self._stream.wait_stream(torch.cuda.current_stream())
+
+        logger.info(
+            "DES-LOC streaming optimizer state '%s' fragment=%s sync starting (step=%s, manager_step=%s)",
+            self.state_key,
+            self._fragment_id,
+            self._current_sync_step if self._current_sync_step is not None else "unknown",
+            self._manager.current_step(),
+        )
 
         context = torch.cuda.stream(self._stream) if self._stream is not None else nullcontext()
         with context:
@@ -903,12 +915,14 @@ class _StreamingOptimizerStateFragment(_BaseFragment):
             self.restore_state()
         self._averaged_state_tensors.clear()
         logger.info(
-            "DES-LOC streaming optimizer state '%s' fragment=%s sync complete (commit=%s, manager_step=%s)",
+            "DES-LOC streaming optimizer state '%s' fragment=%s sync complete (commit=%s, step=%s, manager_step=%s)",
             self.state_key,
             self._fragment_id,
             should_commit,
+            self._current_sync_step if self._current_sync_step is not None else "unknown",
             self._manager.current_step(),
         )
+        self._current_sync_step = None
 
     def _apply_states(self) -> None:
         with torch.no_grad():
@@ -977,6 +991,7 @@ class _StreamingParameterFragment:
         self._averaging_only = outer_optimizer is None
         self._should_quantize = should_quantize
         self._checkpoint_outer_optimizer = checkpoint_outer_optimizer
+        self._current_sync_step: int | None = None
 
         self._grads: dict[str, torch.Tensor] = {}
         self._averaged_parameters: list[tuple[str, torch.Tensor]] = []
@@ -1000,6 +1015,9 @@ class _StreamingParameterFragment:
 
     def set_metrics_logger(self, logger_fn: Callable[[dict[str, float]], None] | None) -> None:
         self._metrics_logger = logger_fn
+
+    def set_step_context(self, step: int) -> None:
+        self._current_sync_step = step
 
     @property
     def parameter_names(self) -> list[str]:
@@ -1226,6 +1244,13 @@ class _StreamingParameterFragment:
         if self._stream is not None:
             self._stream.wait_stream(torch.cuda.current_stream())
 
+        logger.info(
+            "DES-LOC streaming parameter fragment=%s sync starting (step=%s, manager_step=%s)",
+            self._fragment_id,
+            self._current_sync_step if self._current_sync_step is not None else "unknown",
+            self._manager.current_step(),
+        )
+
         context = torch.cuda.stream(self._stream) if self._stream is not None else nullcontext()
         with context:
             if self._averaging_only:
@@ -1302,11 +1327,13 @@ class _StreamingParameterFragment:
         self._averaged_parameters.clear()
 
         logger.info(
-            "DES-LOC streaming parameter fragment=%s sync complete (commit=%s, manager_step=%s)",
+            "DES-LOC streaming parameter fragment=%s sync complete (commit=%s, step=%s, manager_step=%s)",
             self._fragment_id,
             should_commit,
+            self._current_sync_step if self._current_sync_step is not None else "unknown",
             self._manager.current_step(),
         )
+        self._current_sync_step = None
 
         return should_commit
 
@@ -1795,6 +1822,7 @@ class StreamingDesLocController:
             fragment.fragment_id,
             self._inner_step,
         )
+        fragment.set_step_context(self._inner_step)
         fragment.prepare_sync()
         entry.pending = True
 
@@ -1983,6 +2011,7 @@ class StreamingDesLocController:
             return
 
         for fragment in fragments:
+            fragment.set_step_context(self._inner_step)
             fragment.prepare_sync()
         for fragment in fragments:
             fragment.perform_sync()

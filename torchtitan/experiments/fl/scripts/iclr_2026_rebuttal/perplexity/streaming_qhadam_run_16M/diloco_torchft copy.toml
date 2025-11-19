@@ -55,7 +55,7 @@ enabled = true
 fragments = 2  # two transformer blocks per fragment assuming 16 blocks
 fragment_strategy = "strided"
 sync_delay = 1
-update_alpha = 0.0
+update_alpha = 0.5
 
 [fl_metrics.optimizer_monitor]
 interval = 16

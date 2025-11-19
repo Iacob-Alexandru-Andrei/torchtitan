@@ -99,7 +99,7 @@ else
   export PYTHONPATH="${REPO_ROOT}:${PYTHONPATH}"
 fi
 
-CONFIG_FILE=${CONFIG_FILE:-"${SCRIPT_DIR}/base_torchft.toml"}
+CONFIG_FILE=${CONFIG_FILE:-"${SCRIPT_DIR}/mt_dao_torchft.toml"}
 TRAIN_MODULE=${TRAIN_MODULE:-"torchtitan.experiments.fl.train"}
 NGPU=${NGPU:-4}
 MIN_REPLICAS=${MIN_REPLICAS:-${NGPU}}
