@@ -197,14 +197,37 @@ def _partition_named_parameters(
     raise ValueError(msg)
 
 
+_GroupedParams = list[list[tuple[str, nn.Parameter]]]
+
+
 def _partition_strided(
     named_params: list[tuple[str, nn.Parameter]],
     fragments: int,
-) -> list[list[tuple[str, nn.Parameter]]]:
+) -> _GroupedParams:
     groups = _group_parameters_for_striding(named_params)
-    buckets: list[list[tuple[str, nn.Parameter]]] = [[] for _ in range(fragments)]
-    for idx, group in enumerate(groups):
-        buckets[idx % fragments].extend(group)
+    non_layer_groups: _GroupedParams = []
+    layer_groups: _GroupedParams = []
+    for group in groups:
+        name = group[0][0]
+        if _extract_layer_index(name) is None:
+            non_layer_groups.append(group)
+        else:
+            layer_groups.append(group)
+
+    layer_fragment_count = max(1, fragments)
+    buckets: _GroupedParams = [[]]
+    for group in non_layer_groups:
+        buckets[0].extend(group)
+
+    layer_buckets: _GroupedParams = [[] for _ in range(layer_fragment_count)]
+    for idx, group in enumerate(layer_groups):
+        slot = idx % layer_fragment_count
+        layer_buckets[slot].extend(group)
+
+    for bucket in layer_buckets:
+        if bucket:
+            buckets.append(bucket)
+
     return [bucket for bucket in buckets if bucket]
 
 
@@ -297,7 +320,7 @@ def _partition_from_custom_spec(
 
 def _group_parameters_for_striding(
     named_params: list[tuple[str, nn.Parameter]],
-) -> list[list[tuple[str, nn.Parameter]]]:
+) -> _GroupedParams:
     groups: list[list[tuple[str, nn.Parameter]]] = []
     current_group: list[tuple[str, nn.Parameter]] = []
     current_layer: int | None = None
@@ -325,6 +348,10 @@ def _group_parameters_for_striding(
         groups.append(current_group)
 
     return groups
+
+
+def _contains_layer_params(partition: list[tuple[str, nn.Parameter]]) -> bool:
+    return any(_extract_layer_index(name) is not None for name, _ in partition)
 
 
 def _extract_layer_index(param_name: str) -> int | None:
@@ -1466,16 +1493,24 @@ class StreamingDesLocController:
             msg = "DES-LOC streaming requires at least one model parameter."
             raise ValueError(msg)
 
+        layer_fragment_indices = [
+            idx for idx, partition in enumerate(partitions) if _contains_layer_params(partition)
+        ]
+        if not layer_fragment_indices:
+            layer_fragment_indices = list(range(len(partitions)))
+
+        layer_fragment_count = len(layer_fragment_indices)
         num_fragments = len(partitions)
-        if config.param_sync_every < num_fragments:
+
+        if config.param_sync_every < layer_fragment_count:
             msg = "desloc.param_sync_every must be >= the number of streaming fragments."
             raise ValueError(msg)
-        if config.param_sync_every % num_fragments != 0:
+        if config.param_sync_every % layer_fragment_count != 0:
             msg = "desloc.param_sync_every must be divisible by the number of streaming fragments."
             raise ValueError(msg)
 
         self._sync_window = config.param_sync_every
-        self._fragment_stride = self._sync_window // num_fragments
+        self._fragment_stride = self._sync_window // layer_fragment_count
         if streaming.sync_delay >= self._fragment_stride:
             msg = "desloc.streaming.sync_delay must be smaller than param_sync_every / fragments."
             raise ValueError(msg)
@@ -1486,7 +1521,10 @@ class StreamingDesLocController:
         outer_handles = self._build_outer_optimizer_handles(config.outer_optimizer, partitions)
         self._partitions = partitions
         self._fragment_sync_delay = streaming.sync_delay
-        fragment_offsets = self._resolve_fragment_offsets(num_fragments, streaming)
+        layer_offsets = self._resolve_fragment_offsets(layer_fragment_count, streaming)
+        fragment_offsets = self._assign_fragment_offsets(
+            num_fragments, layer_fragment_indices, layer_offsets
+        )
         outer_checkpoint_flags = self._build_outer_checkpoint_flags(outer_handles)
         self._schedule_entries: list[_StreamingFragmentSchedule] = []
         self._fragments: list[_StreamingParameterFragment] = []
@@ -1645,6 +1683,20 @@ class StreamingDesLocController:
                 msg = "Each fragment sync offset must exceed desloc.streaming.sync_delay."
                 raise ValueError(msg)
         return offsets
+
+    @staticmethod
+    def _assign_fragment_offsets(
+        total_fragments: int,
+        layer_fragment_indices: list[int],
+        layer_offsets: list[int],
+    ) -> list[int]:
+        offset_map: dict[int, int] = {}
+        for slot, fragment_idx in enumerate(layer_fragment_indices):
+            offset_map[fragment_idx] = layer_offsets[slot]
+        default_offset = layer_offsets[0]
+        for fragment_idx in range(total_fragments):
+            offset_map.setdefault(fragment_idx, default_offset)
+        return [offset_map[idx] for idx in range(total_fragments)]
 
     def _drive_fragment_schedule(self) -> None:
         if not self._schedule_entries:

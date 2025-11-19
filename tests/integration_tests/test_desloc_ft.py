@@ -160,6 +160,30 @@ def _build_tiny_transformer(num_layers: int = 4) -> nn.Module:
     return _TinyTransformer(num_layers)
 
 
+def _build_transformer_with_embeddings(num_layers: int = 2) -> nn.Module:
+    class _Block(nn.Module):
+        def __init__(self) -> None:
+            super().__init__()
+            self.attention = nn.Linear(2, 2, bias=False)
+            self.feed_forward = nn.Linear(2, 2, bias=False)
+
+        def forward(self, x: torch.Tensor) -> torch.Tensor:  # pragma: no cover - helper stub
+            return self.feed_forward(self.attention(x))
+
+    class _TransformerWithEmbeddings(nn.Module):
+        def __init__(self, layers: int) -> None:
+            super().__init__()
+            self.embedding_norm = nn.LayerNorm(2)
+            self.layers = nn.ModuleList(_Block() for _ in range(layers))
+            self.norm = nn.LayerNorm(2)
+            self.tok_embeddings = nn.Embedding(4, 2)
+
+        def forward(self, x: torch.Tensor) -> torch.Tensor:  # pragma: no cover - helper stub
+            return x
+
+    return _TransformerWithEmbeddings(num_layers)
+
+
 stub_optimizers = ModuleType("torchtitan.experiments.fl.configs.optimizers")
 stub_optimizers.DesLocConfig = _TestDeslocConfig
 stub_optimizers.DesLocOuterOptimizerConfig = _TestOuterOptimizerConfig
@@ -386,15 +410,19 @@ def test_streaming_strided_partition_logs_assignments(caplog):
     )
 
     controller = container._desloc_controllers[0]
-    frag0 = controller._fragments[0].parameter_names
+    assert len(controller._fragments) == streaming_cfg.fragments + 1
+    frag0 = set(controller._fragments[0].parameter_names)
     frag1 = controller._fragments[1].parameter_names
+    frag2 = controller._fragments[2].parameter_names
 
-    assert any("layers.0" in name for name in frag0)
-    assert any("layers.2" in name for name in frag0)
-    assert not any("layers.1" in name for name in frag0)
-    assert not any("layers.3" in name for name in frag0)
-    assert any("layers.1" in name for name in frag1)
-    assert any("layers.3" in name for name in frag1)
+    assert frag0, "Fragment 0 should contain non-layer parameters."
+    assert all(not name.startswith("layers.") for name in frag0)
+    assert any("layers.0" in name for name in frag1)
+    assert any("layers.2" in name for name in frag1)
+    assert not any("layers.1" in name for name in frag1)
+    assert not any("layers.3" in name for name in frag1)
+    assert any("layers.1" in name for name in frag2)
+    assert any("layers.3" in name for name in frag2)
 
     param_logs = [
         record.message
@@ -403,6 +431,44 @@ def test_streaming_strided_partition_logs_assignments(caplog):
     ]
     assert param_logs, "Expected parameter fragment assignment logs."
     assert "layers.0.attention" in param_logs[0]
+
+
+def test_streaming_strided_partition_places_all_non_layers_in_fragment_zero():
+    streaming_cfg = _TestStreamingConfig(enabled=True, fragments=2, fragment_strategy="strided")
+    desloc_cfg = _TestDeslocConfig(param_sync_every=4, streaming=streaming_cfg)
+    dummy_manager = _DummyManager()
+    model = _build_transformer_with_embeddings()
+
+    container = desloc_module.DesLocFTOptimizersContainer(
+        desloc_module.DesLocFTOptimizersConfig(
+            model_parts=[model],
+            optimizer_cls=optim.SGD,
+            optimizer_kwargs={"lr": 0.1},
+            ft_manager=dummy_manager,
+            desloc_config=desloc_cfg,
+        )
+    )
+
+    controller = container._desloc_controllers[0]
+    assert len(controller._fragments) == streaming_cfg.fragments + 1
+    frag0 = set(controller._fragments[0].parameter_names)
+    layer_frags = [
+        set(fragment.parameter_names) for fragment in controller._fragments[1:]
+    ]
+
+    non_layer_names = {
+        name for name, _ in model.named_parameters() if not name.startswith("layers.")
+    }
+    assert frag0 == non_layer_names
+    assert all(
+        all(name.startswith("layers.") for name in fragment) for fragment in layer_frags
+    )
+
+    # Ensure layers still stride between fragments.
+    assert any(name.startswith("layers.0") for name in layer_frags[0])
+    assert any(name.startswith("layers.1") for name in layer_frags[1])
+    assert not any(name.startswith("layers.0") for name in layer_frags[1])
+    assert not any(name.startswith("layers.1") for name in layer_frags[0])
 
 
 def test_streaming_custom_fragments_and_offsets():
