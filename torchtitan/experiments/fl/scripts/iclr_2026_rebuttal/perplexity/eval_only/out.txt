@@ -1576,3 +1576,351 @@ Dispatching 18 eval run(s) (20 checkpoint(s) per run) via sbatch (per-run).
 [wandb-check]   - Filter 'display_name': no matches
 [wandb-check]   - Filter 'display_name regex': no matches
 [wandb-check] No matches for 'iclr2026-adamw360M-20251115-215917_2' in 'camlsys/torchtitan_validation'
+[wandb-check] Searching 'camlsys/torchtitan_validation' for run 'iclr2026-adamw360M-20251115-215917_3'
+[wandb-check]   - Filter 'config.run_uuid.value': no matches
+[wandb-check]   - Filter 'group': no matches
+[wandb-check]   - Filter 'display_name': no matches
+[wandb-check]   - Filter 'display_name regex': no matches
+[wandb-check] No matches for 'iclr2026-adamw360M-20251115-215917_3' in 'camlsys/torchtitan_validation'
+[wandb-check] Searching 'camlsys/torchtitan_validation' for run 'iclr2026-adamw360M-20251115-215917_4'
+[wandb-check]   - Filter 'config.run_uuid.value': no matches
+[wandb-check]   - Filter 'group': no matches
+[wandb-check]   - Filter 'display_name': no matches
+[wandb-check]   - Filter 'display_name regex': no matches
+[wandb-check] No matches for 'iclr2026-adamw360M-20251115-215917_4' in 'camlsys/torchtitan_validation'
+[wandb-check] Searching 'camlsys/torchtitan_validation' for run 'iclr2026-adamw360M-20251115-215917_5'
+[wandb-check]   - Filter 'config.run_uuid.value': no matches
+[wandb-check]   - Filter 'group': no matches
+[wandb-check]   - Filter 'display_name': no matches
+[wandb-check]   - Filter 'display_name regex': no matches
+[wandb-check] No matches for 'iclr2026-adamw360M-20251115-215917_5' in 'camlsys/torchtitan_validation'
+[wandb-check] Searching 'camlsys/torchtitan_validation' for run 'iclr2026-adamw360M-20251115-215917_6'
+[wandb-check]   - Filter 'config.run_uuid.value': no matches
+[wandb-check]   - Filter 'group': no matches
+[wandb-check]   - Filter 'display_name': no matches
+[wandb-check]   - Filter 'display_name regex': no matches
+[wandb-check] No matches for 'iclr2026-adamw360M-20251115-215917_6' in 'camlsys/torchtitan_validation'
+[wandb-check] Searching 'camlsys/torchtitan_validation' for run 'iclr2026-adamw360M-20251115-215917_7'
+[wandb-check]   - Filter 'config.run_uuid.value': no matches
+[wandb-check]   - Filter 'group': no matches
+[wandb-check]   - Filter 'display_name': no matches
+[wandb-check]   - Filter 'display_name regex': no matches
+[wandb-check] No matches for 'iclr2026-adamw360M-20251115-215917_7' in 'camlsys/torchtitan_validation'
+[wandb-check] Searching 'camlsys/torchtitan_validation' for run 'iclr2026-adamw360M-20251115-215917_8'
+[wandb-check]   - Filter 'config.run_uuid.value': no matches
+[wandb-check]   - Filter 'group': no matches
+[wandb-check]   - Filter 'display_name': no matches
+[wandb-check]   - Filter 'display_name regex': no matches
+[wandb-check] No matches for 'iclr2026-adamw360M-20251115-215917_8' in 'camlsys/torchtitan_validation'
+[wandb-check] Searching 'camlsys/torchtitan_validation' for run 'iclr2026-adamw360M-20251115-215917_9'
+[wandb-check]   - Filter 'config.run_uuid.value': no matches
+[wandb-check]   - Filter 'group': no matches
+[wandb-check]   - Filter 'display_name': no matches
+[wandb-check]   - Filter 'display_name regex': no matches
+[wandb-check] No matches for 'iclr2026-adamw360M-20251115-215917_9' in 'camlsys/torchtitan_validation'
+[wandb-check] Searching 'camlsys/torchtitan_validation' for run 'iclr2026-adamw360M-20251115-215917_10'
+[wandb-check]   - Filter 'config.run_uuid.value': no matches
+[wandb-check]   - Filter 'group': no matches
+[wandb-check]   - Filter 'display_name': no matches
+[wandb-check]   - Filter 'display_name regex': no matches
+[wandb-check] No matches for 'iclr2026-adamw360M-20251115-215917_10' in 'camlsys/torchtitan_validation'
+[wandb-check] Searching 'camlsys/torchtitan_validation' for run 'iclr2026-adamw360M-20251115-215917_11'
+[wandb-check]   - Filter 'config.run_uuid.value': no matches
+[wandb-check]   - Filter 'group': no matches
+[wandb-check]   - Filter 'display_name': no matches
+[wandb-check]   - Filter 'display_name regex': no matches
+[wandb-check] No matches for 'iclr2026-adamw360M-20251115-215917_11' in 'camlsys/torchtitan_validation'
+[wandb-check] Searching 'camlsys/torchtitan_validation' for run 'iclr2026-adamw360M-20251115-215917_12'
+[wandb-check]   - Filter 'config.run_uuid.value': no matches
+[wandb-check]   - Filter 'group': no matches
+[wandb-check]   - Filter 'display_name': no matches
+[wandb-check]   - Filter 'display_name regex': no matches
+[wandb-check] No matches for 'iclr2026-adamw360M-20251115-215917_12' in 'camlsys/torchtitan_validation'
+[wandb-check] Searching 'camlsys/torchtitan_validation' for run 'iclr2026-adamw360M-20251115-215917_13'
+[wandb-check]   - Filter 'config.run_uuid.value': no matches
+[wandb-check]   - Filter 'group': no matches
+[wandb-check]   - Filter 'display_name': no matches
+[wandb-check]   - Filter 'display_name regex': no matches
+[wandb-check] No matches for 'iclr2026-adamw360M-20251115-215917_13' in 'camlsys/torchtitan_validation'
+[wandb-check] Searching 'camlsys/torchtitan_validation' for run 'iclr2026-adamw360M-20251115-215917_14'
+[wandb-check]   - Filter 'config.run_uuid.value': no matches
+[wandb-check]   - Filter 'group': no matches
+[wandb-check]   - Filter 'display_name': no matches
+[wandb-check]   - Filter 'display_name regex': no matches
+[wandb-check] No matches for 'iclr2026-adamw360M-20251115-215917_14' in 'camlsys/torchtitan_validation'
+[wandb-check] Searching 'camlsys/torchtitan_validation' for run 'iclr2026-adamw360M-20251115-215917_15'
+[wandb-check]   - Filter 'config.run_uuid.value': no matches
+[wandb-check]   - Filter 'group': no matches
+[wandb-check]   - Filter 'display_name': no matches
+[wandb-check]   - Filter 'display_name regex': no matches
+[wandb-check] No matches for 'iclr2026-adamw360M-20251115-215917_15' in 'camlsys/torchtitan_validation'
+[wandb-check] Searching 'camlsys/torchtitan_validation' for run 'iclr2026-adamw360M-20251115-215917_16'
+[wandb-check]   - Filter 'config.run_uuid.value': no matches
+[wandb-check]   - Filter 'group': no matches
+[wandb-check]   - Filter 'display_name': no matches
+[wandb-check]   - Filter 'display_name regex': no matches
+[wandb-check] No matches for 'iclr2026-adamw360M-20251115-215917_16' in 'camlsys/torchtitan_validation'
+[wandb-check] Searching 'camlsys/torchtitan_validation' for run 'iclr2026-adamw360M-20251115-215917_17'
+[wandb-check]   - Filter 'config.run_uuid.value': no matches
+[wandb-check]   - Filter 'group': no matches
+[wandb-check]   - Filter 'display_name': no matches
+[wandb-check]   - Filter 'display_name regex': no matches
+[wandb-check] No matches for 'iclr2026-adamw360M-20251115-215917_17' in 'camlsys/torchtitan_validation'
+[wandb-check] Searching 'camlsys/torchtitan_validation' for run 'iclr2026-adamw360M-20251115-215917_18'
+[wandb-check]   - Filter 'config.run_uuid.value': no matches
+[wandb-check]   - Filter 'group': no matches
+[wandb-check]   - Filter 'display_name': no matches
+[wandb-check]   - Filter 'display_name regex': no matches
+[wandb-check] No matches for 'iclr2026-adamw360M-20251115-215917_18' in 'camlsys/torchtitan_validation'
+[wandb-check] Searching 'camlsys/torchtitan_validation' for run 'iclr2026-adamw360M-20251115-215917_19'
+[wandb-check]   - Filter 'config.run_uuid.value': no matches
+[wandb-check]   - Filter 'group': no matches
+[wandb-check]   - Filter 'display_name': no matches
+[wandb-check]   - Filter 'display_name regex': no matches
+[wandb-check] No matches for 'iclr2026-adamw360M-20251115-215917_19' in 'camlsys/torchtitan_validation'
+[EvalLoop] 12/18: 360M | iclr2026-adamw360M-20251115-215917 (20 pending step(s))
+28246
+[wandb-check] Searching 'camlsys/torchtitan_validation' for run 'iclr2026-agg3mtdao125M-20251118-004346_0'
+[wandb-check]   - Filter 'config.run_uuid.value': no matches
+[wandb-check]   - Filter 'group': no matches
+[wandb-check]   - Filter 'display_name': no matches
+[wandb-check]   - Filter 'display_name regex': no matches
+[wandb-check] No matches for 'iclr2026-agg3mtdao125M-20251118-004346_0' in 'camlsys/torchtitan_validation'
+[wandb-check] Searching 'camlsys/torchtitan_validation' for run 'iclr2026-agg3mtdao125M-20251118-004346_1'
+[wandb-check]   - Filter 'config.run_uuid.value': no matches
+[wandb-check]   - Filter 'group': no matches
+[wandb-check]   - Filter 'display_name': no matches
+[wandb-check]   - Filter 'display_name regex': no matches
+[wandb-check] No matches for 'iclr2026-agg3mtdao125M-20251118-004346_1' in 'camlsys/torchtitan_validation'
+[wandb-check] Searching 'camlsys/torchtitan_validation' for run 'iclr2026-agg3mtdao125M-20251118-004346_2'
+[wandb-check]   - Filter 'config.run_uuid.value': no matches
+[wandb-check]   - Filter 'group': no matches
+[wandb-check]   - Filter 'display_name': no matches
+[wandb-check]   - Filter 'display_name regex': no matches
+[wandb-check] No matches for 'iclr2026-agg3mtdao125M-20251118-004346_2' in 'camlsys/torchtitan_validation'
+[wandb-check] Searching 'camlsys/torchtitan_validation' for run 'iclr2026-agg3mtdao125M-20251118-004346_3'
+[wandb-check]   - Filter 'config.run_uuid.value': no matches
+[wandb-check]   - Filter 'group': no matches
+[wandb-check]   - Filter 'display_name': no matches
+[wandb-check]   - Filter 'display_name regex': no matches
+[wandb-check] No matches for 'iclr2026-agg3mtdao125M-20251118-004346_3' in 'camlsys/torchtitan_validation'
+[wandb-check] Searching 'camlsys/torchtitan_validation' for run 'iclr2026-agg3mtdao125M-20251118-004346_4'
+[wandb-check]   - Filter 'config.run_uuid.value': no matches
+[wandb-check]   - Filter 'group': no matches
+[wandb-check]   - Filter 'display_name': no matches
+[wandb-check]   - Filter 'display_name regex': no matches
+[wandb-check] No matches for 'iclr2026-agg3mtdao125M-20251118-004346_4' in 'camlsys/torchtitan_validation'
+[wandb-check] Searching 'camlsys/torchtitan_validation' for run 'iclr2026-agg3mtdao125M-20251118-004346_5'
+[wandb-check]   - Filter 'config.run_uuid.value': no matches
+[wandb-check]   - Filter 'group': no matches
+[wandb-check]   - Filter 'display_name': no matches
+[wandb-check]   - Filter 'display_name regex': no matches
+[wandb-check] No matches for 'iclr2026-agg3mtdao125M-20251118-004346_5' in 'camlsys/torchtitan_validation'
+[wandb-check] Searching 'camlsys/torchtitan_validation' for run 'iclr2026-agg3mtdao125M-20251118-004346_6'
+[wandb-check]   - Filter 'config.run_uuid.value': no matches
+[wandb-check]   - Filter 'group': no matches
+[wandb-check]   - Filter 'display_name': no matches
+[wandb-check]   - Filter 'display_name regex': no matches
+[wandb-check] No matches for 'iclr2026-agg3mtdao125M-20251118-004346_6' in 'camlsys/torchtitan_validation'
+[wandb-check] Searching 'camlsys/torchtitan_validation' for run 'iclr2026-agg3mtdao125M-20251118-004346_7'
+[wandb-check]   - Filter 'config.run_uuid.value': no matches
+[wandb-check]   - Filter 'group': no matches
+[wandb-check]   - Filter 'display_name': no matches
+[wandb-check]   - Filter 'display_name regex': no matches
+[wandb-check] No matches for 'iclr2026-agg3mtdao125M-20251118-004346_7' in 'camlsys/torchtitan_validation'
+[wandb-check] Searching 'camlsys/torchtitan_validation' for run 'iclr2026-agg3mtdao125M-20251118-004346_8'
+[wandb-check]   - Filter 'config.run_uuid.value': no matches
+[wandb-check]   - Filter 'group': no matches
+[wandb-check]   - Filter 'display_name': no matches
+[wandb-check]   - Filter 'display_name regex': no matches
+[wandb-check] No matches for 'iclr2026-agg3mtdao125M-20251118-004346_8' in 'camlsys/torchtitan_validation'
+[wandb-check] Searching 'camlsys/torchtitan_validation' for run 'iclr2026-agg3mtdao125M-20251118-004346_9'
+[wandb-check]   - Filter 'config.run_uuid.value': no matches
+[wandb-check]   - Filter 'group': no matches
+[wandb-check]   - Filter 'display_name': no matches
+[wandb-check]   - Filter 'display_name regex': no matches
+[wandb-check] No matches for 'iclr2026-agg3mtdao125M-20251118-004346_9' in 'camlsys/torchtitan_validation'
+[wandb-check] Searching 'camlsys/torchtitan_validation' for run 'iclr2026-agg3mtdao125M-20251118-004346_10'
+[wandb-check]   - Filter 'config.run_uuid.value': no matches
+[wandb-check]   - Filter 'group': no matches
+[wandb-check]   - Filter 'display_name': no matches
+[wandb-check]   - Filter 'display_name regex': no matches
+[wandb-check] No matches for 'iclr2026-agg3mtdao125M-20251118-004346_10' in 'camlsys/torchtitan_validation'
+[wandb-check] Searching 'camlsys/torchtitan_validation' for run 'iclr2026-agg3mtdao125M-20251118-004346_11'
+[wandb-check]   - Filter 'config.run_uuid.value': no matches
+[wandb-check]   - Filter 'group': no matches
+[wandb-check]   - Filter 'display_name': no matches
+[wandb-check]   - Filter 'display_name regex': no matches
+[wandb-check] No matches for 'iclr2026-agg3mtdao125M-20251118-004346_11' in 'camlsys/torchtitan_validation'
+[wandb-check] Searching 'camlsys/torchtitan_validation' for run 'iclr2026-agg3mtdao125M-20251118-004346_12'
+[wandb-check]   - Filter 'config.run_uuid.value': no matches
+[wandb-check]   - Filter 'group': no matches
+[wandb-check]   - Filter 'display_name': no matches
+[wandb-check]   - Filter 'display_name regex': no matches
+[wandb-check] No matches for 'iclr2026-agg3mtdao125M-20251118-004346_12' in 'camlsys/torchtitan_validation'
+[wandb-check] Searching 'camlsys/torchtitan_validation' for run 'iclr2026-agg3mtdao125M-20251118-004346_13'
+[wandb-check]   - Filter 'config.run_uuid.value': no matches
+[wandb-check]   - Filter 'group': no matches
+[wandb-check]   - Filter 'display_name': no matches
+[wandb-check]   - Filter 'display_name regex': no matches
+[wandb-check] No matches for 'iclr2026-agg3mtdao125M-20251118-004346_13' in 'camlsys/torchtitan_validation'
+[wandb-check] Searching 'camlsys/torchtitan_validation' for run 'iclr2026-agg3mtdao125M-20251118-004346_14'
+[wandb-check]   - Filter 'config.run_uuid.value': no matches
+[wandb-check]   - Filter 'group': no matches
+[wandb-check]   - Filter 'display_name': no matches
+[wandb-check]   - Filter 'display_name regex': no matches
+[wandb-check] No matches for 'iclr2026-agg3mtdao125M-20251118-004346_14' in 'camlsys/torchtitan_validation'
+[wandb-check] Searching 'camlsys/torchtitan_validation' for run 'iclr2026-agg3mtdao125M-20251118-004346_15'
+[wandb-check]   - Filter 'config.run_uuid.value': no matches
+[wandb-check]   - Filter 'group': no matches
+[wandb-check]   - Filter 'display_name': no matches
+[wandb-check]   - Filter 'display_name regex': no matches
+[wandb-check] No matches for 'iclr2026-agg3mtdao125M-20251118-004346_15' in 'camlsys/torchtitan_validation'
+[wandb-check] Searching 'camlsys/torchtitan_validation' for run 'iclr2026-agg3mtdao125M-20251118-004346_16'
+[wandb-check]   - Filter 'config.run_uuid.value': no matches
+[wandb-check]   - Filter 'group': no matches
+[wandb-check]   - Filter 'display_name': no matches
+[wandb-check]   - Filter 'display_name regex': no matches
+[wandb-check] No matches for 'iclr2026-agg3mtdao125M-20251118-004346_16' in 'camlsys/torchtitan_validation'
+[wandb-check] Searching 'camlsys/torchtitan_validation' for run 'iclr2026-agg3mtdao125M-20251118-004346_17'
+[wandb-check]   - Filter 'config.run_uuid.value': no matches
+[wandb-check]   - Filter 'group': no matches
+[wandb-check]   - Filter 'display_name': no matches
+[wandb-check]   - Filter 'display_name regex': no matches
+[wandb-check] No matches for 'iclr2026-agg3mtdao125M-20251118-004346_17' in 'camlsys/torchtitan_validation'
+[wandb-check] Searching 'camlsys/torchtitan_validation' for run 'iclr2026-agg3mtdao125M-20251118-004346_18'
+[wandb-check]   - Filter 'config.run_uuid.value': no matches
+[wandb-check]   - Filter 'group': no matches
+[wandb-check]   - Filter 'display_name': no matches
+[wandb-check]   - Filter 'display_name regex': no matches
+[wandb-check] No matches for 'iclr2026-agg3mtdao125M-20251118-004346_18' in 'camlsys/torchtitan_validation'
+[wandb-check] Searching 'camlsys/torchtitan_validation' for run 'iclr2026-agg3mtdao125M-20251118-004346_19'
+[wandb-check]   - Filter 'config.run_uuid.value': no matches
+[wandb-check]   - Filter 'group': no matches
+[wandb-check]   - Filter 'display_name': no matches
+[wandb-check]   - Filter 'display_name regex': no matches
+[wandb-check] No matches for 'iclr2026-agg3mtdao125M-20251118-004346_19' in 'camlsys/torchtitan_validation'
+[EvalLoop] 13/18: 125M | iclr2026-agg3mtdao125M-20251118-004346 (20 pending step(s))
+28247
+[wandb-check] Searching 'camlsys/torchtitan_validation' for run 'iclr2026-mtdao360M-20251116-224929_0'
+[wandb-check]   - Filter 'config.run_uuid.value': no matches
+[wandb-check]   - Filter 'group': no matches
+[wandb-check]   - Filter 'display_name': no matches
+[wandb-check]   - Filter 'display_name regex': no matches
+[wandb-check] No matches for 'iclr2026-mtdao360M-20251116-224929_0' in 'camlsys/torchtitan_validation'
+[wandb-check] Searching 'camlsys/torchtitan_validation' for run 'iclr2026-mtdao360M-20251116-224929_1'
+[wandb-check]   - Filter 'config.run_uuid.value': no matches
+[wandb-check]   - Filter 'group': no matches
+[wandb-check]   - Filter 'display_name': no matches
+[wandb-check]   - Filter 'display_name regex': no matches
+[wandb-check] No matches for 'iclr2026-mtdao360M-20251116-224929_1' in 'camlsys/torchtitan_validation'
+[wandb-check] Searching 'camlsys/torchtitan_validation' for run 'iclr2026-mtdao360M-20251116-224929_2'
+[wandb-check]   - Filter 'config.run_uuid.value': no matches
+[wandb-check]   - Filter 'group': no matches
+[wandb-check]   - Filter 'display_name': no matches
+[wandb-check]   - Filter 'display_name regex': no matches
+[wandb-check] No matches for 'iclr2026-mtdao360M-20251116-224929_2' in 'camlsys/torchtitan_validation'
+[wandb-check] Searching 'camlsys/torchtitan_validation' for run 'iclr2026-mtdao360M-20251116-224929_3'
+[wandb-check]   - Filter 'config.run_uuid.value': no matches
+[wandb-check]   - Filter 'group': no matches
+[wandb-check]   - Filter 'display_name': no matches
+[wandb-check]   - Filter 'display_name regex': no matches
+[wandb-check] No matches for 'iclr2026-mtdao360M-20251116-224929_3' in 'camlsys/torchtitan_validation'
+[wandb-check] Searching 'camlsys/torchtitan_validation' for run 'iclr2026-mtdao360M-20251116-224929_4'
+[wandb-check]   - Filter 'config.run_uuid.value': no matches
+[wandb-check]   - Filter 'group': no matches
+[wandb-check]   - Filter 'display_name': no matches
+[wandb-check]   - Filter 'display_name regex': no matches
+[wandb-check] No matches for 'iclr2026-mtdao360M-20251116-224929_4' in 'camlsys/torchtitan_validation'
+[wandb-check] Searching 'camlsys/torchtitan_validation' for run 'iclr2026-mtdao360M-20251116-224929_5'
+[wandb-check]   - Filter 'config.run_uuid.value': no matches
+[wandb-check]   - Filter 'group': no matches
+[wandb-check]   - Filter 'display_name': no matches
+[wandb-check]   - Filter 'display_name regex': no matches
+[wandb-check] No matches for 'iclr2026-mtdao360M-20251116-224929_5' in 'camlsys/torchtitan_validation'
+[wandb-check] Searching 'camlsys/torchtitan_validation' for run 'iclr2026-mtdao360M-20251116-224929_6'
+[wandb-check]   - Filter 'config.run_uuid.value': no matches
+[wandb-check]   - Filter 'group': no matches
+[wandb-check]   - Filter 'display_name': no matches
+[wandb-check]   - Filter 'display_name regex': no matches
+[wandb-check] No matches for 'iclr2026-mtdao360M-20251116-224929_6' in 'camlsys/torchtitan_validation'
+[wandb-check] Searching 'camlsys/torchtitan_validation' for run 'iclr2026-mtdao360M-20251116-224929_7'
+[wandb-check]   - Filter 'config.run_uuid.value': no matches
+[wandb-check]   - Filter 'group': no matches
+[wandb-check]   - Filter 'display_name': no matches
+[wandb-check]   - Filter 'display_name regex': no matches
+[wandb-check] No matches for 'iclr2026-mtdao360M-20251116-224929_7' in 'camlsys/torchtitan_validation'
+[wandb-check] Searching 'camlsys/torchtitan_validation' for run 'iclr2026-mtdao360M-20251116-224929_8'
+[wandb-check]   - Filter 'config.run_uuid.value': no matches
+[wandb-check]   - Filter 'group': no matches
+[wandb-check]   - Filter 'display_name': no matches
+[wandb-check]   - Filter 'display_name regex': no matches
+[wandb-check] No matches for 'iclr2026-mtdao360M-20251116-224929_8' in 'camlsys/torchtitan_validation'
+[wandb-check] Searching 'camlsys/torchtitan_validation' for run 'iclr2026-mtdao360M-20251116-224929_9'
+[wandb-check]   - Filter 'config.run_uuid.value': no matches
+[wandb-check]   - Filter 'group': no matches
+[wandb-check]   - Filter 'display_name': no matches
+[wandb-check]   - Filter 'display_name regex': no matches
+[wandb-check] No matches for 'iclr2026-mtdao360M-20251116-224929_9' in 'camlsys/torchtitan_validation'
+[wandb-check] Searching 'camlsys/torchtitan_validation' for run 'iclr2026-mtdao360M-20251116-224929_10'
+[wandb-check]   - Filter 'config.run_uuid.value': no matches
+[wandb-check]   - Filter 'group': no matches
+[wandb-check]   - Filter 'display_name': no matches
+[wandb-check]   - Filter 'display_name regex': no matches
+[wandb-check] No matches for 'iclr2026-mtdao360M-20251116-224929_10' in 'camlsys/torchtitan_validation'
+[wandb-check] Searching 'camlsys/torchtitan_validation' for run 'iclr2026-mtdao360M-20251116-224929_11'
+[wandb-check]   - Filter 'config.run_uuid.value': no matches
+[wandb-check]   - Filter 'group': no matches
+[wandb-check]   - Filter 'display_name': no matches
+[wandb-check]   - Filter 'display_name regex': no matches
+[wandb-check] No matches for 'iclr2026-mtdao360M-20251116-224929_11' in 'camlsys/torchtitan_validation'
+[wandb-check] Searching 'camlsys/torchtitan_validation' for run 'iclr2026-mtdao360M-20251116-224929_12'
+[wandb-check]   - Filter 'config.run_uuid.value': no matches
+[wandb-check]   - Filter 'group': no matches
+[wandb-check]   - Filter 'display_name': no matches
+[wandb-check]   - Filter 'display_name regex': no matches
+[wandb-check] No matches for 'iclr2026-mtdao360M-20251116-224929_12' in 'camlsys/torchtitan_validation'
+[wandb-check] Searching 'camlsys/torchtitan_validation' for run 'iclr2026-mtdao360M-20251116-224929_13'
+[wandb-check]   - Filter 'config.run_uuid.value': no matches
+[wandb-check]   - Filter 'group': no matches
+[wandb-check]   - Filter 'display_name': no matches
+[wandb-check]   - Filter 'display_name regex': no matches
+[wandb-check] No matches for 'iclr2026-mtdao360M-20251116-224929_13' in 'camlsys/torchtitan_validation'
+[wandb-check] Searching 'camlsys/torchtitan_validation' for run 'iclr2026-mtdao360M-20251116-224929_14'
+[wandb-check]   - Filter 'config.run_uuid.value': no matches
+[wandb-check]   - Filter 'group': no matches
+[wandb-check]   - Filter 'display_name': no matches
+[wandb-check]   - Filter 'display_name regex': no matches
+[wandb-check] No matches for 'iclr2026-mtdao360M-20251116-224929_14' in 'camlsys/torchtitan_validation'
+[wandb-check] Searching 'camlsys/torchtitan_validation' for run 'iclr2026-mtdao360M-20251116-224929_15'
+[wandb-check]   - Filter 'config.run_uuid.value': no matches
+[wandb-check]   - Filter 'group': no matches
+[wandb-check]   - Filter 'display_name': no matches
+[wandb-check]   - Filter 'display_name regex': no matches
+[wandb-check] No matches for 'iclr2026-mtdao360M-20251116-224929_15' in 'camlsys/torchtitan_validation'
+[wandb-check] Searching 'camlsys/torchtitan_validation' for run 'iclr2026-mtdao360M-20251116-224929_16'
+[wandb-check]   - Filter 'config.run_uuid.value': no matches
+[wandb-check]   - Filter 'group': no matches
+[wandb-check]   - Filter 'display_name': no matches
+[wandb-check]   - Filter 'display_name regex': no matches
+[wandb-check] No matches for 'iclr2026-mtdao360M-20251116-224929_16' in 'camlsys/torchtitan_validation'
+[wandb-check] Searching 'camlsys/torchtitan_validation' for run 'iclr2026-mtdao360M-20251116-224929_17'
+[wandb-check]   - Filter 'config.run_uuid.value': no matches
+[wandb-check]   - Filter 'group': no matches
+[wandb-check]   - Filter 'display_name': no matches
+[wandb-check]   - Filter 'display_name regex': no matches
+[wandb-check] No matches for 'iclr2026-mtdao360M-20251116-224929_17' in 'camlsys/torchtitan_validation'
+[wandb-check] Searching 'camlsys/torchtitan_validation' for run 'iclr2026-mtdao360M-20251116-224929_18'
+[wandb-check]   - Filter 'config.run_uuid.value': no matches
+[wandb-check]   - Filter 'group': no matches
+[wandb-check]   - Filter 'display_name': no matches
+[wandb-check]   - Filter 'display_name regex': no matches
+[wandb-check] No matches for 'iclr2026-mtdao360M-20251116-224929_18' in 'camlsys/torchtitan_validation'
+[wandb-check] Searching 'camlsys/torchtitan_validation' for run 'iclr2026-mtdao360M-20251116-224929_19'
+[wandb-check]   - Filter 'config.run_uuid.value': no matches
+[wandb-check]   - Filter 'group': no matches
+[wandb-check]   - Filter 'display_name': no matches
+[wandb-check]   - Filter 'display_name regex': no matches
+[wandb-check] No matches for 'iclr2026-mtdao360M-20251116-224929_19' in 'camlsys/torchtitan_validation'
+[EvalLoop] 14/18: 360M | iclr2026-mtdao360M-20251116-224929 (20 pending step(s))
+28248
