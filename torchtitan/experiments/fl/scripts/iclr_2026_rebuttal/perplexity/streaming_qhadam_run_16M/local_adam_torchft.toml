@@ -84,10 +84,10 @@ decay_ratio = 0.0  # lr scheduler decay ratio, 80% of the train steps
 decay_type = "sqrt"
 min_lr_factor = 0.0
 switch_step = 2049
-switch_scale = 2.0
+switch_scale = 1.0
 
 [fl_metrics.hyperparameter_switch]
-enabled = true
+enabled = false
 steps = [2049]
 new_vs = [0.00, 0.95]
 new_betas = [0.9,0.999, 0.999]

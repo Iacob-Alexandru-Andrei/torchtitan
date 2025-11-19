@@ -1661,6 +1661,7 @@ class StreamingDesLocController:
         self._state_fragments_per_fragment: list[list[_StreamingOptimizerStateFragment]] = []
         self._is_opt_init = False
         self._fragments_synced_this_step: set[int] = set()
+        self._pending_aligned_state_frags: dict[int, list[tuple[_StreamingOptimizerStateFragment, int]]] = {}
 
         self._register_state_dict_functions()
         self._log_parameter_fragment_assignments()
@@ -1824,6 +1825,7 @@ class StreamingDesLocController:
         )
         fragment.set_step_context(self._inner_step)
         fragment.prepare_sync()
+        self._maybe_prepare_aligned_state_sync(fragment.fragment_id)
         entry.pending = True
 
     def _complete_fragment_sync(self, entry: _StreamingFragmentSchedule) -> None:
@@ -1838,6 +1840,76 @@ class StreamingDesLocController:
         entry.pending = False
         self._fragments_synced_this_step.add(fragment.fragment_id)
         entry.advance(self._sync_window)
+
+    def _maybe_prepare_aligned_state_sync(self, fragment_idx: int) -> None:
+        if self._optimizer_state_schedule != "aligned":
+            return
+        commit_step = self._inner_step + self._fragment_sync_delay
+        ready = self._resolve_aligned_state_candidates(
+            fragment_idx,
+            commit_step=commit_step,
+        )
+        if not ready:
+            self._pending_aligned_state_frags.pop(fragment_idx, None)
+            return
+        entries: list[tuple[_StreamingOptimizerStateFragment, int]] = []
+        for state_fragment in ready:
+            state_fragment.set_step_context(self._inner_step)
+            state_fragment.prepare_sync()
+            entries.append((state_fragment, commit_step))
+        self._pending_aligned_state_frags[fragment_idx] = entries
+
+    def _drive_aligned_state_completion(self) -> None:
+        if self._optimizer_state_schedule != "aligned":
+            return
+        if not self._pending_aligned_state_frags:
+            return
+        current_step = self._inner_step
+        for fragment_idx in list(self._pending_aligned_state_frags.keys()):
+            entries = self._pending_aligned_state_frags.get(fragment_idx)
+            if not entries:
+                self._pending_aligned_state_frags.pop(fragment_idx, None)
+                continue
+            completed: list[tuple[_StreamingOptimizerStateFragment, int]] = []
+            remaining: list[tuple[_StreamingOptimizerStateFragment, int]] = []
+            for state_fragment, commit_step in entries:
+                if current_step >= commit_step:
+                    completed.append((state_fragment, commit_step))
+                else:
+                    remaining.append((state_fragment, commit_step))
+            for state_fragment, _commit in completed:
+                state_fragment.perform_sync()
+                state_fragment.reset()
+            if remaining:
+                self._pending_aligned_state_frags[fragment_idx] = remaining
+            else:
+                self._pending_aligned_state_frags.pop(fragment_idx, None)
+
+    def _resolve_aligned_state_candidates(
+        self,
+        fragment_idx: int,
+        *,
+        commit_step: int,
+    ) -> list[_StreamingOptimizerStateFragment]:
+        if not self._state_fragments_per_fragment:
+            return []
+        if fragment_idx >= len(self._state_fragments_per_fragment):
+            return []
+        states = self._state_fragments_per_fragment[fragment_idx]
+        if not states:
+            return []
+
+        fragment = self._fragments[fragment_idx]
+        offset = fragment.fragment_sync_offset
+        if commit_step < offset:
+            return []
+
+        ready: list[_StreamingOptimizerStateFragment] = []
+        for state_fragment in states:
+            interval = max(1, state_fragment.sync_every)
+            if (commit_step - offset) % interval == 0:
+                ready.append(state_fragment)
+        return ready
 
     def _step_pre_hook(
         self,
@@ -1861,15 +1933,16 @@ class StreamingDesLocController:
 
         if not self._fragments or not self._state_fragments_per_fragment:
             self._fragments_synced_this_step.clear()
+            self._pending_aligned_state_frags.clear()
+            return
+
+        if self._optimizer_state_schedule == "aligned":
+            self._drive_aligned_state_completion()
+            self._fragments_synced_this_step.clear()
             return
 
         synced_fragments = tuple(self._fragments_synced_this_step)
         self._fragments_synced_this_step.clear()
-
-        if self._optimizer_state_schedule == "aligned":
-            for fragment_idx in synced_fragments:
-                self._aligned_state_sync(fragment_idx)
-            return
 
         if not synced_fragments:
             self._drive_staggered_state_schedule()
@@ -2016,30 +2089,6 @@ class StreamingDesLocController:
         for fragment in fragments:
             fragment.perform_sync()
             fragment.reset()
-
-    def _aligned_state_sync(self, fragment_idx: int) -> None:
-        if not self._state_fragments_per_fragment:
-            return
-        if fragment_idx >= len(self._state_fragments_per_fragment):
-            return
-
-        states = self._state_fragments_per_fragment[fragment_idx]
-        if not states:
-            return
-
-        fragment = self._fragments[fragment_idx]
-        offset = fragment.fragment_sync_offset
-        current_step = self._inner_step
-        if current_step < offset:
-            return
-
-        ready: list[_StreamingOptimizerStateFragment] = []
-        for state_fragment in states:
-            interval = max(1, state_fragment.sync_every)
-            if (current_step - offset) % interval == 0:
-                ready.append(state_fragment)
-
-        self._execute_state_sync_batch(ready)
 
     def _drive_staggered_state_schedule(self) -> None:
         if not self._state_fragments_per_fragment or not self._fragments:
