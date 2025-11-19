@@ -46,7 +46,7 @@ implementation = "for-loop"
 [optimizer.desloc]
 enabled = true
 param_sync_every = 128
-optimizer_sync_every = 128
+optimizer_sync_every = 999999  # disable optimizer state sync by default
 backup_device = "cpu"
 pin_memory = true
 
@@ -56,6 +56,15 @@ fragments = 2  # two transformer blocks per fragment assuming 16 blocks
 fragment_strategy = "strided"
 sync_delay = 1
 update_alpha = 0.5
+
+[optimizer.desloc.outer_optimizer]
+target = "SGD"
+
+[optimizer.desloc.outer_optimizer.kwargs]
+lr = 1.0          
+momentum = 0.9   
+nesterov = true
+
 
 [fl_metrics.optimizer_monitor]
 interval = 16
