@@ -3,7 +3,11 @@
 set -euo pipefail
 
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
-REPO_ROOT=$(cd -- "${SCRIPT_DIR}/../../../../../.." && pwd -P)
+if REPO_ROOT=$(cd -- "${SCRIPT_DIR}" && git rev-parse --show-toplevel 2>/dev/null); then
+  :
+else
+  REPO_ROOT="/nfs-share/aai30/projects/torchtitan"
+fi
 cd "${REPO_ROOT}"
 
 CONFIG_FILE="${SCRIPT_DIR}/base_eval.toml"
@@ -15,7 +19,7 @@ MODEL_SIZE=""
 TARGET_RUN_UUID=""
 RESUME_STEP=""
 VAL_BATCH_SIZE=4
-VAL_STEPS=32
+VAL_STEPS=4096
 
 print_usage() {
   cat <<'EOF'
@@ -35,6 +39,7 @@ Environment overrides:
   HF_ASSETS_PATH      When set, overrides model.hf_assets_path.
   WANDB_MODE          Defaults to "offline" to prevent accidental uploads.
   S3_ENDPOINT_URL     Passed through when defined by the caller.
+  EVAL_SWEEP_INDEX    Optional integer suffix used for deterministic eval UUIDs.
 EOF
 }
 
@@ -83,27 +88,50 @@ if [[ "${VAL_BATCH_SIZE}" -lt 1 || "${VAL_STEPS}" -lt 1 ]]; then
   exit 1
 fi
 
+export WANDB_PROJECT="${WANDB_PROJECT:-torchtitan_validation}"
+export WANDB_TEAM="${WANDB_TEAM:-camlsys}"
+
+EVAL_SWEEP_INDEX=${EVAL_SWEEP_INDEX:-}
+if [[ -n "${EVAL_SWEEP_INDEX}" && ! "${EVAL_SWEEP_INDEX}" =~ ^[0-9]+$ ]]; then
+  echo "EVAL_SWEEP_INDEX must be an integer when provided." >&2
+  exit 1
+fi
+
 # Derive a distinct UUID for the eval job to keep logs/checkpoints isolated.
-EVAL_RUN_UUID=${EVAL_RUN_UUID:-"eval-${TARGET_RUN_UUID}-step-${RESUME_STEP}-$(date +%Y%m%d-%H%M%S)"}
+if [[ -n "${EVAL_SWEEP_INDEX}" ]]; then
+  DEFAULT_EVAL_RUN_UUID="${TARGET_RUN_UUID}_${EVAL_SWEEP_INDEX}"
+else
+  DEFAULT_EVAL_RUN_UUID="eval-${TARGET_RUN_UUID}-step-${RESUME_STEP}-$(date +%Y%m%d-%H%M%S)"
+fi
+EVAL_RUN_UUID=${EVAL_RUN_UUID:-"${DEFAULT_EVAL_RUN_UUID}"}
 export RUN_UUID="${EVAL_RUN_UUID}"
+export WANDB_RUN_NAME="${WANDB_RUN_NAME:-${EVAL_RUN_UUID}}"
+export TORCHTITAN_WANDB_BASE_RUN_NAME="${TORCHTITAN_WANDB_BASE_RUN_NAME:-${EVAL_RUN_UUID}}"
 export RESUME_FROM_RUN_STEP="${TARGET_RUN_UUID}/step-${RESUME_STEP}"
-export WANDB_MODE=${WANDB_MODE:-offline}
+export WANDB_MODE=${WANDB_MODE:-online}
 
 cli_args=(
   --job.config_file "${CONFIG_FILE}"
   --run_uuid "${EVAL_RUN_UUID}"
-  --eval_only true
+  --eval_only
   --checkpoint.load_step "${RESUME_STEP}"
   --s3_checkpoint.resume_from_run_step "${TARGET_RUN_UUID}/step-${RESUME_STEP}"
-  --validation.enable true
+  --validation.enable
   --validation.local_batch_size "${VAL_BATCH_SIZE}"
   --validation.steps "${VAL_STEPS}"
   --model.flavor "${MODEL_SIZE}"
 )
 
+CHECKPOINT_EXCLUDE_FROM_LOADING=${CHECKPOINT_EXCLUDE_FROM_LOADING:-"optimizer,lr_scheduler,dataloader"}
+if [[ -n "${CHECKPOINT_EXCLUDE_FROM_LOADING}" ]]; then
+  cli_args+=(--checkpoint.exclude_from_loading "${CHECKPOINT_EXCLUDE_FROM_LOADING}")
+fi
+
 if [[ -n "${HF_ASSETS_PATH:-}" ]]; then
   cli_args+=(--model.hf_assets_path "${HF_ASSETS_PATH}")
 fi
+
+export S3_ENDPOINT_URL=${S3_ENDPOINT_URL:-'http://taranaki.cl.cam.ac.uk:9000'}
 
 PYTORCH_ALLOC_CONF="expandable_segments:True" \
 uv run --no-sync torchrun \

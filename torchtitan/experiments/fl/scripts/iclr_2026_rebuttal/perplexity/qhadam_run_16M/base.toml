@@ -1,3 +1,9 @@
+
+
+
+
+
+
 [job]
 dump_folder = "./outputs"
 description = "Llama 3 debug training with Mosaic streaming"
@@ -19,34 +25,23 @@ enable_wandb = true
 save_for_all_ranks = true
 
 [model]
-name = "mosaic_llama3_mup_scion"
-flavor = "16M_scion_torch"
+name = "mosaic_llama3_mup"
+flavor = "16M"
 # test folder with tokenizer.json, for debug purpose only
 hf_assets_path = "./tests/assets/tokenizer"
 # converters = ["float8"]
 
+
 [optimizer]
-name = "QHScion"
-vs = [1.0]
+name = "AggMoAdamW"
+builder = "mosaic"
 lr = 0.001
 eps = 1e-8
 weight_decay = 0.0
-betas = [0.9]
+vs = [1.0, 0.0]
+betas = [0.9, 0.999, 0.999]
 implementation = "for-loop"
-norm = "Auto"
-scion_hidden_scale = 50.0
-scion_output_scale = 3000.0
-scion_hidden_norm = "spectral"
-scion_output_norm = "sign"
 
-[optimizer.norm_kwargs]
-backend = "newtonschulz5"
-backend_steps = 5
-eps = 1e-7
-
-[optimizer.scion_hidden_norm_kwargs]
-backend = "newtonschulz5"
-backend_steps = 5
 
 # [optimizer.desloc]
 # enabled = false
@@ -77,26 +72,26 @@ enabled = true
 interval = 16
 
 [lr_scheduler]
-warmup_steps = 0  # lr scheduler warm up, normally 20% of the train steps
+warmup_steps = 2048  # lr scheduler warm up, normally 20% of the train steps
 decay_ratio = 0.0  # lr scheduler decay ratio, 80% of the train steps
 decay_type = "sqrt"
 min_lr_factor = 0.0
-switch_step = 2048
-switch_scale = 1.0
+switch_step = 2049
+switch_scale = 2.0
 
 [fl_metrics.hyperparameter_switch]
-enabled = false
+enabled = true
 steps = [2049]
-new_vs = [0.98]
-new_betas = [0.999,0.999]
-reset_momenta = ["exp_avg"]
+new_vs = [0.00, 0.95]
+new_betas = [0.9,0.999, 0.999]
+reset_momenta = ["exp_avg","exp_avg_2"]
 
 [training]
-local_batch_size = 8
+local_batch_size = 16
 global_batch_size = 64
 seq_len = 2048
-# max_norm = 1.0  # no grad norm clipping with scion
-steps = 6144
+max_norm = 1.0  # grad norm clipping
+steps = 40960
 dataset = "c4_test"  # supported datasets: c4_test (2K), c4 (177M)
 
 
@@ -113,18 +108,17 @@ context_parallel_degree = 1
 enable = true
 keep_latest_k = 20
 folder = "checkpoints"
-interval = 9999999
+interval = 2048
 last_save_model_only = false
 export_dtype = "float32"
 async_mode = "async_with_pinned_mem"  # ["disabled", "async", "async_with_pinned_mem"]
-exclude_from_loading = ["dataloader"]
 
 [s3_checkpoint]
-enable = false
+enable = true
 bucket = "checkpoints"
 prefix = ""  # Root of bucket
 download_on_start = true
-resume_from_run_step = "16M-baseline-20251029-095728/step-2048"
+resume_from_run_step = "iclr2026-adamw16m-20251115-020141/step-2048"
 # run_uuid and remote_checkpoint_folder will be set via RUN_UUID environment variable
 
 [activation_checkpoint]
@@ -196,7 +190,7 @@ batching_method = "random"
 [mosaic_dataloader.dataset.train]
 split = "train"
 root_remote = "s3://smollm-corpus/shared"
-root_local = "/nfs-share/datasets/photon/dataset_cache/smollm-corpus-shared-val"
+root_local = "/home/ubuntu/nfs-share/datasets/photon/dataset_cache/smollm-corpus-shared"
 sampling_groups_mode = "grouped"  # set to "concatenate" to merge all sampling groups
 
 [mosaic_dataloader.dataset.train.streams.client_streams.stream_0]
@@ -701,7 +695,7 @@ streams = [
 # The validation samples are stored under the "train" split on disk.
 split = "train"
 root_remote = "s3://smollm-corpus/shared"
-root_local = "/nfs-share/datasets/photon/dataset_cache/smollm-corpus-shared-val"
+root_local = "/home/ubuntu/nfs-share/datasets/photon/dataset_cache/smollm-corpus-shared"
 # subset_num_samples = 512
 sampling_groups_mode = "grouped"
 
@@ -1116,3 +1110,8 @@ streams = ["stream_40", "stream_41", "stream_42", "stream_43", "stream_44", "str
 
 [mosaic_dataloader.dataset.val.sampling_groups.group_3]
 streams = ["stream_60", "stream_61", "stream_62", "stream_63", "stream_64", "stream_65", "stream_66", "stream_67", "stream_68", "stream_69", "stream_70", "stream_71", "stream_72", "stream_73", "stream_74", "stream_75", "stream_76", "stream_77", "stream_78", "stream_79"]
+
+
+
+
+

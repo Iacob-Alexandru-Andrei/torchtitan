@@ -767,6 +767,15 @@ class MosaicJobConfig(JobConfig):
         },
     )
 
+    eval_only: bool = field(
+        default=False,
+        metadata={
+            "help": (
+                "If True, skip the training loop and only run validation after loading the initial checkpoint."
+            )
+        },
+    )
+
     # Override optimizer field to use MosaicOptimizerConfig
     optimizer: MosaicOptimizerConfig = field(  # type: ignore[assignment]
         default_factory=MosaicOptimizerConfig,

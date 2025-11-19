@@ -24,6 +24,32 @@ _MIN_BETAS_LENGTH = 2
 
 
 @dataclass
+class DesLocStreamingConfig:
+    """Configuration options for the streaming DES-LOC variant."""
+
+    enabled: bool = False
+    """Whether to enable streaming synchronization for DES-LOC parameters."""
+
+    fragments: int = 1
+    """Number of streaming fragments per model part."""
+
+    sync_delay: int = 0
+    """Delay (in inner steps) between preparing and committing a fragment."""
+
+    update_alpha: float = 0.0
+    """Linear interpolation factor when blending local and global solutions."""
+
+    use_bucketization: bool = False
+    """Whether to bucketize allreduce operations while streaming."""
+
+    bucket_cap_mb: float | None = None
+    """Optional bucket size (in MiB) used when bucketization is enabled."""
+
+    should_quantize: bool = False
+    """Whether to request gradient quantization from TorchFT during allreduce."""
+
+
+@dataclass
 class DesLocConfig:
     """Configuration options for the Desynchronized Local SGD strategy."""
 
@@ -59,6 +85,9 @@ class DesLocConfig:
 
     checkpoint_outer_optimizer: bool = True
     """Whether to include the DES-LOC outer optimizer state in checkpoints."""
+
+    streaming: DesLocStreamingConfig | dict[str, Any] | None = None
+    """Optional configuration for streaming DES-LOC."""
 
     def resolved_backup_device(self) -> torch.device | None:
         """Convert the configured ``backup_device`` into a ``torch.device``."""
@@ -112,6 +141,23 @@ class DesLocConfig:
             f"received {type(outer)!r}."
         )
         raise TypeError(msg)
+
+    def resolved_streaming(self) -> DesLocStreamingConfig | None:
+        """Materialize the optional streaming configuration."""
+        streaming = self.streaming
+        if streaming is None:
+            return None
+        if isinstance(streaming, dict):
+            streaming = DesLocStreamingConfig(**streaming)
+        if not isinstance(streaming, DesLocStreamingConfig):
+            msg = (
+                "desloc.streaming must be a DesLocStreamingConfig, mapping, or None; "
+                f"received {type(streaming)!r}."
+            )
+            raise TypeError(msg)
+        if not streaming.enabled:
+            return None
+        return streaming
 
 
 @dataclass

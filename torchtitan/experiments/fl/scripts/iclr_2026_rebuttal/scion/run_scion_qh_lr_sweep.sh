@@ -17,7 +17,7 @@ USE_SBATCH=${USE_SBATCH:-false}
 DRY_RUN=${DRY_RUN:-false}
 SBATCH_CPUS_PER_TASK=${SBATCH_CPUS_PER_TASK:-8}
 SBATCH_GPUS_PER_TASK=${SBATCH_GPUS_PER_TASK:-1}
-SBATCH_MAX_CHAINS=${SBATCH_MAX_CHAINS:-1}
+SBATCH_MAX_CHAINS=${SBATCH_MAX_CHAINS:-8}
 SBATCH_MEM=${SBATCH_MEM:-}
 SBATCH_TIME=${SBATCH_TIME:-}
 SBATCH_PARTITION=${SBATCH_PARTITION:-}
@@ -27,7 +27,7 @@ SBATCH_CONSTRAINT=${SBATCH_CONSTRAINT:-}
 SBATCH_COMMENT=${SBATCH_COMMENT:-}
 SBATCH_LOG_DIR=${SBATCH_LOG_DIR:-"${SCRIPT_DIR}/logs"}
 SBATCH_ADDITIONAL_ARGS=${SBATCH_ADDITIONAL_ARGS:-}
-SBATCH_NODE=${SBATCH_NODE:-"ruapehu"}
+SBATCH_NODE=${SBATCH_NODE:-"mauao"}
 
 DEFAULT_LOG_STREAM_DIR=${SBATCH_LOG_DIR:-"${SCRIPT_DIR}/logs"}
 LOG_STREAM_DIR=${LOG_STREAM_DIR:-"${DEFAULT_LOG_STREAM_DIR}"}
@@ -135,9 +135,9 @@ TRAINING_ARGS_ESCAPED=$(serialize_training_args)
 read -r -a SBATCH_EXTRA_ARRAY <<< "${SBATCH_ADDITIONAL_ARGS}"
 [[ -z "${SBATCH_ADDITIONAL_ARGS}" ]] && SBATCH_EXTRA_ARRAY=()
 
-MOMENTUM_VALUES=${MOMENTUM_VALUES:-"0.1 0.2 0.3 0.4 0.5 0.6 0.7 0.8 0.9 1.0"}
-# LR_VALUES=${LR_VALUES:-"0.0005 0.001 0.002 0.004"}
-LR_VALUES=${LR_VALUES:-"0.00025 0.000125 0.0000625"}
+MOMENTUM_VALUES=${MOMENTUM_VALUES:-"0.9"}
+LR_VALUES=${LR_VALUES:-"0.0025 0.00125 0.000625 0.0003125 0.00015625"}
+# LR_VALUES=${LR_VALUES:-"0.00025 0.000125 0.0000625"}
 
 read -r -a MOMENTUM_ARRAY <<< "${MOMENTUM_VALUES}"
 read -r -a LR_ARRAY <<< "${LR_VALUES}"
@@ -407,7 +407,7 @@ echo "Node: \$(hostname) at \$(date)"
 echo "==================================================================="
 export TORCHFT_LIGHTHOUSE="${lighthouse_url}"
 export RUN_UUID="${run_uuid}"
-export WANDB_PROJECT=\${WANDB_PROJECT:-"torchtitan_tune_Lr"}
+export WANDB_PROJECT=\${WANDB_PROJECT:-"torchtitan_tune_scion"}
 export WANDB_TEAM=\${WANDB_TEAM:-"camlsys"}
 export WANDB_RUN_NAME="${run_uuid}"
 export TORCHTITAN_FORCE_WANDB_WORKER_SUFFIX=\${TORCHTITAN_FORCE_WANDB_WORKER_SUFFIX:-1}
@@ -420,6 +420,8 @@ STREAM_LOG_FILE="\${LOG_STREAM_DIR}/\${SLURM_JOB_ID:-local}-${run_uuid}.train.lo
 echo "Torchrun stdout/stderr streaming to \${STREAM_LOG_FILE}"
 set -o pipefail
 
+export S3_ENDPOINT_URL='http://taranaki.cl.cam.ac.uk:9000'
+
 uv run --no-sync torchrun \
   --nproc_per_node=1 \
   --rdzv_backend=c10d \
@@ -430,7 +432,7 @@ uv run --no-sync torchrun \
   --tee 3 \
   -m "${TRAIN_MODULE}" \
   --job.config_file "${CONFIG_FILE}" \
-  --model.flavor "16M_RMS_scion" \
+  --model.flavor "16M_scion" \
   --optimizer.builder mosaic \
   --optimizer.name ScionQH \
   --optimizer.lr "${lr_value}" \
@@ -534,6 +536,8 @@ for idx in "${!RUN_PLAN_INDICES[@]}"; do
       export TORCHTITAN_FORCE_WANDB_WORKER_SUFFIX=${TORCHTITAN_FORCE_WANDB_WORKER_SUFFIX:-1}
       export PYTHONUNBUFFERED=1
 
+export S3_ENDPOINT_URL='http://taranaki.cl.cam.ac.uk:9000'
+
 uv run --no-sync torchrun \
   --nproc_per_node=1 \
   --rdzv_backend=c10d \
@@ -544,7 +548,7 @@ uv run --no-sync torchrun \
   --tee 3 \
   -m "${TRAIN_MODULE}" \
   --job.config_file "${CONFIG_FILE}" \
-  --model.flavor "16M" \
+  --model.flavor "16M_scion" \
   --optimizer.builder mosaic \
   --optimizer.name ScionQH \
   --optimizer.lr "${lr_value}" \

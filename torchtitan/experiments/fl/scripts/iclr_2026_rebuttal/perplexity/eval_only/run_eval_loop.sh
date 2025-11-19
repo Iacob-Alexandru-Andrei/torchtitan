@@ -21,22 +21,31 @@ fi
 #   "125M iclr2026-adamw125m-20251119-120001"
 # )
 RUN_MODELS=(
+  "16M iclr2026-adamw16m-20251115-020141"
+  "16M iclr2026-ademamix16m-20251115-113214"
+  "125M iclr2026-ademamix125M-20251115-190012"
+  "360M iclr2026-ademamix360M-20251116-083236"
+  "125M iclr2026-agg3ademamix125M-20251118-004306"
+  "16M iclr2026-agg3mtdao16m-20251118-095753"
+  "16M iclr2026-qhademamix16m-20251117-102445"
+  "16M iclr2026-qhademamix16m-20251117-142610"
+  "16M iclr2026-qhmtdao16m-20251117-131851"
+  "125M iclr2026-qhmtdao125M-20251117-160027"
+  "16M iclr2026-agg3ademamix16m-20251118-094352"
+  "16M iclr2026-mtdao16m-20251116-153626"
+  "125M iclr2026-mtdao125M-20251116-174945"
+  "125M iclr2026-qhademamix125M-20251117-142757"
+  "125M iclr2026-adamw125M-20251115-113315"
+  "360M iclr2026-adamw360M-20251115-215917"
+  "125M iclr2026-agg3mtdao125M-20251118-004346"
+  "360M iclr2026-mtdao360M-20251116-224929"
 )
 
-iclr2026-adamw16m-20251115-020141
-iclr2026-ademamix16m-20251115-113214
-
-iclr2026-ademamix125M-20251115-190012
-
-iclr2026-ademamix360M-20251116-083236
-iclr2026-agg3ademamix125M-20251118-004306
-
-iclr2026-agg3mtdao16m-20251118-095753
-iclr2026-qhademamix16m-20251117-102445
-iclr2026-qhademamix16m-20251117-142610
-iclr2026-qhmtdao16m-20251117-131851
-iclr2026-qhmtdao125M-20251117-160027
-
+# Route eval logging to torchtitan_validation on camlsys unless caller overrides.
+export WANDB_PROJECT="${WANDB_PROJECT:-torchtitan_validation}"
+export WANDB_TEAM="${WANDB_TEAM:-camlsys}"
+export WANDB_MODE="${WANDB_MODE:-online}"
+export TORCHTITAN_FORCE_WANDB_WORKER_SUFFIX="${TORCHTITAN_FORCE_WANDB_WORKER_SUFFIX:-1}"
 
 # Override STEP_LIST (space-separated) to customize checkpoints.
 STEP_LIST=${STEP_LIST:-""}
@@ -45,11 +54,11 @@ STEP_END=${STEP_END:-40960}
 STEP_INTERVAL=${STEP_INTERVAL:-2048}
 
 VAL_BATCH_SIZE=${VAL_BATCH_SIZE:-4}
-VAL_STEPS=${VAL_STEPS:-32}
+VAL_STEPS=${VAL_STEPS:-4096}
 
 USE_SBATCH=${USE_SBATCH:-true}
 DRY_RUN=${DRY_RUN:-false}
-SBATCH_CPUS_PER_TASK=${SBATCH_CPUS_PER_TASK:-4}
+SBATCH_CPUS_PER_TASK=${SBATCH_CPUS_PER_TASK:-8}
 SBATCH_GPUS_PER_TASK=${SBATCH_GPUS_PER_TASK:-1}
 SBATCH_MEM=${SBATCH_MEM:-}
 SBATCH_TIME=${SBATCH_TIME:-}
@@ -120,6 +129,83 @@ normalize_bool() {
 USE_SBATCH=$(normalize_bool "${USE_SBATCH}")
 DRY_RUN=$(normalize_bool "${DRY_RUN}")
 
+serialize_csv() {
+  local IFS=','
+  printf "%s" "$*"
+}
+
+wandb_run_exists() {
+  local query_run_name="$1"
+  local entity="${WANDB_ENTITY:-${WANDB_TEAM:-}}"
+  local project="${WANDB_PROJECT:-}"
+  if [[ -z "${entity}" || -z "${project}" || -z "${query_run_name}" ]]; then
+    echo "[wandb-check] Missing entity/project/run_name; cannot search for '${query_run_name}'." >&2
+    return 1
+  fi
+  local python_output
+  python_output=$(python3 - "$entity" "$project" "$query_run_name" <<'PY'
+import re
+import sys
+
+entity, project, run_name = sys.argv[1:]
+
+try:
+    import wandb  # noqa: F401
+except Exception as exc:
+    print(f"[wandb-check] Failed to import wandb: {exc}")
+    sys.exit(2)
+
+try:
+    api = wandb.Api()
+except Exception as exc:
+    print(f"[wandb-check] Failed to initialize WandB API: {exc}")
+    sys.exit(2)
+
+project_path = f"{entity}/{project}"
+print(f"[wandb-check] Searching '{project_path}' for run '{run_name}'")
+filters_to_try = [
+    ("config.run_uuid.value", {"config.run_uuid.value": run_name}),
+    ("group", {"group": run_name}),
+    ("display_name", {"display_name": run_name}),
+    (
+        "display_name regex",
+        {"display_name": {"$regex": f"^{re.escape(run_name)}(-worker.*)?$"}},
+    ),
+]
+
+for label, filter_query in filters_to_try:
+    try:
+        runs = api.runs(project_path, filters=filter_query, per_page=1)
+    except Exception as exc:
+        print(f"[wandb-check]   - Filter '{label}' failed ({exc})")
+        continue
+
+    match = None
+    for candidate in runs:
+        match = candidate
+        break
+
+    if match is None:
+        print(f"[wandb-check]   - Filter '{label}': no matches")
+        continue
+
+    run_display_name = getattr(match, "display_name", None) or getattr(match, "name", None) or getattr(match, "id", "<unknown>")
+    run_url = getattr(match, "url", "")
+    suffix = f" ({run_url})" if run_url else ""
+    print(f"[wandb-check]   - Filter '{label}': found '{run_display_name}'{suffix}")
+    sys.exit(0)
+
+print(f"[wandb-check] No matches for '{run_name}' in '{project_path}'")
+sys.exit(1)
+PY
+)
+  local status=$?
+  if [[ -n "${python_output}" ]]; then
+    echo "${python_output}" >&2
+  fi
+  [[ ${status} -eq 0 ]]
+}
+
 if [[ ${#RUN_MODELS[@]} -eq 0 ]]; then
   echo "RUN_MODELS is empty. Edit run_eval_loop.sh and add the runs to process." >&2
   exit 1
@@ -147,6 +233,15 @@ if (( ${#STEP_ARRAY[@]} == 0 )); then
   exit 1
 fi
 
+for step in "${STEP_ARRAY[@]}"; do
+  if ! [[ "${step}" =~ ^[0-9]+$ ]]; then
+    echo "Invalid step '${step}' (must be integer)." >&2
+    exit 1
+  fi
+done
+
+TOTAL_STEPS=${#STEP_ARRAY[@]}
+
 if [[ -n "${SBATCH_LOG_DIR}" ]]; then
   mkdir -p "${SBATCH_LOG_DIR}"
 fi
@@ -155,14 +250,40 @@ if [[ -z "${SBATCH_ADDITIONAL_ARGS}" ]]; then
   SBATCH_EXTRA_ARRAY=()
 fi
 
-submit_sbatch_job() {
+run_steps_locally() {
   local model_size=$1
   local run_uuid=$2
-  local step=$3
-  local job_idx=$4
-  local total_jobs=$5
+  local job_idx=$3
+  local total_jobs=$4
+  local step_values_csv=$5
+  local step_indices_csv=$6
+  IFS=',' read -r -a local_steps <<<"${step_values_csv}"
+  IFS=',' read -r -a local_indices <<<"${step_indices_csv}"
+  local pending_count=${#local_steps[@]}
+  echo "Running eval job ${job_idx}/${total_jobs} locally | Model ${model_size} | Run ${run_uuid} | Steps ${pending_count}"
+  for idx in "${!local_steps[@]}"; do
+    step="${local_steps[idx]}"
+    step_index="${local_indices[idx]}"
+    echo "[EvalRun] ${model_size} | ${run_uuid} | step ${step} (${idx}/${pending_count})"
+    EVAL_SWEEP_INDEX="${step_index}" "${RUN_ONCE_SCRIPT}" \
+      --model-size "${model_size}" \
+      --run-uuid "${run_uuid}" \
+      --step "${step}" \
+      --val-batch-size "${VAL_BATCH_SIZE}" \
+      --val-steps "${VAL_STEPS}"
+  done
+}
 
-  local job_name="eval-${model_size}-s${step}"
+submit_sbatch_run_job() {
+  local model_size=$1
+  local run_uuid=$2
+  local job_idx=$3
+  local total_jobs=$4
+  local step_values=$5
+  local step_indices=$6
+  local pending_steps=$7
+
+  local job_name="eval-${model_size}-${job_idx}"
   local sbatch_opts=(--parsable "-c" "${SBATCH_CPUS_PER_TASK}" "--gres=gpu:${SBATCH_GPUS_PER_TASK}" "--job-name=${job_name}")
   [[ -n "${SBATCH_MEM}" ]] && sbatch_opts+=("--mem=${SBATCH_MEM}")
   [[ -n "${SBATCH_TIME}" ]] && sbatch_opts+=("--time=${SBATCH_TIME}")
@@ -171,29 +292,49 @@ submit_sbatch_job() {
   [[ -n "${SBATCH_QOS}" ]] && sbatch_opts+=("--qos=${SBATCH_QOS}")
   [[ -n "${SBATCH_CONSTRAINT}" ]] && sbatch_opts+=("--constraint=${SBATCH_CONSTRAINT}")
   [[ -n "${SBATCH_COMMENT}" ]] && sbatch_opts+=("--comment=${SBATCH_COMMENT}")
-  [[ -n "${SBATCH_NODE}" ]] && sbatch_opts+=("-w" "${SBATCH_NODE}")
+  [[ -n "${SBATCH_NODE}" ]] && sbatch_opts+=("--nodelist=${SBATCH_NODE}")
   sbatch_opts+=("--output=${SBATCH_LOG_DIR}/%j-${job_name}.out" "--error=${SBATCH_LOG_DIR}/%j-${job_name}.err")
   sbatch_opts+=("${SBATCH_EXTRA_ARRAY[@]}")
 
-  sbatch "${sbatch_opts[@]}" <<EOF
+  MODEL_SIZE="${model_size}" \
+  RUN_UUID="${run_uuid}" \
+  STEP_VALUES="${step_values}" \
+  STEP_INDICES="${step_indices}" \
+  TOTAL_STEPS="${TOTAL_STEPS}" \
+  JOB_IDX="${job_idx}" \
+  TOTAL_JOBS="${total_jobs}" \
+  PENDING_STEPS="${pending_steps}" \
+  RUN_ONCE_SCRIPT="${RUN_ONCE_SCRIPT}" \
+  VAL_BATCH_SIZE="${VAL_BATCH_SIZE}" \
+  VAL_STEPS="${VAL_STEPS}" \
+  sbatch "${sbatch_opts[@]}" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
 echo "==================================================================="
-echo "Eval job ${job_idx}/${total_jobs} | Model ${model_size} | Run ${run_uuid} | Step ${step}"
-echo "Node: \$(hostname) | Time: \$(date)"
+echo "Eval run ${JOB_IDX}/${TOTAL_JOBS} | Model ${MODEL_SIZE} | Run ${RUN_UUID}"
+echo "Node: $(hostname) | Time: $(date)"
+echo "Evaluating ${PENDING_STEPS} checkpoint(s) sequentially on this worker."
 echo "==================================================================="
-${RUN_ONCE_SCRIPT} \
-  --model-size "${model_size}" \
-  --run-uuid "${run_uuid}" \
-  --step "${step}" \
-  --val-batch-size "${VAL_BATCH_SIZE}" \
-  --val-steps "${VAL_STEPS}"
+IFS=',' read -r -a steps <<< "${STEP_VALUES}"
+IFS=',' read -r -a step_indices <<< "${STEP_INDICES}"
+for idx in "${!steps[@]}"; do
+  step="${steps[idx]}"
+  step_index="${step_indices[idx]}"
+  echo "[EvalRun] ${MODEL_SIZE} | ${RUN_UUID} | step ${step} (${idx}/${PENDING_STEPS})"
+  export EVAL_SWEEP_INDEX="${step_index}"
+  "${RUN_ONCE_SCRIPT}" \
+    --model-size "${MODEL_SIZE}" \
+    --run-uuid "${RUN_UUID}" \
+    --step "${step}" \
+    --val-batch-size "${VAL_BATCH_SIZE}" \
+    --val-steps "${VAL_STEPS}"
+done
 EOF
 }
 
-total_jobs=$(( ${#RUN_MODELS[@]} * ${#STEP_ARRAY[@]} ))
-dispatch_mode=$([[ "${USE_SBATCH}" == "true" ]] && echo "sbatch" || echo "local")
-echo "Dispatching ${total_jobs} eval jobs (${#RUN_MODELS[@]} run(s) x ${#STEP_ARRAY[@]} step(s)) via ${dispatch_mode}."
+total_jobs=${#RUN_MODELS[@]}
+dispatch_mode=$([[ "${USE_SBATCH}" == "true" ]] && echo "sbatch (per-run)" || echo "local")
+echo "Dispatching ${total_jobs} eval run(s) (${TOTAL_STEPS} checkpoint(s) per run) via ${dispatch_mode}."
 
 job_counter=0
 for spec in "${RUN_MODELS[@]}"; do
@@ -202,25 +343,33 @@ for spec in "${RUN_MODELS[@]}"; do
     echo "Invalid RUN_MODELS entry '${spec}'. Expected '<model_size> <run_uuid>'." >&2
     exit 1
   fi
-  for step in "${STEP_ARRAY[@]}"; do
-    if ! [[ "${step}" =~ ^[0-9]+$ ]]; then
-      echo "Invalid step '${step}' (must be integer)." >&2
-      exit 1
-    fi
-    ((++job_counter))
-    echo "[EvalLoop] ${job_counter}/${total_jobs}: ${model_size} | ${run_uuid} | step ${step}"
-    if [[ "${DRY_RUN}" == "true" ]]; then
+  pending_steps=()
+  pending_indices=()
+  for idx in "${!STEP_ARRAY[@]}"; do
+    step="${STEP_ARRAY[idx]}"
+    eval_run_uuid="${run_uuid}_${idx}"
+    if wandb_run_exists "${eval_run_uuid}"; then
+      echo "[EvalLoop] Skipping ${model_size} | ${eval_run_uuid} (already on W&B)."
       continue
     fi
-    if [[ "${USE_SBATCH}" == "true" ]]; then
-      submit_sbatch_job "${model_size}" "${run_uuid}" "${step}" "${job_counter}" "${total_jobs}"
-    else
-      "${RUN_ONCE_SCRIPT}" \
-        --model-size "${model_size}" \
-        --run-uuid "${run_uuid}" \
-        --step "${step}" \
-        --val-batch-size "${VAL_BATCH_SIZE}" \
-        --val-steps "${VAL_STEPS}"
-    fi
+    pending_steps+=("${step}")
+    pending_indices+=("${idx}")
   done
+  if (( ${#pending_steps[@]} == 0 )); then
+    echo "[EvalLoop] ${model_size} | ${run_uuid} already evaluated for all checkpoints."
+    continue
+  fi
+  steps_csv=$(IFS=','; printf "%s" "${pending_steps[*]}")
+  indices_csv=$(IFS=','; printf "%s" "${pending_indices[*]}")
+  pending_count=${#pending_steps[@]}
+  ((++job_counter))
+  echo "[EvalLoop] ${job_counter}/${total_jobs}: ${model_size} | ${run_uuid} (${pending_count} pending step(s))"
+  if [[ "${DRY_RUN}" == "true" ]]; then
+    continue
+  fi
+  if [[ "${USE_SBATCH}" == "true" ]]; then
+    submit_sbatch_run_job "${model_size}" "${run_uuid}" "${job_counter}" "${total_jobs}" "${steps_csv}" "${indices_csv}" "${pending_count}"
+  else
+    run_steps_locally "${model_size}" "${run_uuid}" "${job_counter}" "${total_jobs}" "${steps_csv}" "${indices_csv}"
+  fi
 done

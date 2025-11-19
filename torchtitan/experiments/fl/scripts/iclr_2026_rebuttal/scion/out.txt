@@ -1,20 +1,80 @@
-Starting QHScion scale/unconstrained sweep hash=b5cf87e7 using sbatch submission: 4/4 run(s) selected (all runs).
+Starting QHScion momentum/lr sweep hash=18d7ccf3 using 1 GPU slot(s): 5/5 run(s) selected (all runs).
 
-Selected run configurations (4 total):
-Idx(1-based) Idx(0-based) base_scale     output_scale   unconstrained 
----------- ---------- ------------   -------------- --------------
-1          0          30             1800           false         
-2          1          30             1800           true          
-3          2          60             3600           false         
-4          3          60             3600           true          
+Selected run configurations (5 total):
+Idx(1-based) Idx(0-based) momentum       lr            
+---------- ---------- ------------   ------------  
+1          0          0.9            0.01          
+2          1          0.9            0.02          
+3          2          0.9            0.005         
+4          3          0.9            0.004         
+5          4          0.9            0.0025        
 
-[SBATCH] Chain 0: submitting iclr2026-scionDisco-scale-b5cf87e7-base30-out1800-unconfalse-20251111-181214-idx0 with no dependency.
-[SBATCH] Submitted iclr2026-scionDisco-scale-b5cf87e7-base30-out1800-unconfalse-20251111-181214-idx0 (run 1/4) as job 27078 | hidden=30, output=1800, unconstrained=false
-[SBATCH] Chain 1: submitting iclr2026-scionDisco-scale-b5cf87e7-base30-out1800-uncontrue-20251111-181214-idx1 with no dependency.
-[SBATCH] Submitted iclr2026-scionDisco-scale-b5cf87e7-base30-out1800-uncontrue-20251111-181214-idx1 (run 2/4) as job 27079 | hidden=30, output=1800, unconstrained=true
-[SBATCH] Chain 0: submitting iclr2026-scionDisco-scale-b5cf87e7-base60-out3600-unconfalse-20251111-181214-idx2 after job 27078.
-[SBATCH] Submitted iclr2026-scionDisco-scale-b5cf87e7-base60-out3600-unconfalse-20251111-181214-idx2 (run 3/4) as job 27080 | hidden=60, output=3600, unconstrained=false
-[SBATCH] Chain 1: submitting iclr2026-scionDisco-scale-b5cf87e7-base60-out3600-uncontrue-20251111-181214-idx3 after job 27079.
-[SBATCH] Submitted iclr2026-scionDisco-scale-b5cf87e7-base60-out3600-uncontrue-20251111-181214-idx3 (run 4/4) as job 27081 | hidden=60, output=3600, unconstrained=true
-Submitted 4 job(s) via sbatch (hash b5cf87e7).
-Sweep complete.
+[GPU 0] Launching run iclr2026-scionDisco-qh-lr-18d7ccf3-mom0p9-lr0p01-20251118-232037-idx0 (momentum=0.9, lr=0.01) [run 1/5]
+           torchrun rendezvous: 127.0.0.1:46004, lighthouse: http://127.0.0.1:46104
+           streaming stdout/stderr to /nfs-share/aai30/projects/torchtitan/torchtitan/experiments/fl/scripts/iclr_2026_rebuttal/scion/logs/iclr2026-scionDisco-qh-lr-18d7ccf3-mom0p9-lr0p01-20251118-232037-idx0.local.log
+[rank0]:[titan] 2025-11-18 23:20:46,416 - root - WARNING - HF assets path ./tests/assets/tokenizer does not exist!
+[rank0]:[titan] 2025-11-18 23:20:46,416 - root - INFO - Using RUN_UUID: iclr2026-scionDisco-qh-lr-18d7ccf3-mom0p9-lr0p01-20251118-232037-idx0
+[rank0]:[titan] 2025-11-18 23:20:46,416 - root - INFO - Starting job: Llama 3 debug training with Mosaic streaming
+[rank0]:Traceback (most recent call last):
+[rank0]:  File "<frozen runpy>", line 198, in _run_module_as_main
+[rank0]:  File "<frozen runpy>", line 88, in _run_code
+[rank0]:  File "/nfs-share/aai30/projects/torchtitan/torchtitan/experiments/fl/train.py", line 688, in <module>
+[rank0]:    main()
+[rank0]:  File "/nfs-share/aai30/projects/torchtitan/torchtitan/experiments/fl/train.py", line 518, in main
+[rank0]:    trainer = Trainer(job_config)
+[rank0]:              ^^^^^^^^^^^^^^^^^^^
+[rank0]:  File "/nfs-share/aai30/projects/torchtitan/.venv/lib/python3.12/site-packages/torch/distributed/elastic/multiprocessing/errors/__init__.py", line 362, in wrapper
+[rank0]:    return f(*args, **kwargs)
+[rank0]:           ^^^^^^^^^^^^^^^^^^
+[rank0]:  File "/nfs-share/aai30/projects/torchtitan/torchtitan/train.py", line 104, in __init__
+[rank0]:    device_module.set_device(self.device)
+[rank0]:  File "/nfs-share/aai30/projects/torchtitan/.venv/lib/python3.12/site-packages/torch/cuda/__init__.py", line 584, in set_device
+[rank0]:    torch._C._cuda_setDevice(device)
+[rank0]:  File "/nfs-share/aai30/projects/torchtitan/.venv/lib/python3.12/site-packages/torch/cuda/__init__.py", line 424, in _lazy_init
+[rank0]:    torch._C._cuda_init()
+[rank0]:RuntimeError: Found no NVIDIA driver on your system. Please check that you have an NVIDIA GPU and installed a driver from http://www.nvidia.com/Download/index.aspx
+E1118 23:20:47.813000 691363 torch/distributed/elastic/multiprocessing/api.py:978] failed (exitcode: 1) local_rank: 0 (pid: 691457) of binary: /nfs-share/aai30/projects/torchtitan/.venv/bin/python3
+E1118 23:20:47.821000 691363 torch/distributed/elastic/multiprocessing/errors/error_handler.py:145] no error file defined for parent, to copy child error file (/tmp/torchelastic_gnfhxit9/iclr2026-scionDisco-qh-lr-18d7ccf3-mom0p9-lr0p01-20251118-232037-idx0_bsz89twq/attempt_0/0/error.json)
+Traceback (most recent call last):
+  File "/nfs-share/aai30/projects/torchtitan/.venv/bin/torchrun", line 10, in <module>
+    sys.exit(main())
+             ^^^^^^
+  File "/nfs-share/aai30/projects/torchtitan/.venv/lib/python3.12/site-packages/torch/distributed/elastic/multiprocessing/errors/__init__.py", line 362, in wrapper
+    return f(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^
+  File "/nfs-share/aai30/projects/torchtitan/.venv/lib/python3.12/site-packages/torch/distributed/run.py", line 982, in main
+    run(args)
+  File "/nfs-share/aai30/projects/torchtitan/.venv/lib/python3.12/site-packages/torch/distributed/run.py", line 973, in run
+    elastic_launch(
+  File "/nfs-share/aai30/projects/torchtitan/.venv/lib/python3.12/site-packages/torch/distributed/launcher/api.py", line 165, in __call__
+    return launch_agent(self._config, self._entrypoint, list(args))
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/nfs-share/aai30/projects/torchtitan/.venv/lib/python3.12/site-packages/torch/distributed/launcher/api.py", line 313, in launch_agent
+    raise ChildFailedError(
+torch.distributed.elastic.multiprocessing.errors.ChildFailedError: 
+============================================================
+torchtitan.experiments.fl.train FAILED
+------------------------------------------------------------
+Failures:
+  <NO_OTHER_FAILURES>
+------------------------------------------------------------
+Root Cause (first observed failure):
+[0]:
+  time      : 2025-11-18_23:20:46
+  host      : taranaki.cl.cam.ac.uk
+  rank      : 0 (local_rank: 0)
+  exitcode  : 1 (pid: 691457)
+  error_file: /tmp/torchelastic_gnfhxit9/iclr2026-scionDisco-qh-lr-18d7ccf3-mom0p9-lr0p01-20251118-232037-idx0_bsz89twq/attempt_0/0/error.json
+  traceback : Traceback (most recent call last):
+    File "/nfs-share/aai30/projects/torchtitan/.venv/lib/python3.12/site-packages/torch/distributed/elastic/multiprocessing/errors/__init__.py", line 362, in wrapper
+      return f(*args, **kwargs)
+             ^^^^^^^^^^^^^^^^^^
+    File "/nfs-share/aai30/projects/torchtitan/torchtitan/train.py", line 104, in __init__
+      device_module.set_device(self.device)
+    File "/nfs-share/aai30/projects/torchtitan/.venv/lib/python3.12/site-packages/torch/cuda/__init__.py", line 584, in set_device
+      torch._C._cuda_setDevice(device)
+    File "/nfs-share/aai30/projects/torchtitan/.venv/lib/python3.12/site-packages/torch/cuda/__init__.py", line 424, in _lazy_init
+      torch._C._cuda_init()
+  RuntimeError: Found no NVIDIA driver on your system. Please check that you have an NVIDIA GPU and installed a driver from http://www.nvidia.com/Download/index.aspx
+  
+============================================================
