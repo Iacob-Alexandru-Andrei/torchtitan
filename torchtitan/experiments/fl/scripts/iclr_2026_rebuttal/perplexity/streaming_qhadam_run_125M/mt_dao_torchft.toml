@@ -52,7 +52,7 @@ pin_memory = true
 
 [optimizer.desloc.streaming]
 enabled = true
-fragments = 2  # two transformer blocks per fragment assuming 16 blocks
+fragments = 4  # two transformer blocks per fragment assuming 16 blocks
 fragment_strategy = "strided"
 sync_delay = 1
 update_alpha = 0.5
