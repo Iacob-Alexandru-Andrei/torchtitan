@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+import logging
 import sys
 from dataclasses import dataclass
 from importlib import util as importlib_util
@@ -49,7 +50,7 @@ class _DummyManager:
     def should_commit(self) -> bool:
         return True
 
-    def allreduce(self, _tensor: torch.Tensor) -> _DummyWork:
+    def allreduce(self, _tensor: torch.Tensor, **_kwargs) -> _DummyWork:
         return _DummyWork()
 
     def register_state_dict_fn(self, key: str, load_fn, save_fn) -> None:
@@ -77,6 +78,9 @@ class _TestStreamingConfig:
     use_bucketization: bool = False
     bucket_cap_mb: float | None = None
     should_quantize: bool = False
+    fragment_strategy: str = "strided"
+    fragment_sync_offsets: list[int] | None = None
+    custom_fragments: list[list[str]] | None = None
 
 
 class _TestDeslocConfig:
@@ -130,6 +134,30 @@ def _build_job_config(**overrides):
     optimizer = SimpleNamespace(desloc=desloc)
     optimizer_override = overrides.get("optimizer", optimizer)
     return SimpleNamespace(optimizer=optimizer_override, fault_tolerance=ft_override)
+
+
+def _build_tiny_transformer(num_layers: int = 4) -> nn.Module:
+    class _Block(nn.Module):
+        def __init__(self) -> None:
+            super().__init__()
+            self.attention = nn.Linear(2, 2, bias=False)
+            self.feed_forward = nn.Linear(2, 2, bias=False)
+
+        def forward(self, x: torch.Tensor) -> torch.Tensor:  # pragma: no cover - helper stub
+            return self.feed_forward(self.attention(x))
+
+    class _TinyTransformer(nn.Module):
+        def __init__(self, layers: int) -> None:
+            super().__init__()
+            self.layers = nn.ModuleList(_Block() for _ in range(layers))
+            self.head = nn.Linear(2, 2, bias=False)
+
+        def forward(self, x: torch.Tensor) -> torch.Tensor:  # pragma: no cover - helper stub
+            for layer in self.layers:
+                x = layer(x)
+            return self.head(x)
+
+    return _TinyTransformer(num_layers)
 
 
 stub_optimizers = ModuleType("torchtitan.experiments.fl.configs.optimizers")
@@ -307,3 +335,134 @@ def test_streaming_desloc_uses_streaming_controller():
     controller = container._desloc_controllers[0]
     assert isinstance(controller, desloc_module.StreamingDesLocController)
     assert controller._fragments[0]._outer_optimizer is outer_optimizer
+
+
+def test_streaming_desloc_streams_optimizer_states():
+    streaming_cfg = _TestStreamingConfig(enabled=True, fragments=2)
+    desloc_cfg = _TestDeslocConfig(param_sync_every=4, streaming=streaming_cfg, optimizer_sync_every=2)
+    dummy_manager = _DummyManager()
+    model = nn.Linear(2, 2, bias=False)
+
+    container = desloc_module.DesLocFTOptimizersContainer(
+        desloc_module.DesLocFTOptimizersConfig(
+            model_parts=[model],
+            optimizer_cls=optim.SGD,
+            optimizer_kwargs={"lr": 0.1, "momentum": 0.9},
+            ft_manager=dummy_manager,
+            desloc_config=desloc_cfg,
+        )
+    )
+
+    optimizer = container.optimizers[0]
+    for param in model.parameters():
+        param.grad = torch.ones_like(param)
+    optimizer.step()
+
+    controller = container._desloc_controllers[0]
+    assert isinstance(controller, desloc_module.StreamingDesLocController)
+    assert controller._state_fragments_per_fragment
+    assert len(controller._state_fragments_per_fragment) == len(controller._fragments)
+    assert any(
+        isinstance(fragment, desloc_module._StreamingOptimizerStateFragment)
+        for fragment in controller._state_fragments_per_fragment[0]
+    )
+
+
+def test_streaming_strided_partition_logs_assignments(caplog):
+    caplog.set_level(logging.INFO, desloc_module.logger.name)
+    streaming_cfg = _TestStreamingConfig(enabled=True, fragments=2, fragment_strategy="strided")
+    desloc_cfg = _TestDeslocConfig(param_sync_every=4, streaming=streaming_cfg)
+    dummy_manager = _DummyManager()
+    model = _build_tiny_transformer()
+
+    container = desloc_module.DesLocFTOptimizersContainer(
+        desloc_module.DesLocFTOptimizersConfig(
+            model_parts=[model],
+            optimizer_cls=optim.SGD,
+            optimizer_kwargs={"lr": 0.1},
+            ft_manager=dummy_manager,
+            desloc_config=desloc_cfg,
+        )
+    )
+
+    controller = container._desloc_controllers[0]
+    frag0 = controller._fragments[0].parameter_names
+    frag1 = controller._fragments[1].parameter_names
+
+    assert any("layers.0" in name for name in frag0)
+    assert any("layers.2" in name for name in frag0)
+    assert not any("layers.1" in name for name in frag0)
+    assert not any("layers.3" in name for name in frag0)
+    assert any("layers.1" in name for name in frag1)
+    assert any("layers.3" in name for name in frag1)
+
+    param_logs = [
+        record.message
+        for record in caplog.records
+        if "DES-LOC streaming parameter fragments" in record.message
+    ]
+    assert param_logs, "Expected parameter fragment assignment logs."
+    assert "layers.0.attention" in param_logs[0]
+
+
+def test_streaming_custom_fragments_and_offsets():
+    streaming_cfg = _TestStreamingConfig(
+        enabled=True,
+        fragments=2,
+        fragment_strategy="custom",
+        custom_fragments=[["layers.0.*", "layers.1.*"], ["layers.2.*", "layers.3.*", "head.*"]],
+        fragment_sync_offsets=[2, 4],
+    )
+    desloc_cfg = _TestDeslocConfig(param_sync_every=4, streaming=streaming_cfg)
+    dummy_manager = _DummyManager()
+    model = _build_tiny_transformer()
+
+    container = desloc_module.DesLocFTOptimizersContainer(
+        desloc_module.DesLocFTOptimizersConfig(
+            model_parts=[model],
+            optimizer_cls=optim.SGD,
+            optimizer_kwargs={"lr": 0.1},
+            ft_manager=dummy_manager,
+            desloc_config=desloc_cfg,
+        )
+    )
+
+    controller = container._desloc_controllers[0]
+    schedule = controller._schedule_entries
+    assert [entry.next_sync_step for entry in schedule] == [2, 4]
+    assert all(
+        name.startswith(("layers.0", "layers.1"))
+        for name in controller._fragments[0].parameter_names
+    )
+    assert any(name.startswith("head.") for name in controller._fragments[1].parameter_names)
+
+
+def test_streaming_optimizer_state_logging(caplog):
+    caplog.set_level(logging.INFO, desloc_module.logger.name)
+    streaming_cfg = _TestStreamingConfig(enabled=True, fragments=2)
+    desloc_cfg = _TestDeslocConfig(param_sync_every=4, streaming=streaming_cfg, optimizer_sync_every=2)
+    dummy_manager = _DummyManager()
+    model = _build_tiny_transformer(2)
+
+    container = desloc_module.DesLocFTOptimizersContainer(
+        desloc_module.DesLocFTOptimizersConfig(
+            model_parts=[model],
+            optimizer_cls=optim.SGD,
+            optimizer_kwargs={"lr": 0.1, "momentum": 0.9},
+            ft_manager=dummy_manager,
+            desloc_config=desloc_cfg,
+        )
+    )
+
+    optimizer = container.optimizers[0]
+    for param in model.parameters():
+        param.grad = torch.ones_like(param)
+    optimizer.step()
+
+    state_logs = [
+        record.message
+        for record in caplog.records
+        if "DES-LOC streaming optimizer state" in record.message
+    ]
+    assert state_logs, "Expected optimizer state fragment assignment logs."
+    assert "momentum_buffer" in state_logs[0]

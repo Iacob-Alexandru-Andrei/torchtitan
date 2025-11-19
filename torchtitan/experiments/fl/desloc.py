@@ -11,11 +11,13 @@ import logging
 import math
 import os
 import sys
+from collections import defaultdict
 from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass
 from datetime import timedelta
 from types import ModuleType
-from typing import Any, TYPE_CHECKING
+from typing import Any, TYPE_CHECKING, Sequence
+from fnmatch import fnmatch
 
 import torch
 from torch import nn
@@ -77,6 +79,24 @@ class OptimizerFragmentConfig:
     sync_every: int
     backup_device: torch.device | None
     name_prefix: str
+
+
+@dataclass(frozen=True)
+class StreamingOptimizerFragmentConfig:
+    """Configuration for streaming optimizer state synchronization."""
+
+    manager: Any
+    fragment_id: int
+    name_prefix: str
+    param_entries: list[tuple[str, nn.Parameter]]
+    optimizer: Optimizer
+    state_key: str
+    sync_every: int
+    backup_device: torch.device | None
+    pin_memory: bool
+    use_bucketization: bool
+    bucket_cap_mb: float | None
+    should_quantize: bool
 
 
 @dataclass(frozen=True)
@@ -149,8 +169,11 @@ def _zero_optimizer_grads(optimizer: Optimizer | None) -> None:
 def _partition_named_parameters(
     model: nn.Module,
     fragments: int,
+    *,
+    strategy: str = "strided",
+    custom_fragments: Sequence[Sequence[str]] | None = None,
 ) -> list[list[tuple[str, nn.Parameter]]]:
-    """Partition model parameters into ``fragments`` balanced buckets."""
+    """Partition model parameters into ``fragments`` buckets."""
     if fragments <= 0:
         msg = "desloc.streaming.fragments must be a positive integer."
         raise ValueError(msg)
@@ -160,6 +183,47 @@ def _partition_named_parameters(
         return []
 
     fragments = min(max(1, fragments), len(named_params))
+    if custom_fragments is not None:
+        return _partition_from_custom_spec(named_params, fragments, custom_fragments)
+
+    strategy = strategy.lower()
+    if strategy == "strided":
+        return _partition_strided(named_params, fragments)
+    if strategy == "sequential":
+        return _partition_sequential(named_params, fragments)
+    if strategy == "balanced":
+        return _partition_balanced(named_params, fragments)
+    msg = f"Unknown DES-LOC streaming fragment strategy '{strategy}'."
+    raise ValueError(msg)
+
+
+def _partition_strided(
+    named_params: list[tuple[str, nn.Parameter]],
+    fragments: int,
+) -> list[list[tuple[str, nn.Parameter]]]:
+    groups = _group_parameters_for_striding(named_params)
+    buckets: list[list[tuple[str, nn.Parameter]]] = [[] for _ in range(fragments)]
+    for idx, group in enumerate(groups):
+        buckets[idx % fragments].extend(group)
+    return [bucket for bucket in buckets if bucket]
+
+
+def _partition_sequential(
+    named_params: list[tuple[str, nn.Parameter]],
+    fragments: int,
+) -> list[list[tuple[str, nn.Parameter]]]:
+    bucket_size = math.ceil(len(named_params) / fragments)
+    ordered = [
+        named_params[idx : idx + bucket_size]
+        for idx in range(0, len(named_params), bucket_size)
+    ]
+    return [bucket for bucket in ordered if bucket]
+
+
+def _partition_balanced(
+    named_params: list[tuple[str, nn.Parameter]],
+    fragments: int,
+) -> list[list[tuple[str, nn.Parameter]]]:
     if fragments == 1:
         return [named_params]
 
@@ -184,6 +248,112 @@ def _partition_named_parameters(
         ordered.append([(name, param) for _, name, param in bucket])
 
     return ordered
+
+
+def _partition_from_custom_spec(
+    named_params: list[tuple[str, nn.Parameter]],
+    fragments: int,
+    custom_fragments: Sequence[Sequence[str]],
+) -> list[list[tuple[str, nn.Parameter]]]:
+    buckets_spec = [tuple(fragment) for fragment in custom_fragments if fragment]
+    if not buckets_spec:
+        msg = "desloc.streaming.custom_fragments must contain at least one selector."
+        raise ValueError(msg)
+    if len(buckets_spec) != fragments:
+        msg = "desloc.streaming.custom_fragments must match desloc.streaming.fragments."
+        raise ValueError(msg)
+
+    param_map = dict(named_params)
+    remaining = set(param_map.keys())
+
+    partitions: list[list[tuple[str, nn.Parameter]]] = []
+    for bucket_idx, selectors in enumerate(buckets_spec):
+        bucket: list[tuple[str, nn.Parameter]] = []
+        for selector in selectors:
+            matches = [
+                name for name in list(remaining) if fnmatch(name, selector)
+            ]
+            if not matches:
+                msg = (
+                    f"DES-LOC custom fragment {bucket_idx} selector '{selector}' "
+                    "did not match any parameter."
+                )
+                raise ValueError(msg)
+            for name in sorted(matches):
+                bucket.append((name, param_map[name]))
+                remaining.remove(name)
+        if bucket:
+            partitions.append(bucket)
+
+    if remaining:
+        unused = ", ".join(list(sorted(remaining))[:3])
+        msg = (
+            "DES-LOC custom fragments must cover every parameter; "
+            f"remaining parameters include: {unused}..."
+        )
+        raise ValueError(msg)
+    return partitions
+
+
+def _group_parameters_for_striding(
+    named_params: list[tuple[str, nn.Parameter]],
+) -> list[list[tuple[str, nn.Parameter]]]:
+    groups: list[list[tuple[str, nn.Parameter]]] = []
+    current_group: list[tuple[str, nn.Parameter]] = []
+    current_layer: int | None = None
+
+    for name, param in named_params:
+        layer_idx = _extract_layer_index(name)
+        if layer_idx is None:
+            if current_group:
+                groups.append(current_group)
+                current_group = []
+                current_layer = None
+            groups.append([(name, param)])
+            continue
+
+        if current_layer is None:
+            current_layer = layer_idx
+        if layer_idx != current_layer:
+            groups.append(current_group)
+            current_group = [(name, param)]
+            current_layer = layer_idx
+        else:
+            current_group.append((name, param))
+
+    if current_group:
+        groups.append(current_group)
+
+    return groups
+
+
+def _extract_layer_index(param_name: str) -> int | None:
+    token = "layers."
+    idx = param_name.find(token)
+    if idx == -1:
+        return None
+    remainder = param_name[idx + len(token) :]
+    digits: list[str] = []
+    for char in remainder:
+        if char.isdigit():
+            digits.append(char)
+        else:
+            break
+    if not digits:
+        return None
+    try:
+        return int("".join(digits))
+    except ValueError:  # pragma: no cover - defensive
+        return None
+
+
+def _component_key_from_name(param_name: str) -> str:
+    if param_name.startswith("layers."):
+        parts = param_name.split(".")
+        if len(parts) >= 3:
+            return ".".join(parts[:3])
+        return ".".join(parts[: len(parts)])
+    return param_name.split(".")[0]
 
 
 class _BaseFragment:
@@ -488,6 +658,205 @@ class _OptimizerStateFragment(_BaseFragment):
         )
 
 
+class _StreamingOptimizerStateFragment(_BaseFragment):
+    """Streaming-aware optimizer state fragment."""
+
+    bucket_cap_mb: int = 1 * 1024 * 1024 * 1024
+    use_bucketization: bool = False
+
+    def __init__(self, config: StreamingOptimizerFragmentConfig) -> None:
+        super().__init__(config.sync_every)
+        self._manager = config.manager
+        self._fragment_id = config.fragment_id
+        self._name_prefix = config.name_prefix
+        self._param_entries = config.param_entries
+        self._param_map = {name: param for name, param in self._param_entries}
+        self._optimizer = config.optimizer
+        self.state_key = config.state_key
+        self._backup_device = config.backup_device
+        self._pin_memory = config.pin_memory
+        self._should_quantize = config.should_quantize
+
+        self._original_state_tensors: dict[str, torch.Tensor] = {}
+        self._averaged_state_tensors: list[tuple[str, torch.Tensor]] = []
+        self._allreduce_work: list[Work] = []
+        self._stream = torch.cuda.Stream() if torch.cuda.is_available() else None
+        self._stop_event: torch.cuda.Event | None = None
+
+        if config.bucket_cap_mb is not None:
+            self.bucket_cap_mb = int(config.bucket_cap_mb * 1024 * 1024)
+
+        if os.getenv(USE_BUCKETIZATION_ENV, "False") == "True":
+            self.use_bucketization = True
+        else:
+            self.use_bucketization = config.use_bucketization
+
+        self._init_backup_storage()
+        self.save_state()
+
+    @property
+    def fragment_id(self) -> int:
+        return self._fragment_id
+
+    @property
+    def parameter_names(self) -> list[str]:
+        return [name for name, _ in self._param_entries]
+
+    def _init_backup_storage(self) -> None:
+        for name, param in self._param_entries:
+            state = self._optimizer.state.get(param, {})
+            tensor = state.get(self.state_key)
+            if isinstance(tensor, torch.Tensor):
+                device = self._backup_device if self._backup_device is not None else tensor.device
+                backup = torch.empty_like(tensor, device=device)
+                if (
+                    self._pin_memory
+                    and backup.device.type == "cpu"
+                    and torch.cuda.is_available()
+                    and not backup.is_pinned()
+                ):
+                    backup = backup.pin_memory()
+                self._original_state_tensors[name] = backup
+
+    def save_state(self) -> None:
+        with torch.no_grad():
+            for name, backup in self._original_state_tensors.items():
+                param = self._param_map[name]
+                tensor = self._optimizer.state[param][self.state_key]
+                backup.copy_(tensor, non_blocking=True)
+
+    def restore_state(self) -> None:
+        with torch.no_grad():
+            for name, backup in self._original_state_tensors.items():
+                param = self._param_map[name]
+                if param in self._optimizer.state and self.state_key in self._optimizer.state[param]:
+                    self._optimizer.state[param][self.state_key].copy_(backup)
+
+    def prepare_sync(self) -> None:
+        if not self._original_state_tensors:
+            return
+        assert not self._allreduce_work
+        if self._stream is not None:
+            self._stream.wait_stream(torch.cuda.current_stream())
+
+        context = torch.cuda.stream(self._stream) if self._stream is not None else nullcontext()
+        with context:
+            self._capture_states()
+            self._allreduce_states()
+
+    def _capture_states(self) -> None:
+        self._averaged_state_tensors.clear()
+        with torch.no_grad():
+            for name in self._original_state_tensors:
+                param = self._param_map[name]
+                tensor = self._optimizer.state[param][self.state_key]
+                self._averaged_state_tensors.append((name, tensor.detach().clone()))
+
+    def _allreduce_states(self) -> None:
+        tensors = [tensor for _, tensor in self._averaged_state_tensors]
+        if not tensors:
+            return
+        if self.use_bucketization:
+            self._bucketize_and_allreduce(tensors)
+            return
+        for tensor in tensors:
+            work = self._manager.allreduce(
+                tensor,
+                should_quantize=self._should_quantize,
+            )
+            self._allreduce_work.append(work)
+
+    def _bucketize_and_allreduce(self, tensors: list[torch.Tensor]) -> None:
+        if not tensors:
+            return
+
+        bucket_size_bytes = self.bucket_cap_mb
+        offset = 0
+        flat_index = 0
+        total_elems = sum(t.numel() for t in tensors)
+        dtype = tensors[0].dtype
+        device = tensors[0].device
+
+        while offset < total_elems:
+            chunk_elems = min(bucket_size_bytes // tensors[0].element_size(), total_elems - offset)
+            flat_buffer = torch.zeros(chunk_elems, dtype=dtype, device=device)
+
+            pack_offset = 0
+            bucket_tensors: list[tuple[torch.Tensor, int, int]] = []
+            for tensor in tensors[flat_index:]:
+                numel = tensor.numel()
+                if pack_offset + numel > chunk_elems:
+                    break
+                flat_buffer[pack_offset : pack_offset + numel].copy_(tensor.view(-1))
+                bucket_tensors.append((tensor, pack_offset, numel))
+                pack_offset += numel
+                flat_index += 1
+
+            work = self._manager.allreduce(
+                flat_buffer,
+                should_quantize=self._should_quantize,
+            )
+
+            def callback(
+                fut: torch.futures.Future[list[torch.Tensor]],
+            ) -> list[torch.Tensor]:
+                for tensor, tensor_offset, numel in bucket_tensors:
+                    tensor.copy_(flat_buffer[tensor_offset : tensor_offset + numel].view_as(tensor))
+                return []
+
+            work.get_future().then(callback)
+            self._allreduce_work.append(work)
+            offset += chunk_elems
+
+    def wait(self) -> None:
+        if not self._allreduce_work:
+            return
+        if self._stream is not None and self._stop_event is not None:
+            self._stop_event.synchronize()
+            self._stop_event = None
+        self._allreduce_work = []
+
+    def perform_sync(self) -> None:
+        if not self._averaged_state_tensors:
+            return
+        context = torch.cuda.stream(self._stream) if self._stream is not None else nullcontext()
+        with context:
+            for work in self._allreduce_work:
+                work.wait()
+            if self._stream is not None:
+                self._stop_event = torch.cuda.Event()
+                self._stop_event.record()
+        self.wait()
+
+        should_commit = self._manager.should_commit()
+        if should_commit:
+            self._apply_states()
+            self.save_state()
+        else:
+            self.restore_state()
+        self._averaged_state_tensors.clear()
+
+    def _apply_states(self) -> None:
+        with torch.no_grad():
+            for name, averaged in self._averaged_state_tensors:
+                param = self._param_map[name]
+                self._optimizer.state[param][self.state_key].copy_(averaged)
+
+    def register_state_dict_fn(self) -> None:
+        def load_fn(state_dict: dict[str, torch.Tensor]) -> None:
+            for name, tensor in state_dict.items():
+                if name in self._original_state_tensors:
+                    self._original_state_tensors[name].copy_(tensor)
+
+        def save_fn() -> dict[str, torch.Tensor]:
+            return self._original_state_tensors
+
+        self._manager.register_state_dict_fn(
+            f"{self._name_prefix}_state_{self.state_key}",
+            load_fn,
+            save_fn,
+        )
+
 class _StreamingParameterFragment:
     """Streaming-enabled parameter fragment with asynchronous allreduce."""
 
@@ -504,12 +873,17 @@ class _StreamingParameterFragment:
         backup_device: torch.device | None,
         pin_memory: bool,
         outer_optimizer: Optimizer | None,
+        inner_optimizer: Optimizer,
+        fragment_sync_offset: int,
+        fragment_sync_delay: int,
+        sync_window: int,
         fragment_update_alpha: float,
         use_bucketization: bool,
         bucket_cap_mb: float | None,
         should_quantize: bool,
         log_outer_metrics: bool,
         metrics_logger: Callable[[dict[str, float]], None] | None,
+        checkpoint_outer_optimizer: bool,
     ) -> None:
         self._manager = manager
         self._fragment_id = fragment_id
@@ -519,11 +893,16 @@ class _StreamingParameterFragment:
         self._backup_device = backup_device
         self._pin_memory = pin_memory
         self._outer_optimizer = outer_optimizer
+        self._inner_optimizer = inner_optimizer
+        self._fragment_sync_offset = fragment_sync_offset
+        self._fragment_sync_delay = fragment_sync_delay
+        self._sync_window = sync_window
         self._fragment_update_alpha = fragment_update_alpha
         self._log_outer_metrics = log_outer_metrics
         self._metrics_logger = metrics_logger
         self._averaging_only = outer_optimizer is None
         self._should_quantize = should_quantize
+        self._checkpoint_outer_optimizer = checkpoint_outer_optimizer
 
         self._grads: dict[str, torch.Tensor] = {}
         self._averaged_parameters: list[tuple[str, torch.Tensor]] = []
@@ -548,6 +927,22 @@ class _StreamingParameterFragment:
     def set_metrics_logger(self, logger_fn: Callable[[dict[str, float]], None] | None) -> None:
         self._metrics_logger = logger_fn
 
+    @property
+    def parameter_names(self) -> list[str]:
+        return [name for name, _ in self._param_entries]
+
+    @property
+    def fragment_id(self) -> int:
+        return self._fragment_id
+
+    @property
+    def fragment_sync_offset(self) -> int:
+        return self._fragment_sync_offset
+
+    @property
+    def fragment_sync_delay(self) -> int:
+        return self._fragment_sync_delay
+
     def _named_parameters(self):
         for name, param in self._param_entries:
             yield name, param
@@ -562,19 +957,35 @@ class _StreamingParameterFragment:
             self.original_parameters[name] = backup
 
     def register_state_dict_fn(self) -> None:
-        def load_fn(state_dict: dict[str, torch.Tensor]) -> None:
-            if state_dict:
-                for name, tensor in state_dict.items():
-                    if name in self.original_parameters:
-                        self.original_parameters[name].copy_(tensor)
-            else:
+        def load_fn(state_dict: dict[str, Any]) -> None:
+            if not state_dict:
                 self.save_parameters()
+                return
+            params_state = state_dict.get("original_parameters")
+            if params_state is None:
+                params_state = state_dict
 
-        def save_fn() -> dict[str, torch.Tensor]:
-            return {
-                name: _extract_local_tensor(param)
-                for name, param in self.original_parameters.items()
+            for name, tensor in params_state.items():
+                if name in self.original_parameters:
+                    self.original_parameters[name].copy_(tensor)
+
+            if (
+                self._outer_optimizer is not None
+                and self._checkpoint_outer_optimizer
+                and "outer_optimizer" in state_dict
+            ):
+                self._outer_optimizer.load_state_dict(state_dict["outer_optimizer"])
+
+        def save_fn() -> dict[str, Any]:
+            payload: dict[str, Any] = {
+                "original_parameters": {
+                    name: _extract_local_tensor(param)
+                    for name, param in self.original_parameters.items()
+                }
             }
+            if self._outer_optimizer is not None and self._checkpoint_outer_optimizer:
+                payload["outer_optimizer"] = self._outer_optimizer.state_dict()
+            return payload
 
         self._manager.register_state_dict_fn(
             f"{self._name_prefix}_params",
@@ -819,6 +1230,18 @@ class _StreamingParameterFragment:
         return should_commit
 
 
+@dataclass
+class _StreamingFragmentSchedule:
+    fragment: _StreamingParameterFragment
+    next_prepare_step: int
+    next_sync_step: int
+    pending: bool = False
+
+    def advance(self, sync_window: int) -> None:
+        self.next_prepare_step += sync_window
+        self.next_sync_step += sync_window
+
+
 class DesLocController:
     """Attach DES-LOC synchronization hooks to a PyTorch optimizer."""
 
@@ -1025,8 +1448,20 @@ class StreamingDesLocController:
         self._log_outer_metrics = config.log_outer_metrics
         self._metrics_logger = config.metrics_logger
         self._checkpoint_outer_optimizer = config.checkpoint_outer_optimizer
+        self._streaming_cfg = streaming
 
-        partitions = _partition_named_parameters(self._model, streaming.fragments)
+        fragment_strategy = getattr(streaming, "fragment_strategy", "strided")
+        custom_fragments = getattr(streaming, "custom_fragments", None)
+        if fragment_strategy == "custom" and not custom_fragments:
+            msg = "desloc.streaming.custom_fragments must be provided when using the 'custom' strategy."
+            raise ValueError(msg)
+
+        partitions = _partition_named_parameters(
+            self._model,
+            streaming.fragments,
+            strategy=fragment_strategy,
+            custom_fragments=custom_fragments,
+        )
         if not partitions:
             msg = "DES-LOC streaming requires at least one model parameter."
             raise ValueError(msg)
@@ -1039,8 +1474,9 @@ class StreamingDesLocController:
             msg = "desloc.param_sync_every must be divisible by the number of streaming fragments."
             raise ValueError(msg)
 
-        self._sync_every = config.param_sync_every // num_fragments
-        if streaming.sync_delay >= self._sync_every:
+        self._sync_window = config.param_sync_every
+        self._fragment_stride = self._sync_window // num_fragments
+        if streaming.sync_delay >= self._fragment_stride:
             msg = "desloc.streaming.sync_delay must be smaller than param_sync_every / fragments."
             raise ValueError(msg)
         if not (0.0 <= streaming.update_alpha <= 1.0):
@@ -1048,9 +1484,13 @@ class StreamingDesLocController:
             raise ValueError(msg)
 
         outer_handles = self._build_outer_optimizer_handles(config.outer_optimizer, partitions)
-
+        self._partitions = partitions
+        self._fragment_sync_delay = streaming.sync_delay
+        fragment_offsets = self._resolve_fragment_offsets(num_fragments, streaming)
+        outer_checkpoint_flags = self._build_outer_checkpoint_flags(outer_handles)
+        self._schedule_entries: list[_StreamingFragmentSchedule] = []
         self._fragments: list[_StreamingParameterFragment] = []
-        for idx, params in enumerate(partitions):
+        for idx, (params, offset) in enumerate(zip(partitions, fragment_offsets, strict=True)):
             fragment = _StreamingParameterFragment(
                 manager=self._manager,
                 fragment_id=idx,
@@ -1059,28 +1499,41 @@ class StreamingDesLocController:
                 backup_device=self._backup_device,
                 pin_memory=self._pin_memory,
                 outer_optimizer=outer_handles[idx],
+                inner_optimizer=self._optimizer,
+                fragment_sync_offset=offset,
+                fragment_sync_delay=self._fragment_sync_delay,
+                sync_window=self._sync_window,
                 fragment_update_alpha=streaming.update_alpha,
                 use_bucketization=streaming.use_bucketization,
                 bucket_cap_mb=streaming.bucket_cap_mb,
                 should_quantize=streaming.should_quantize,
                 log_outer_metrics=self._log_outer_metrics,
                 metrics_logger=self._metrics_logger,
+                checkpoint_outer_optimizer=(
+                    self._checkpoint_outer_optimizer and outer_checkpoint_flags[idx]
+                ),
             )
+            prepare_step = max(offset - self._fragment_sync_delay, 0)
+            schedule_entry = _StreamingFragmentSchedule(
+                fragment=fragment,
+                next_prepare_step=prepare_step,
+                next_sync_step=offset,
+            )
+            self._schedule_entries.append(schedule_entry)
             self._fragments.append(fragment)
-
-        self._fragment_sync_delay = streaming.sync_delay
         self._hooks: list[RemovableHandle] = []
         self._hooks.append(self._optimizer.register_step_pre_hook(self._step_pre_hook))
         self._hooks.append(self._optimizer.register_step_post_hook(self._step_post_hook))
 
-        self._local_step = 0
+        self._inner_step = 0
+        self._state_cursor = 0
+        self._optimizer_state_log_emitted = False
 
-        self._state_fragments: list[_BaseFragment] = []
-        self._state_allreduce_work: list[Any] = []
+        self._state_fragments_per_fragment: list[list[_StreamingOptimizerStateFragment]] = []
         self._is_opt_init = False
 
         self._register_state_dict_functions()
-        self._register_outer_optimizer_state(outer_handles)
+        self._log_parameter_fragment_assignments()
 
     def close(self) -> None:
         for hook in self._hooks:
@@ -1095,6 +1548,31 @@ class StreamingDesLocController:
     def _register_state_dict_functions(self) -> None:
         for fragment in self._fragments:
             fragment.register_state_dict_fn()
+
+    def _log_parameter_fragment_assignments(self) -> None:
+        mapping: dict[str, int] = {}
+        for fragment in self._fragments:
+            for name in fragment.parameter_names:
+                key = _component_key_from_name(name)
+                existing = mapping.get(key)
+                if existing is not None and existing != fragment.fragment_id:
+                    logger.warning(
+                        "DES-LOC streaming parameter component %s mapped to multiple fragments (%s, %s).",
+                        key,
+                        existing,
+                        fragment.fragment_id,
+                    )
+                mapping[key] = fragment.fragment_id
+
+        if not mapping:
+            logger.info("DES-LOC streaming parameter fragments: none discovered.")
+            return
+
+        formatted = "; ".join(
+            f"{component}->frag{fragment_id}"
+            for component, fragment_id in sorted(mapping.items())
+        )
+        logger.info("DES-LOC streaming parameter fragments: %s", formatted)
 
     def _build_outer_optimizer_handles(
         self,
@@ -1123,29 +1601,97 @@ class StreamingDesLocController:
         msg = "desloc.outer_optimizer must be a config, Optimizer, list of Optimizers, or None."
         raise TypeError(msg)
 
-    def _register_outer_optimizer_state(self, outer_handles: list[Optimizer | None]) -> None:
+    def _build_outer_checkpoint_flags(self, outer_handles: list[Optimizer | None]) -> list[bool]:
         if not self._checkpoint_outer_optimizer:
-            return
+            return [False for _ in outer_handles]
         seen: set[int] = set()
-        for idx, optimizer in enumerate(outer_handles):
+        flags: list[bool] = []
+        for optimizer in outer_handles:
             if optimizer is None:
+                flags.append(False)
                 continue
             ident = id(optimizer)
             if ident in seen:
+                flags.append(False)
                 continue
             seen.add(ident)
+            flags.append(True)
+        return flags
 
-            def load_fn(state_dict: dict[str, Any], opt=optimizer) -> None:
-                opt.load_state_dict(state_dict)
+    def _resolve_fragment_offsets(
+        self,
+        num_fragments: int,
+        streaming: DesLocStreamingConfig,
+    ) -> list[int]:
+        fragment_sync_offsets = getattr(streaming, "fragment_sync_offsets", None)
+        if fragment_sync_offsets is None:
+            stride = self._sync_window / num_fragments
+            offsets = [max(1, int(math.floor(stride * (idx + 1)))) for idx in range(num_fragments)]
+            offsets[-1] = self._sync_window
+        else:
+            offsets = [int(value) for value in fragment_sync_offsets]
+            if len(offsets) != num_fragments:
+                msg = "desloc.streaming.fragment_sync_offsets must match the fragment count."
+                raise ValueError(msg)
 
-            def save_fn(opt=optimizer) -> dict[str, Any]:
-                return opt.state_dict()
+        if offsets != sorted(offsets):
+            msg = "desloc.streaming.fragment_sync_offsets must be strictly increasing."
+            raise ValueError(msg)
+        if offsets[0] <= 0 or offsets[-1] > self._sync_window:
+            msg = "desloc.streaming.fragment_sync_offsets must lie within the sync window."
+            raise ValueError(msg)
+        for offset in offsets:
+            if offset <= self._fragment_sync_delay:
+                msg = "Each fragment sync offset must exceed desloc.streaming.sync_delay."
+                raise ValueError(msg)
+        return offsets
 
-            self._manager.register_state_dict_fn(
-                f"{self._name_prefix}_stream_outer_{idx}",
-                load_fn,
-                save_fn,
+    def _drive_fragment_schedule(self) -> None:
+        if not self._schedule_entries:
+            return
+        for entry in self._schedule_entries:
+            if not entry.pending and self._inner_step == entry.next_prepare_step:
+                self._attempt_prepare_fragment(entry)
+            if entry.pending and self._inner_step == entry.next_sync_step:
+                self._complete_fragment_sync(entry)
+
+    def _attempt_prepare_fragment(self, entry: _StreamingFragmentSchedule) -> None:
+        fragment = entry.fragment
+        try:
+            self._manager.start_quorum(
+                allow_heal=False,
+                shrink_only=False,
+                timeout=self._quorum_timeout,
             )
+        except TimeoutError as err:
+            logger.warning(
+                "DES-LOC streaming quorum timed out after %.1f seconds; skipping synchronization.",
+                self._quorum_timeout.total_seconds(),
+            )
+            self._manager.report_error(err)
+            fragment.restore_parameters()
+            entry.advance(self._sync_window)
+            return
+
+        logger.info(
+            "Preparing fragment=%s step=%s",
+            fragment.fragment_id,
+            self._inner_step,
+        )
+        fragment.prepare_sync()
+        entry.pending = True
+
+    def _complete_fragment_sync(self, entry: _StreamingFragmentSchedule) -> None:
+        fragment = entry.fragment
+        logger.info(
+            "Syncing fragment=%s step=%s manager_step=%s",
+            fragment.fragment_id,
+            self._inner_step,
+            self._manager.current_step(),
+        )
+        fragment.perform_sync()
+        entry.pending = False
+        entry.advance(self._sync_window)
 
     def _step_pre_hook(
         self,
@@ -1154,10 +1700,6 @@ class StreamingDesLocController:
         _kwargs: dict[str, Any],
     ) -> None:
         self._manager.disallow_state_dict_read()
-
-    def _current_fragment(self) -> int:
-        step = self._manager.current_step()
-        return step % len(self._fragments)
 
     def _step_post_hook(
         self,
@@ -1168,40 +1710,15 @@ class StreamingDesLocController:
         self._manager.allow_state_dict_read()
         if not self._is_opt_init:
             self._lazy_init_optimizer_fragments()
+        self._inner_step += 1
+        self._drive_fragment_schedule()
 
-        self._local_step += 1
-
-        if self._local_step == self._sync_every - self._fragment_sync_delay:
-            try:
-                self._manager.start_quorum(
-                    allow_heal=False,
-                    shrink_only=False,
-                    timeout=self._quorum_timeout,
-                )
-            except TimeoutError as err:
-                logger.warning(
-                    "DES-LOC streaming quorum timed out after %.1f seconds; skipping synchronization.",
-                    self._quorum_timeout.total_seconds(),
-                )
-                self._manager.report_error(err)
-                fragment = self._fragments[self._current_fragment()]
-                fragment.restore_parameters()
-                self._local_step = 0
-                self._sync_state_fragments([])
-                return
-
-            fragment = self._fragments[self._current_fragment()]
-            fragment.prepare_sync()
-
-        if self._local_step < self._sync_every:
-            self._sync_state_fragments([])
+        if not self._fragments:
             return
 
-        fragment = self._fragments[self._current_fragment()]
-        fragment.perform_sync()
-        self._local_step = 0
-
-        self._sync_state_fragments([])
+        fragment_idx = self._state_cursor
+        self._sync_state_fragments(fragment_idx)
+        self._state_cursor = (self._state_cursor + 1) % len(self._fragments)
 
     def _resolve_optimizer_sync_intervals(self, state_keys: Iterable[str]) -> list[int]:
         keys = list(state_keys)
@@ -1210,7 +1727,7 @@ class StreamingDesLocController:
 
         spec = self._raw_optimizer_sync_config
         if spec is None:
-            return [self._sync_every for _ in keys]
+            return [self._fragment_stride for _ in keys]
         if isinstance(spec, int):
             return self._expand_single_interval(spec, keys)
         if isinstance(spec, list):
@@ -1251,7 +1768,7 @@ class StreamingDesLocController:
             raise ValueError(msg)
 
     def _lazy_init_optimizer_fragments(self) -> None:
-        state_sets = set()
+        state_sets: set[str] = set()
         for state in self._optimizer.state.values():
             for key, value in state.items():
                 if isinstance(value, torch.Tensor) and value.numel() > 1:
@@ -1265,24 +1782,42 @@ class StreamingDesLocController:
                 "DES-LOC optimizer_sync_every provided but no tensor states were discovered; skipping state synchronization."
             )
 
+        if not state_keys:
+            self._state_fragments_per_fragment = [[] for _ in self._fragments]
+            self._is_opt_init = True
+            return
+
+        self._state_fragments_per_fragment = [[] for _ in self._fragments]
         for idx, key in enumerate(state_keys):
-            fragment_config = OptimizerFragmentConfig(
-                manager=self._manager,
-                model=self._model,
-                optimizer=self._optimizer,
-                state_key=key,
-                sync_every=sync_intervals[idx],
-                backup_device=self._backup_device,
-                name_prefix=f"{self._name_prefix}_{key}",
-            )
-            fragment = _OptimizerStateFragment(fragment_config)
-            fragment.register_state_dict_fn()
-            self._state_fragments.append(fragment)
+            sync_every = sync_intervals[idx]
+            for fragment_idx, params in enumerate(self._partitions):
+                fragment_config = StreamingOptimizerFragmentConfig(
+                    manager=self._manager,
+                    fragment_id=fragment_idx,
+                    name_prefix=f"{self._name_prefix}_{key}_fragment_{fragment_idx}",
+                    param_entries=params,
+                    optimizer=self._optimizer,
+                    state_key=key,
+                    sync_every=sync_every,
+                    backup_device=self._backup_device,
+                    pin_memory=self._pin_memory,
+                    use_bucketization=self._streaming_cfg.use_bucketization,
+                    bucket_cap_mb=self._streaming_cfg.bucket_cap_mb,
+                    should_quantize=self._streaming_cfg.should_quantize,
+                )
+                fragment = _StreamingOptimizerStateFragment(fragment_config)
+                fragment.register_state_dict_fn()
+                self._state_fragments_per_fragment[fragment_idx].append(fragment)
 
         self._is_opt_init = True
+        self._log_optimizer_state_fragment_assignments()
 
-    def _sync_state_fragments(self, fragments: list[_BaseFragment]) -> None:
-        ready = fragments or [fragment for fragment in self._state_fragments if fragment.tick()]
+    def _sync_state_fragments(self, fragment_idx: int) -> None:
+        if not self._state_fragments_per_fragment:
+            return
+
+        candidates = self._state_fragments_per_fragment[fragment_idx]
+        ready = [fragment for fragment in candidates if fragment.tick()]
         if not ready:
             return
 
@@ -1303,29 +1838,49 @@ class StreamingDesLocController:
                 fragment.reset()
             return
 
-        self._prepare_state_sync(ready)
-        self._perform_state_sync(ready)
         for fragment in ready:
+            fragment.prepare_sync()
+        for fragment in ready:
+            fragment.perform_sync()
             fragment.reset()
 
-    def _prepare_state_sync(self, fragments: list[_BaseFragment]) -> None:
-        self._state_allreduce_work.clear()
-        for fragment in fragments:
-            self._state_allreduce_work.extend(fragment.prepare_sync())
+    def _log_optimizer_state_fragment_assignments(self) -> None:
+        if self._optimizer_state_log_emitted:
+            return
 
-    def _perform_state_sync(self, fragments: list[_BaseFragment]) -> None:
-        for work in self._state_allreduce_work:
-            work.wait()
+        if not any(self._state_fragments_per_fragment):
+            logger.info("DES-LOC streaming optimizer state fragments: none discovered.")
+            self._optimizer_state_log_emitted = True
+            return
 
-        commit_allowed = self._manager.should_commit()
-
-        if commit_allowed:
+        per_state: dict[str, dict[str, int]] = defaultdict(dict)
+        for fragments in self._state_fragments_per_fragment:
             for fragment in fragments:
-                fragment.perform_sync()
-                fragment.save_state()
-        else:
-            for fragment in fragments:
-                fragment.restore_state()
+                state_map = per_state[fragment.state_key]
+                for name in fragment.parameter_names:
+                    key = _component_key_from_name(name)
+                    existing = state_map.get(key)
+                    if existing is not None and existing != fragment.fragment_id:
+                        logger.warning(
+                            "DES-LOC streaming optimizer state '%s' component %s mapped to multiple fragments (%s, %s).",
+                            fragment.state_key,
+                            key,
+                            existing,
+                            fragment.fragment_id,
+                        )
+                    state_map[key] = fragment.fragment_id
+
+        for state_key, mapping in sorted(per_state.items()):
+            formatted = "; ".join(
+                f"{component}->frag{fragment_id}"
+                for component, fragment_id in sorted(mapping.items())
+            )
+            logger.info(
+                "DES-LOC streaming optimizer state '%s' fragments: %s",
+                state_key,
+                formatted or "none",
+            )
+        self._optimizer_state_log_emitted = True
 class DesLocFTOptimizersContainer(FTOptimizersContainer):
     """FT optimizer container augmented with DES-LOC synchronization."""
 

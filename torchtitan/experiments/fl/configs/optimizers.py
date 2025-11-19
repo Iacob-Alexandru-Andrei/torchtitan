@@ -50,6 +50,15 @@ class DesLocStreamingConfig:
     should_quantize: bool = False
     """Whether to request gradient quantization from TorchFT during allreduce."""
 
+    fragment_sync_offsets: tuple[int, ...] | list[int] | None = None
+    """Optional explicit fragment sync offsets within the DES-LOC window."""
+
+    fragment_strategy: Literal["strided", "sequential", "balanced", "custom"] = "strided"
+    """Strategy used to group parameters into fragments."""
+
+    custom_fragments: tuple[tuple[str, ...], ...] | list[list[str]] | None = None
+    """Optional explicit fragment specification (list of name globs per fragment)."""
+
 
 @dataclass
 class DesLocConfig:
