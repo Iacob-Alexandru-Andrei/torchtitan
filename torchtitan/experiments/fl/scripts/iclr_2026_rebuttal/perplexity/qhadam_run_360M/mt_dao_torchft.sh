@@ -43,7 +43,7 @@ read -r -a ADEMAMIX_RESET_MOMENTA_ARRAY <<< "${ADEMAMIX_RESET_MOMENTA}"
 
 TRAINING_ARGS=("$@")
 
-LOG_DIR="${REPO_ROOT}/outputs/torchft_logs"
+LOG_DIR="${REPO_ROOT}/outputs/torchft_logs_mtdao"
 mkdir -p "${LOG_DIR}"
 LIGHTHOUSE_LOG_FILE="${LOG_DIR}/lighthouse.log"
 
