@@ -101,6 +101,8 @@ def sync_run(
         "--include",
         "step-*",
     ]
+    
+    print(cmd)
 
     if dry_run:
         print(f"[dry-run] {' '.join(cmd)}")
