@@ -99,19 +99,20 @@ def sync_run(
         "--exclude",
         "*",
         "--include",
+        "step-*/*",
+        "--include",
         "step-*",
     ]
-    
-    print(cmd)
 
     if dry_run:
         print(f"[dry-run] {' '.join(cmd)}", flush=True)
         return 0
 
-    result = subprocess.run(cmd, capture_output=True, text=True)
+    print(f"[run] {' '.join(cmd)}", flush=True)
+    result = subprocess.run(cmd)
     if result.returncode != 0:
         sys.stderr.write(
-            f"[error] Upload failed for {run_uuid}: {result.stderr.strip()}\n"
+            f"[error] Upload failed for {run_uuid} with exit code {result.returncode}\n"
         )
         sys.stderr.flush()
     else:
