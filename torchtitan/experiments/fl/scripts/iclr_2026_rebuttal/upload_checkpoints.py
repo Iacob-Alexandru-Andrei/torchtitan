@@ -105,7 +105,7 @@ def sync_run(
     print(cmd)
 
     if dry_run:
-        print(f"[dry-run] {' '.join(cmd)}")
+        print(f"[dry-run] {' '.join(cmd)}", flush=True)
         return 0
 
     result = subprocess.run(cmd, capture_output=True, text=True)
@@ -113,8 +113,9 @@ def sync_run(
         sys.stderr.write(
             f"[error] Upload failed for {run_uuid}: {result.stderr.strip()}\n"
         )
+        sys.stderr.flush()
     else:
-        print(f"[ok] Uploaded {run_uuid} to {destination}")
+        print(f"[ok] Uploaded {run_uuid} to {destination}", flush=True)
     return result.returncode
 
 
@@ -123,11 +124,12 @@ def main() -> int:
     runs_root = args.runs_root.expanduser().resolve()
     if not runs_root.is_dir():
         sys.stderr.write(f"[error] Runs root does not exist: {runs_root}\n")
+        sys.stderr.flush()
         return 2
 
     eligible_runs = find_eligible_runs(runs_root, args.min_step)
     if not eligible_runs:
-        print("No runs found with checkpoints beyond target step.")
+        print("No runs found with checkpoints beyond target step.", flush=True)
         return 0
 
     exit_code = 0
@@ -141,9 +143,9 @@ def main() -> int:
             dry_run=args.dry_run,
         )
 
-    print("Runs with checkpoints beyond target step:")
+    print("Runs with checkpoints beyond target step:", flush=True)
     for run_uuid in eligible_runs:
-        print(run_uuid)
+        print(run_uuid, flush=True)
 
     return exit_code
 
