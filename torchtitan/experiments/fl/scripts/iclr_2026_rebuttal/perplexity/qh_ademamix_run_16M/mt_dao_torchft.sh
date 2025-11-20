@@ -1,8 +1,18 @@
 #!/usr/bin/env bash
 # Launch the AdeMaMix TorchFT (\"mt_dao\") experiment with TorchFT replicas.
+#!/usr/bin/env bash
+#SBATCH -c 24
+#SBATCH -w mauao
+#SBATCH --gres=gpu:4
+#SBATCH --job-name=ademamix_qh_16M
+#SBATCH --tasks-per-node=1
+#SBATCH --output=%x-%j.out
+#SBATCH --time=11:59:00
+
+# Launch the AdeMaMix TorchFT (\"mt_dao\") experiment with TorchFT replicas.
 set -euo pipefail
 
-SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
+SCRIPT_DIR=/nfs-share/aai30/projects/torchtitan/torchtitan/experiments/fl/scripts/iclr_2026_rebuttal/perplexity/qh_ademamix_run_16M
 if [[ -n "${SLURM_SUBMIT_DIR:-}" ]]; then
   REPO_ROOT=$(cd -- "${SLURM_SUBMIT_DIR}" && pwd -P)
 else
@@ -10,6 +20,7 @@ else
 fi
 cd "${REPO_ROOT}"
 export REPO_ROOT
+
 
 # Remove stale shared-memory artifacts owned by the current user.
 find /dev/shm -maxdepth 1 -user "${USER}" -exec rm -rf {} + 2>/dev/null || true

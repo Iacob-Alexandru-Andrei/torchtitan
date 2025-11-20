@@ -1,8 +1,16 @@
 #!/usr/bin/env bash
+#SBATCH -c 24
+#SBATCH -w mauao
+#SBATCH --gres=gpu:4
+#SBATCH --job-name=noclip_16M
+#SBATCH --tasks-per-node=1
+#SBATCH --output=%x-%j.out
+#SBATCH --time=11:59:00
+
 # Launch the AdeMaMix TorchFT (\"mt_dao\") experiment with TorchFT replicas.
 set -euo pipefail
 
-SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
+SCRIPT_DIR=/nfs-share/aai30/projects/torchtitan/torchtitan/experiments/fl/scripts/iclr_2026_rebuttal/perplexity/qhadam_noclip_run_16M
 if [[ -n "${SLURM_SUBMIT_DIR:-}" ]]; then
   REPO_ROOT=$(cd -- "${SLURM_SUBMIT_DIR}" && pwd -P)
 else
