@@ -33,7 +33,6 @@ from torchtitan.experiments.fl.optimizers.galore import (
     REV_STD_PROJ,
     STD_PROJ,
     GaLore,
-    GaLoreProjector,
     _orthogonal_matrix,
 )
 from torchtitan.tools.logging import logger
@@ -1333,7 +1332,7 @@ class GaLoreMomentumProjectionCallback(Callback):
         for group in optimizer.param_groups:
             initial_rank = group.get("rank")
             has_projector = any(
-                isinstance(optimizer.state.get(param, {}).get("projector"), GaLoreProjector)
+                "projector_meta" in optimizer.state.get(param, {})
                 for param in group.get("params", [])
                 if isinstance(param, torch.Tensor)
             )
@@ -1405,12 +1404,12 @@ class GaLoreMomentumProjectionCallback(Callback):
                 )
             state[key] = _apply_projection(tensor, basis, resolved_proj_type)
 
-        state["projector"] = GaLoreProjector(
-            rank=rank,
-            update_proj_gap=group.get("update_proj_gap", 200),
-            scale=group.get("scale", 1.0),
-            proj_type=group.get("proj_type", STD_PROJ),
-        )
+        state["projector_meta"] = {
+            "rank": rank,
+            "update_proj_gap": group.get("update_proj_gap", 200),
+            "scale": group.get("scale", 1.0),
+            "proj_type": group.get("proj_type", STD_PROJ),
+        }
 
 
 class HyperparameterSwitchCallback(Callback):

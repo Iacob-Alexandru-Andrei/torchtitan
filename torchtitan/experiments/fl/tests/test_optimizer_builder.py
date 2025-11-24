@@ -16,7 +16,7 @@ from torch import nn
 from torchtitan.components.optimizer import OptimizersContainer
 from torchtitan.distributed import ParallelDims
 from torchtitan.experiments.fl.configs.optimizers import MosaicOptimizerConfig
-from torchtitan.experiments.fl.optimizers.galore import GaLore
+from torchtitan.experiments.fl.optimizers.galore import GaLore, _project
 from torchtitan.experiments.fl.optimizer_builder import build_mosaic_optimizers
 
 
@@ -157,8 +157,7 @@ def test_galore_low_rank_states_follow_projected_grad_shape() -> None:
     optimizer.step()
 
     state = optimizer.state[module.weight]
-    projector = state["projector"]
-    projected_grad = projector.project(module.weight.grad, state["step"])
+    projected_grad = _project(state, module.weight.grad, state["step"])
 
     assert state["exp_avg"].shape == state["exp_avg_sq"].shape
     assert state["exp_avg"].shape == projected_grad.shape

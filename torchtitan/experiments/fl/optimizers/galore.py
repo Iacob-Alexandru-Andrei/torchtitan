@@ -10,7 +10,6 @@ from __future__ import annotations
 import logging
 import math
 import re
-from dataclasses import dataclass
 from typing import Any, Callable, Iterable
 
 import torch
@@ -22,7 +21,7 @@ from ._metric_utils import prepare_metrics_for_reduction, reduce_metrics_across_
 
 log = logging.getLogger(__name__)
 
-__all__ = ["GaLore", "GaLoreProjector", "classify_low_rank_parameters", ]
+__all__ = ["GaLore", "classify_low_rank_parameters", ]
 
 GALORE_MAX_SUPPORT_DIM = 2
 _HIGH_WEIGHT_DECAY_WARNING = 1e-1
@@ -32,11 +31,6 @@ RIGHT_PROJ = "right"
 LEFT_PROJ = "left"
 FULL_PROJ = "full"
 REV_STD_PROJ = "reverse_std"
-
-
-def _require(condition: bool, message: str) -> None:
-    if not condition:
-        raise ValueError(message)
 
 
 def _orthogonal_matrix(weights: Tensor, rank: int, proj_type: str) -> Tensor | list[Tensor]:
@@ -61,65 +55,75 @@ def _orthogonal_matrix(weights: Tensor, rank: int, proj_type: str) -> Tensor | l
     return result.to(device=original_device, dtype=original_dtype)
 
 
-@dataclass
-class GaLoreProjector:
-    """Project tensors to/from their low-rank representation."""
+def _resolve_proj_choice(proj_type: str, tensor: Tensor) -> str:
+    if proj_type in {STD_PROJ, REV_STD_PROJ}:
+        if tensor.shape[0] >= tensor.shape[1]:
+            return RIGHT_PROJ if proj_type == STD_PROJ else LEFT_PROJ
+        return LEFT_PROJ if proj_type == STD_PROJ else RIGHT_PROJ
+    return proj_type
 
-    rank: int
-    update_proj_gap: int = 200
-    scale: float = 1.0
-    proj_type: str = STD_PROJ
 
-    def __post_init__(self) -> None:
-        _require(self.rank > 0, "rank must be positive")
-        _require(self.update_proj_gap > 0, "update_proj_gap must be positive")
-        self._orthogonal: Tensor | list[Tensor] | None = None
+def _maybe_refresh_projector(state: dict[str, Any], weights: Tensor, iteration: Tensor) -> None:
+    meta = state.setdefault(
+        "projector_meta",
+        {
+            "rank": None,
+            "update_proj_gap": None,
+            "scale": None,
+            "proj_type": None,
+        },
+    )
+    rank = meta["rank"]
+    update_proj_gap = meta["update_proj_gap"]
+    proj_type = meta["proj_type"]
+    if rank is None or update_proj_gap is None or proj_type is None:
+        return
 
-    def _maybe_refresh(self, weights: Tensor, iteration: Tensor) -> None:
-        if self._orthogonal is None or (iteration % self.update_proj_gap).item() == 0:
-            self._orthogonal = _orthogonal_matrix(weights, self.rank, self._proj_choice(weights))
+    orthogonal = state.get("projector_basis")
+    if orthogonal is None or (iteration % update_proj_gap).item() == 0:
+        state["projector_basis"] = _orthogonal_matrix(weights, rank, proj_type)
 
-    def _proj_choice(self, tensor: Tensor) -> str:
-        if self.proj_type in {STD_PROJ, REV_STD_PROJ}:
-            if tensor.shape[0] >= tensor.shape[1]:
-                return RIGHT_PROJ if self.proj_type == STD_PROJ else LEFT_PROJ
-            return LEFT_PROJ if self.proj_type == STD_PROJ else RIGHT_PROJ
-        return self.proj_type
 
-    def project(self, full_rank_grad: Tensor, iteration: Tensor) -> Tensor:
-        if full_rank_grad.ndim > GALORE_MAX_SUPPORT_DIM:
-            raise NotImplementedError("GaLore currently supports tensors up to rank 2.")
+def _project(
+    state: dict[str, Any],
+    full_rank_grad: Tensor,
+    iteration: Tensor,
+) -> Tensor:
+    if full_rank_grad.ndim > GALORE_MAX_SUPPORT_DIM:
+        raise NotImplementedError("GaLore currently supports tensors up to rank 2.")
 
-        proj_type = self._proj_choice(full_rank_grad)
-        self._maybe_refresh(full_rank_grad, iteration)
-        orthogonal = self._orthogonal
-        if orthogonal is None:
-            raise RuntimeError("Projection matrix not initialised.")
+    proj_type = _resolve_proj_choice(state.get("projector_meta", {}).get("proj_type", STD_PROJ), full_rank_grad)
+    _maybe_refresh_projector(state, full_rank_grad, iteration)
+    orthogonal = state.get("projector_basis")
+    if orthogonal is None:
+        raise RuntimeError("Projection matrix not initialised.")
 
-        if proj_type == RIGHT_PROJ:
-            assert isinstance(orthogonal, Tensor)
-            return full_rank_grad @ orthogonal.T.to(full_rank_grad.device)
-        if proj_type == LEFT_PROJ:
-            assert isinstance(orthogonal, Tensor)
-            return orthogonal.T.to(full_rank_grad.device) @ full_rank_grad
-        if proj_type == FULL_PROJ:
-            assert isinstance(orthogonal, list)
-            a_matrix, b_matrix = orthogonal
-            return a_matrix.T.to(full_rank_grad.device) @ full_rank_grad @ b_matrix.T.to(full_rank_grad.device)
-        raise ValueError(f"Unsupported projection type {proj_type!r}")
-
-    def project_back(self, low_rank_grad: Tensor) -> Tensor:
-        orthogonal = self._orthogonal
-        if orthogonal is None:
-            return low_rank_grad * self.scale
-
-        if isinstance(orthogonal, Tensor):
-            matrix = orthogonal.to(low_rank_grad.device)
-            if matrix.shape[0] == low_rank_grad.shape[-1]:
-                return (low_rank_grad @ matrix) * self.scale
-            return (matrix @ low_rank_grad) * self.scale
+    if proj_type == RIGHT_PROJ:
+        assert isinstance(orthogonal, Tensor)
+        return full_rank_grad @ orthogonal.T.to(full_rank_grad.device)
+    if proj_type == LEFT_PROJ:
+        assert isinstance(orthogonal, Tensor)
+        return orthogonal.T.to(full_rank_grad.device) @ full_rank_grad
+    if proj_type == FULL_PROJ:
+        assert isinstance(orthogonal, list)
         a_matrix, b_matrix = orthogonal
-        return (a_matrix.to(low_rank_grad.device) @ low_rank_grad @ b_matrix.to(low_rank_grad.device)) * self.scale
+        return a_matrix.T.to(full_rank_grad.device) @ full_rank_grad @ b_matrix.T.to(full_rank_grad.device)
+    raise ValueError(f"Unsupported projection type {proj_type!r}")
+
+
+def _project_back(state: dict[str, Any], low_rank_grad: Tensor) -> Tensor:
+    orthogonal = state.get("projector_basis")
+    scale = state.get("projector_meta", {}).get("scale", 1.0)
+    if orthogonal is None:
+        return low_rank_grad * scale
+
+    if isinstance(orthogonal, Tensor):
+        matrix = orthogonal.to(low_rank_grad.device)
+        if matrix.shape[0] == low_rank_grad.shape[-1]:
+            return (low_rank_grad @ matrix) * scale
+        return (matrix @ low_rank_grad) * scale
+    a_matrix, b_matrix = orthogonal
+    return (a_matrix.to(low_rank_grad.device) @ low_rank_grad @ b_matrix.to(low_rank_grad.device)) * scale
 
 
 class GaLore(AdamW):
@@ -237,18 +241,22 @@ class GaLore(AdamW):
                 if "step" not in state:
                     state["step"] = torch.zeros((), dtype=torch.float32, device=param.device)
 
-                projector = state.get("projector")
-                if use_low_rank and projector is None:
-                    projector = GaLoreProjector(
-                        rank=rank,
-                        update_proj_gap=group["update_proj_gap"],
-                        scale=group["scale"],
-                        proj_type=group["proj_type"],
+                if use_low_rank:
+                    state.setdefault(
+                        "projector_meta",
+                        {
+                            "rank": rank,
+                            "update_proj_gap": group["update_proj_gap"],
+                            "scale": group["scale"],
+                            "proj_type": group["proj_type"],
+                        },
                     )
-                    state["projector"] = projector
-
-                if projector is not None:
-                    grad = projector.project(grad, state["step"])
+                    meta = state["projector_meta"]
+                    meta["rank"] = rank
+                    meta["update_proj_gap"] = group["update_proj_gap"]
+                    meta["scale"] = group["scale"]
+                    meta["proj_type"] = group["proj_type"]
+                    grad = _project(state, grad, state["step"])
 
                 if "exp_avg" not in state:
                     state["exp_avg"] = torch.zeros_like(
@@ -280,8 +288,8 @@ class GaLore(AdamW):
                     blended = (1 - self.v1) * grad + self.v1 * (exp_avg / bias_correction1)
                     step_tensor = blended / denom
 
-                if projector is not None:
-                    step_tensor = projector.project_back(step_tensor)
+                if use_low_rank:
+                    step_tensor = _project_back(state, step_tensor)
 
                 param.add_(step_tensor, alpha=-lr)
                 if weight_decay > 0.0:
@@ -300,10 +308,10 @@ class GaLore(AdamW):
 
     def _projector_eigenvalues(
         self,
-        projector: GaLoreProjector,
+        optim_state: dict[str, Any],
         device: torch.device,
     ) -> tuple[torch.Tensor | None, torch.Tensor | None]:
-        basis = projector._orthogonal
+        basis = optim_state.get("projector_basis")
         if basis is None:
             return None, None
 
@@ -346,9 +354,10 @@ class GaLore(AdamW):
 
             step = param_optim_state["step"].item()
             grad = param.grad
-            projector = param_optim_state.get("projector")
-            if grad is not None and projector is not None:
-                grad = projector.project(grad, param_optim_state["step"])
+            meta = param_optim_state.get("projector_meta")
+            use_low_rank = meta is not None and meta.get("rank") is not None
+            if grad is not None and use_low_rank:
+                grad = _project(param_optim_state, grad, param_optim_state["step"])
 
             bias_correction1 = 1 - beta1**step
             bias_correction2 = 1 - beta2**step
@@ -358,8 +367,8 @@ class GaLore(AdamW):
             if self.v1 > 0.0 and grad is not None:
                 step_tensor = (1.0 - self.v1) * grad + self.v1 * step_tensor
             step_tensor = step_tensor / denom
-            if projector is not None:
-                step_tensor = projector.project_back(step_tensor)
+            if use_low_rank:
+                step_tensor = _project_back(param_optim_state, step_tensor)
             step_tensor = step_tensor.mul(step_size)
 
             if weight_decay != 0:
@@ -374,8 +383,8 @@ class GaLore(AdamW):
                     step_tensor,
                 )
 
-            if projector is not None:
-                eigenvalues, eig_product = self._projector_eigenvalues(projector, param.device)
+            if use_low_rank:
+                eigenvalues, eig_product = self._projector_eigenvalues(param_optim_state, param.device)
                 if eigenvalues is not None:
                     for idx, eig in enumerate(eigenvalues):
                         optimizer_metrics[f"mean/projection_eigenvalue_{idx}/{name}"] = eig
