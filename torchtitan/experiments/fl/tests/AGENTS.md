@@ -79,8 +79,8 @@ test_llama3_mup_scion.py→[test_scion_assigns_hidden_and_output_scales(void)[TE
 ## DEPENDENCY_PATTERNS
 
 ### EDGE_PATTERNS
-Contains: 8 edges
 Call: 33 edges
+Contains: 8 edges
 
 ### CROSS_CLUSTER_FLOW
 

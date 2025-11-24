@@ -78,8 +78,8 @@ __init__.py→[] mup_args.py→[] mup_model.py→[forward((self,x: torch.Tensor)
 ## DEPENDENCY_PATTERNS
 
 ### EDGE_PATTERNS
-Contains: 29 edges
 Call: 3 edges
+Contains: 29 edges
 
 ### CROSS_CLUSTER_FLOW
 

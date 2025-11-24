@@ -86,8 +86,8 @@ __init__.py→[get_train_spec(void),get_train_spec(void),get_train_spec(void)] a
 ## DEPENDENCY_PATTERNS
 
 ### EDGE_PATTERNS
-Call: 24 edges
 Contains: 58 edges
+Call: 24 edges
 
 ### CROSS_CLUSTER_FLOW
 
