@@ -53,6 +53,13 @@ class MosaicTrainSpecAdapter:
         """Register the Mosaic TrainSpec, updating an existing entry if needed."""
         spec = self._cached_spec or self.build()
 
+        if spec.name == self.base_spec_name:
+            msg = (
+                "Cannot register Mosaic spec with the same name as the base spec "
+                f"({self.base_spec_name}); this would override the core configuration."
+            )
+            raise ValueError(msg)
+
         try:
             existing_spec = get_train_spec(spec.name)
         except ValueError:
