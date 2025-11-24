@@ -17,7 +17,7 @@ from torch.optim.optimizer import Optimizer
 
 from ._metric_utils import prepare_metrics_for_reduction, reduce_metrics_across_ranks
 
-__all__ = ["Scion", "ScionLight", "QHScion", "ScionAggMo", "Muon", "zeroth_power_via_svd"]
+__all__ = ["Scion", "ScionLight", "QHScion", "ScionAggMo", "zeroth_power_via_svd"]
 
 
 log = logging.getLogger(__name__)
@@ -777,101 +777,6 @@ def _normalise_weights(weights: tuple[float, ...]) -> tuple[float, ...]:
     if total <= 0:
         raise ValueError("Sum of Scion betas weights must be positive.")
     return tuple(weight / total for weight in weights)
-
-
-class Muon(_ScionBase):
-    """Muon optimizer that reuses Scion's LMO/norm helpers."""
-
-    def __init__(
-        self,
-        params: Iterable[Tensor],
-        lr: float = 2e-2,
-        *,
-        betas: tuple[float, ...] | None = None,
-        momentum: float | None = 0.95,
-        weight_decay: float = 0.0,
-        nesterov: bool = True,
-        norm: str = "Auto",
-        norm_kwargs: dict | None = None,
-        zeropower_coeffs: tuple[float, float, float] | None = None,
-    ) -> None:
-        _ensure_positive(lr, "learning rate")
-        betas_tuple = _normalize_betas(
-            betas=betas,
-            fallback=momentum,
-            default=(0.95,),
-            label="betas",
-        )
-        defaults = {
-            "lr": lr,
-            "betas": betas_tuple,
-            "weight_decay": float(weight_decay),
-            "nesterov": bool(nesterov),
-            "norm": norm,
-            "norm_kwargs": norm_kwargs or {},
-            "zeropower_coeffs": tuple(zeropower_coeffs or MUON_ZEROpower_COEFFS),
-        }
-        super().__init__(params, defaults)
-
-    def step(self) -> None:
-        for group in self.param_groups:
-            lr = group["lr"]
-            weight_decay = float(group.get("weight_decay", 0.0))
-            beta1 = _ensure_single_beta(group)
-            nesterov = bool(group.get("nesterov", True))
-            norm_factor, backend, backend_steps, eps, norm_kwargs = _resolve_norm_settings(group)
-            coeffs = tuple(group.get("zeropower_coeffs", self._zeropower_coeffs))
-
-            for param in group["params"]:
-                grad = param.grad
-                if grad is None:
-                    continue
-                if grad.is_sparse:
-                    msg = "Muon does not support sparse gradients."
-                    raise RuntimeError(msg)
-
-                state = self.state[param]
-                _increment_state_step(state, param)
-                buf = state.setdefault("exp_avg", torch.zeros_like(grad))
-                buf.mul_(beta1).add_(grad, alpha=1.0 - beta1)
-                if nesterov:
-                    direction = grad * (1.0 - beta1) + buf * beta1
-                else:
-                    direction = buf
-                state["muon_direction"] = direction.detach()
-
-                if direction.ndim >= 2:
-                    update = _apply_lmo(
-                        direction,
-                        norm_factor=norm_factor,
-                        backend=backend,
-                        backend_steps=backend_steps,
-                        eps=eps,
-                        coefficients=coeffs,
-                        norm_kwargs=norm_kwargs,
-                    )
-                else:
-                    update = direction
-                update = _apply_scale_if_configured(update, group)
-
-                if weight_decay != 0.0:
-                    param.data.mul_(1.0 - lr * weight_decay)
-                param.data.add_(update, alpha=-lr)
-
-    def _compute_direction(self, param: Tensor, group: dict, state: dict) -> Tensor | None:
-        cached = state.get("muon_direction")
-        if isinstance(cached, torch.Tensor):
-            return cached
-        grad = param.grad
-        buf = state.get("exp_avg")
-        if buf is None:
-            return grad
-        if grad is None:
-            return buf
-        beta1 = _ensure_single_beta(group)
-        if bool(group.get("nesterov", True)):
-            return grad * (1.0 - beta1) + buf * beta1
-        return buf
 
 
 class ScionAggMo(_ScionBase):

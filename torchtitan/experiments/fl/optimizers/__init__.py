@@ -11,16 +11,19 @@ from .aggmo_adamw import AggMoAdamW
 from .aggmo_adopt import AggMoAdopt
 from .decoupled_adamw import DecoupledAdamW
 from .desloc_outer import DES_LOC_OUTER
+from .aggmo_muon import AggMoMuon
+from .muon import Muon
 from .qhadamw import QHAdamW
 from .qhadopt import QHADOPT
 from .galore import GaLore
-from .scion import Muon, Scion, ScionAggMo, ScionLight, QHScion
+from .scion import Scion, ScionAggMo, ScionLight, QHScion
 
 __all__ = [
     "ADOPT",
     "QHADOPT",
     "AggMoAdamW",
     "AggMoAdopt",
+    "AggMoMuon",
     "DecoupledAdamW",
     "DES_LOC_OUTER",
     "QHAdamW",

@@ -8,7 +8,7 @@
 """Dataclasses defining MuP-specific configuration for LLaMA models."""
 
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Literal
 
 from torchtitan.models.llama3.model.args import (
     TransformerModelArgs as BaseTransformerModelArgs,
@@ -49,6 +49,9 @@ class TransformerModelArgs(BaseTransformerModelArgs):
     use_peri_norm: bool = True
     tie_word_embeddings: bool = True
     use_torch_layernorm: bool = True
+    layernorm_impl: Literal["torch", "rms"] | None = None
+    qk_layernorm_impl: Literal["torch", "rms"] | None = None
+    force_rmsnorm_bf16: bool = False
     use_simple_silu_ffn: bool = False
     head_dim: int | None = None
     qk_norm: bool = True

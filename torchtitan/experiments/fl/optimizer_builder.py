@@ -31,6 +31,7 @@ from torchtitan.experiments.fl.optimizers import (
     AggMoAdamW,
     AggMoAdopt,
     DecoupledAdamW,
+    AggMoMuon,
     GaLore,
     Muon,
     QHAdamW,
@@ -88,6 +89,7 @@ _MOSAIC_OPTIMIZER_CLASSES: dict[str, type[Optimizer]] = {
     "DecoupledAdamW": DecoupledAdamW,
     "AggMoAdopt": AggMoAdopt,
     "AggMoAdamW": AggMoAdamW,
+    "AggMoMuon": AggMoMuon,
     "Scion": Scion,
     "ScionLight": ScionLight,
     "ScionQH": QHScion,
@@ -125,6 +127,12 @@ def _normalize_mosaic_optimizer_config(
         extra_kwargs["betas"] = config.get_betas_tuple()
     if name in {"QHADOPT", "QHAdamW", "AggMoAdopt", "AggMoAdamW"}:
         extra_kwargs["vs"] = config.vs
+    if name == "AggMoMuon":
+        betas = config.betas if config.betas is not None else tuple([config.beta1] * len(config.vs))
+        extra_kwargs["betas"] = betas
+        extra_kwargs["vs"] = config.vs
+        extra_kwargs["nesterov"] = config.muon_nesterov
+        extra_kwargs["ns_coefficients"] = config.resolved_zeropower_coefficients()
     if name in {"DecoupledAdamW", "AggMoAdopt", "AggMoAdamW"}:
         extra_kwargs["decouple"] = config.decouple
     if name in {"Scion", "ScionLight", "ScionQH", "ScionAggMo"}:
@@ -157,11 +165,9 @@ def _normalize_mosaic_optimizer_config(
     if name == "Muon":
         extra_kwargs.update(
             {
-                "norm": config.norm,
-                "norm_kwargs": config.norm_kwargs or {},
-                "zeropower_coeffs": config.resolved_zeropower_coefficients(),
-                "betas": (config.beta1,),
+                "momentum": config.beta1,
                 "nesterov": config.muon_nesterov,
+                "ns_coefficients": config.resolved_zeropower_coefficients(),
             }
         )
 
@@ -177,6 +183,7 @@ def _build_optimizer_kwargs(config: MosaicOptimizerConfig, extra_kwargs: dict[st
         kwargs = {
             "lr": config.lr,
             "weight_decay": config.weight_decay,
+            "eps": config.eps,
         }
         kwargs.update(extra_kwargs)
         return kwargs
@@ -192,6 +199,14 @@ def _build_optimizer_kwargs(config: MosaicOptimizerConfig, extra_kwargs: dict[st
             "scale": config.galore_scale,
             "proj_type": config.galore_proj_type,
             "dim": config.galore_dim,
+        }
+        kwargs.update(extra_kwargs)
+        return kwargs
+    if config.name == "AggMoMuon":
+        kwargs = {
+            "lr": config.lr,
+            "weight_decay": config.weight_decay,
+            "eps": config.eps,
         }
         kwargs.update(extra_kwargs)
         return kwargs

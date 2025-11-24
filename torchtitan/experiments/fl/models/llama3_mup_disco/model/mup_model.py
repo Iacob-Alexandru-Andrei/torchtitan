@@ -27,6 +27,7 @@ from torchtitan.experiments.fl.models.llama3_mup.model.mup_model import (
     Transformer as MuPTransformer,
     TransformerBlock as MuPTransformerBlock,
 )
+from torchtitan.experiments.fl.models.llama3_mup.model.rms_norm import build_norm_module
 
 from .disco_init import init_linear_weight, initialize_tensor
 from .mup_args import TransformerModelArgs as TransformerModelArgsMuP
@@ -44,85 +45,6 @@ _SCION_SCALE_DEBUG_ENABLED = os.getenv("TORCHTITAN_DEBUG_SCION_SCALES", "").lowe
 }
 
 
-class TitanRMSNorm(nn.Module):
-    """RMSNorm variant that can optionally train an additive offset."""
-
-    def __init__(
-        self,
-        normalized_shape: int | Sequence[int],
-        *,
-        eps: float = 1e-6,
-        elementwise_affine: bool = True,
-        add_unit_offset: bool = True,
-        force_bf16: bool = False,
-    ) -> None:
-        super().__init__()
-        if isinstance(normalized_shape, Sequence):
-            self.normalized_shape = tuple(normalized_shape)
-        else:
-            self.normalized_shape = (normalized_shape,)
-        self.eps = eps
-        self.elementwise_affine = elementwise_affine
-        self.add_unit_offset = add_unit_offset
-        self.force_bf16 = force_bf16
-        self._norm_axes = tuple(range(-len(self.normalized_shape), 0))
-
-        if elementwise_affine:
-            init = torch.zeros(self.normalized_shape)
-            self.weight = nn.Parameter(init)
-        else:
-            self.register_parameter("weight", None)
-
-    def reset_parameters(self) -> None:
-        if self.weight is not None:
-            nn.init.constant_(self.weight, 0.0)
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        if self.weight is None:
-            if self.force_bf16 and x.dtype != torch.bfloat16:
-                return F.rms_norm(
-                    x.to(torch.bfloat16),
-                    self.normalized_shape,
-                    None,
-                    self.eps,
-                ).to(x.dtype)
-            return F.rms_norm(x, self.normalized_shape, None, self.eps)
-
-        compute_dtype = torch.bfloat16 if self.force_bf16 else torch.float32
-        hidden_states = x.to(compute_dtype)
-        variance = hidden_states.pow(2).mean(dim=self._norm_axes, keepdim=True)
-        hidden_states = hidden_states * torch.rsqrt(variance + self.eps)
-
-        scale = 1 + self.weight if self.add_unit_offset else self.weight
-        hidden_states = hidden_states * scale.to(compute_dtype)
-        return hidden_states.to(x.dtype)
-
-
-def _build_norm_module(
-    normalized_shape: int | Sequence[int],
-    *,
-    eps: float,
-    model_args: TransformerModelArgsMuP,
-    prefer_torch: bool,
-    elementwise_affine: bool = True,
-    bias: bool = False,
-) -> nn.Module:
-    if prefer_torch:
-        return LPLayerNorm(
-            normalized_shape,
-            eps=eps,
-            elementwise_affine=elementwise_affine,
-            bias=bias,
-        )
-    return TitanRMSNorm(
-        normalized_shape,
-        eps=eps,
-        elementwise_affine=elementwise_affine,
-        add_unit_offset=elementwise_affine,
-        force_bf16=model_args.force_rmsnorm_bf16,
-    )
-
-
 class Attention(MuPAttention):
     """MuP attention layer with optional Disco initialization and norms."""
 
@@ -136,13 +58,22 @@ class Attention(MuPAttention):
 
     def _build_head_norm(self, model_args: TransformerModelArgsMuP) -> nn.Module:
         prefer_torch = model_args.use_torch_qk_layernorm
-        return _build_norm_module(
+        if prefer_torch is None:
+            if model_args.qk_layernorm_impl is not None:
+                prefer_torch = model_args.qk_layernorm_impl == "torch"
+            elif model_args.layernorm_impl is not None:
+                prefer_torch = model_args.layernorm_impl == "torch"
+            else:
+                prefer_torch = model_args.use_torch_layernorm
+        return build_norm_module(
             self.head_dim,
             eps=model_args.norm_eps,
-            model_args=model_args,
             prefer_torch=prefer_torch,
             elementwise_affine=model_args.qk_norm_elementwise_affine,
             bias=model_args.qk_norm_bias,
+            torch_norm_cls=LPLayerNorm,
+            add_unit_offset=model_args.qk_norm_elementwise_affine,
+            force_bf16=model_args.force_rmsnorm_bf16,
         )
 
     def init_weights(self, init_std: float) -> None:
@@ -232,13 +163,20 @@ class TransformerBlock(MuPTransformerBlock):
     def _refresh_norms(self, model_args: TransformerModelArgsMuP) -> None:
         elementwise_affine = model_args.torch_layernorm_elementwise_affine
         bias = model_args.torch_layernorm_bias if model_args.use_torch_layernorm else False
-        build_norm = lambda: _build_norm_module(  # noqa: E731
+        prefer_torch = (
+            model_args.layernorm_impl == "torch"
+            if model_args.layernorm_impl is not None
+            else model_args.use_torch_layernorm
+        )
+        build_norm = lambda: build_norm_module(  # noqa: E731
             model_args.dim,
             eps=model_args.norm_eps,
-            model_args=model_args,
-            prefer_torch=model_args.use_torch_layernorm,
+            prefer_torch=prefer_torch,
             elementwise_affine=elementwise_affine,
             bias=bias,
+            torch_norm_cls=LPLayerNorm,
+            add_unit_offset=elementwise_affine,
+            force_bf16=model_args.force_rmsnorm_bf16,
         )
         self.attention_norm = build_norm()
         self.ffn_norm = build_norm()
@@ -272,14 +210,21 @@ class Transformer(MuPTransformer):
 
         emb_elementwise = model_args.torch_layernorm_elementwise_affine
         emb_bias = model_args.torch_layernorm_bias if model_args.use_torch_layernorm else False
+        prefer_torch = (
+            model_args.layernorm_impl == "torch"
+            if model_args.layernorm_impl is not None
+            else model_args.use_torch_layernorm
+        )
         if model_args.use_embedding_norm:
-            self.embedding_norm = _build_norm_module(
+            self.embedding_norm = build_norm_module(
                 model_args.dim,
                 eps=model_args.norm_eps,
-                model_args=model_args,
-                prefer_torch=model_args.use_torch_layernorm,
+                prefer_torch=prefer_torch,
                 elementwise_affine=emb_elementwise,
                 bias=emb_bias,
+                torch_norm_cls=LPLayerNorm,
+                add_unit_offset=emb_elementwise,
+                force_bf16=model_args.force_rmsnorm_bf16,
             )
         else:
             self.embedding_norm = None
@@ -287,13 +232,15 @@ class Transformer(MuPTransformer):
         self.layers = nn.ModuleDict(
             {str(layer_id): TransformerBlock(layer_id, model_args) for layer_id in range(model_args.n_layers)}
         )
-        self.norm = _build_norm_module(
+        self.norm = build_norm_module(
             model_args.dim,
             eps=model_args.norm_eps,
-            model_args=model_args,
-            prefer_torch=model_args.use_torch_layernorm,
+            prefer_torch=prefer_torch,
             elementwise_affine=model_args.torch_layernorm_elementwise_affine,
             bias=(model_args.torch_layernorm_bias if model_args.use_torch_layernorm else False),
+            torch_norm_cls=LPLayerNorm,
+            add_unit_offset=model_args.torch_layernorm_elementwise_affine,
+            force_bf16=model_args.force_rmsnorm_bf16,
         )
         self._warned_missing_unembed_bucket = False
 

@@ -135,90 +135,6 @@ llama3_mup_configs: dict[str, TransformerModelArgs] = {
             "output_mult": None,
         },
     ),
-    "16M_scion": TransformerModelArgs(
-        dim=256,
-        n_layers=4,
-        n_heads=4,
-        vocab_size=50368,
-        rope_theta=10_000,
-        ffn_dim_multiplier=None,
-        use_embedding_norm=True,
-        use_peri_norm=True,
-        tie_word_embeddings=True,
-        use_torch_layernorm=False,
-        layernorm_impl="rms",
-        torch_layernorm_bias=False,
-        torch_layernorm_elementwise_affine=False,
-        use_simple_silu_ffn=False,
-        qk_norm=True,
-        qk_norm_bias=False,
-        qk_norm_elementwise_affine=False,
-        use_torch_qk_layernorm=False,
-        qk_layernorm_impl="rms",
-        use_flex_attn=True,
-        attn_mask_type="block_causal",
-        use_disco=False,
-        use_scion=True,
-        mup_config={
-            "mup_enabled": True,
-            "mup_disable_attention_scaling": True,
-            "mup_disable_hidden_lr_scaling": False,
-            "mup_width_multiplier": 1.0,
-            "mup_input_alpha": 1.0,
-            "mup_output_alpha": 1.0,
-            "completep_depth_alpha_enabled": True,
-            "completep_depth_multiplier": 1.0,
-            "completep_depth_alpha_exp": 1.0,
-            "completep_eps_scaling_enabled": False,
-        },
-        init_config={
-            "init_std": 0.02,
-            "emb_init_std": 0.02,
-            "output_mult": None,
-        },
-    ),
-     "16M_scion_torch": TransformerModelArgs(
-        dim=256,
-        n_layers=4,
-        n_heads=4,
-        vocab_size=50368,
-        rope_theta=10_000,
-        ffn_dim_multiplier=None,
-        use_embedding_norm=True,
-        use_peri_norm=True,
-        tie_word_embeddings=True,
-        use_torch_layernorm=True,
-        layernorm_impl="torch",
-        torch_layernorm_bias=False,
-        torch_layernorm_elementwise_affine=True,
-        use_simple_silu_ffn=False,
-        qk_norm=True,
-        qk_norm_bias=False,
-        qk_norm_elementwise_affine=True,
-        use_torch_qk_layernorm=True,
-        qk_layernorm_impl="torch",
-        use_flex_attn=True,
-        attn_mask_type="block_causal",
-        use_disco=False,
-        use_scion=True,
-        mup_config={
-            "mup_enabled": True,
-            "mup_disable_attention_scaling": True,
-            "mup_disable_hidden_lr_scaling": False,
-            "mup_width_multiplier": 1.0,
-            "mup_input_alpha": 1.0,
-            "mup_output_alpha": 1.0,
-            "completep_depth_alpha_enabled": True,
-            "completep_depth_multiplier": 1.0,
-            "completep_depth_alpha_exp": 1.0,
-            "completep_eps_scaling_enabled": False,
-        },
-        init_config={
-            "init_std": 0.02,
-            "emb_init_std": 0.02,
-            "output_mult": None,
-        },
-    ),
     "125M": TransformerModelArgs(
         dim=768,
         n_layers=12,
@@ -536,6 +452,29 @@ llama3_mup_configs: dict[str, TransformerModelArgs] = {
         },
     ),
 }
+
+
+# Register parameter-less RMSNorm variants (BF16-friendly) for every base config.
+def _add_rms_variants() -> None:
+    rms_suffix = "_RMS"
+    base_items = list(llama3_mup_configs.items())
+    for name, args in base_items:
+        rms_args = replace(
+            args,
+            use_torch_layernorm=False,
+            layernorm_impl="rms",
+            torch_layernorm_elementwise_affine=False,
+            torch_layernorm_bias=False,
+            use_torch_qk_layernorm=False,
+            qk_layernorm_impl="rms",
+            qk_norm_elementwise_affine=False,
+            qk_norm_bias=False,
+            force_rmsnorm_bf16=True,
+        )
+        llama3_mup_configs[f"{name}{rms_suffix}"] = rms_args
+
+
+_add_rms_variants()
 
 
 def get_train_spec() -> TrainSpec:

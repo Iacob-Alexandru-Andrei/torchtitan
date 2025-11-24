@@ -292,6 +292,28 @@ llama3_mup_configs = {
 }
 
 
+def _add_rms_variants() -> None:
+    """Register parameter-less RMSNorm (BF16-friendly) variants for all configs."""
+    rms_suffix = "_RMS"
+    base_items = list(llama3_mup_configs.items())
+    for name, args in base_items:
+        rms_args = replace(
+            args,
+            use_torch_layernorm=False,
+            layernorm_impl="rms",
+            torch_layernorm_elementwise_affine=False,
+            torch_layernorm_bias=False,
+            qk_norm_elementwise_affine=False,
+            qk_norm_bias=False,
+            qk_layernorm_impl="rms",
+            force_rmsnorm_bf16=True,
+        )
+        llama3_mup_configs[f"{name}{rms_suffix}"] = rms_args
+
+
+_add_rms_variants()
+
+
 def get_train_spec() -> TrainSpec:
     """Get the training specification for the Llama-3 MuP model."""
     return TrainSpec(

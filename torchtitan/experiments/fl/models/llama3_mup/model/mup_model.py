@@ -10,7 +10,7 @@
 import logging
 from collections.abc import Iterator
 from dataclasses import dataclass
-from typing import Any, cast, Protocol, runtime_checkable
+from typing import Any, Literal, cast, Protocol, runtime_checkable
 
 import torch
 import torch.nn.functional as F
@@ -22,6 +22,7 @@ from torchtitan.experiments.qwen3.model.model import (
     Attention as QwenAttention,
     precompute_rope_cache,
 )
+from torchtitan.experiments.fl.models.llama3_mup.model.rms_norm import build_norm_module
 from torchtitan.models.llama3.model.model import (
     FeedForward as BaseFeedForward,
     Transformer as BaseTransformer,
@@ -48,6 +49,22 @@ def _cast_if_autocast_enabled(tensor: torch.Tensor | None) -> torch.Tensor | Non
         msg = f"Unsupported device for autocast: {tensor.device.type}"
         raise NotImplementedError(msg)
     return tensor.to(dtype=dtype)
+
+
+def _prefer_torch_layernorm(model_args: "TransformerModelArgsMuP") -> bool:
+    """Resolve whether to prefer torch LayerNorm-style layers."""
+    if model_args.layernorm_impl is not None:
+        return model_args.layernorm_impl == "torch"
+    return model_args.use_torch_layernorm
+
+
+def _prefer_torch_qk_layernorm(model_args: "TransformerModelArgsMuP") -> bool:
+    """Resolve whether to prefer torch LayerNorm for QK norms."""
+    if model_args.qk_layernorm_impl is not None:
+        return model_args.qk_layernorm_impl == "torch"
+    if model_args.layernorm_impl is not None:
+        return model_args.layernorm_impl == "torch"
+    return model_args.use_torch_layernorm
 
 
 class LPLayerNorm(torch.nn.LayerNorm):
@@ -188,15 +205,16 @@ class Attention(QwenAttention):
                 norm.reset_parameters()
 
     def _build_head_norm(self, model_args: TransformerModelArgsMuP) -> nn.Module:
-        if model_args.use_torch_layernorm:
-            return LPLayerNorm(
-                self.head_dim,
-                eps=model_args.norm_eps,
-                elementwise_affine=model_args.qk_norm_elementwise_affine,
-                bias=model_args.qk_norm_bias,
-            )
-        return nn.RMSNorm(
-            self.head_dim, eps=model_args.norm_eps, elementwise_affine=True
+        prefer_torch = _prefer_torch_qk_layernorm(model_args)
+        return build_norm_module(
+            self.head_dim,
+            eps=model_args.norm_eps,
+            prefer_torch=prefer_torch,
+            elementwise_affine=model_args.qk_norm_elementwise_affine,
+            bias=model_args.qk_norm_bias if prefer_torch else False,
+            torch_norm_cls=LPLayerNorm,
+            add_unit_offset=model_args.qk_norm_elementwise_affine,
+            force_bf16=model_args.force_rmsnorm_bf16,
         )
 
 
@@ -263,9 +281,7 @@ class TransformerBlock(BaseTransformerBlock):
         self.model_args = model_args
         self.mup_config = model_args.mup_config_obj
         self.init_config = model_args.init_config_obj
-        norm_cls: type[nn.Module] = (
-            LPLayerNorm if model_args.use_torch_layernorm else nn.RMSNorm
-        )
+        prefer_torch_norm = _prefer_torch_layernorm(model_args)
 
         # Override attention/feed-forward with MuP-aware variants
         self.attention = Attention(model_args)
@@ -273,43 +289,27 @@ class TransformerBlock(BaseTransformerBlock):
         self.feed_forward = FeedForward(model_args)
         self.feed_forward.mup_layer_id = layer_id
 
-        if model_args.use_torch_layernorm:
-            self.attention_norm = norm_cls(
+        def _build_block_norm() -> nn.Module:
+            return build_norm_module(
                 model_args.dim,
                 eps=model_args.norm_eps,
+                prefer_torch=prefer_torch_norm,
                 elementwise_affine=model_args.torch_layernorm_elementwise_affine,
-                bias=model_args.torch_layernorm_bias,
+                bias=model_args.torch_layernorm_bias if prefer_torch_norm else False,
+                torch_norm_cls=LPLayerNorm,
+                add_unit_offset=model_args.torch_layernorm_elementwise_affine,
+                force_bf16=model_args.force_rmsnorm_bf16,
             )
-            self.ffn_norm = norm_cls(
-                model_args.dim,
-                eps=model_args.norm_eps,
-                elementwise_affine=model_args.torch_layernorm_elementwise_affine,
-                bias=model_args.torch_layernorm_bias,
-            )
-        else:
-            self.attention_norm = norm_cls(model_args.dim, eps=model_args.norm_eps)
-            self.ffn_norm = norm_cls(model_args.dim, eps=model_args.norm_eps)
+
+        self.attention_norm = _build_block_norm()
+        self.ffn_norm = _build_block_norm()
 
         self.use_peri_norm = model_args.use_peri_norm
         self.post_attn_norm: nn.Module | None = None
         self.post_ffn_norm: nn.Module | None = None
         if self.use_peri_norm:
-            if model_args.use_torch_layernorm:
-                self.post_attn_norm = norm_cls(
-                    model_args.dim,
-                    eps=model_args.norm_eps,
-                    elementwise_affine=model_args.torch_layernorm_elementwise_affine,
-                    bias=model_args.torch_layernorm_bias,
-                )
-                self.post_ffn_norm = norm_cls(
-                    model_args.dim,
-                    eps=model_args.norm_eps,
-                    elementwise_affine=model_args.torch_layernorm_elementwise_affine,
-                    bias=model_args.torch_layernorm_bias,
-                )
-            else:
-                self.post_attn_norm = norm_cls(model_args.dim, eps=model_args.norm_eps)
-                self.post_ffn_norm = norm_cls(model_args.dim, eps=model_args.norm_eps)
+            self.post_attn_norm = _build_block_norm()
+            self.post_ffn_norm = _build_block_norm()
 
         self.residual_scaling = 1.0
         if self.mup_config.completep_depth_alpha_enabled:
@@ -325,7 +325,7 @@ class TransformerBlock(BaseTransformerBlock):
             self.residual_scaling,
             self.use_peri_norm,
             self.mup_config.completep_depth_alpha_enabled,
-            norm_cls.__name__,
+            type(self.attention_norm).__name__,
             self.feed_forward.use_simple_silu_ffn,
         )
 
@@ -397,6 +397,7 @@ class Transformer(BaseTransformer):
         self.init_config = model_args.init_config_obj
         self._logged_bucket_assignments = False
         self._last_bucket_assignments: dict[str, str] = {}
+        resolved_norm_impl = "torch" if prefer_torch_norm else "rms"
 
         logger.info(
             "MuP Transformer configuration: enabled=%s, width_multiplier=%.6f, "
@@ -425,26 +426,26 @@ class Transformer(BaseTransformer):
             model_args.tie_word_embeddings,
         )
         logger.info(
-            "MuP Transformer architecture options: use_torch_layernorm=%s, use_simple_silu_ffn=%s",
+            "MuP Transformer architecture options: use_torch_layernorm=%s, norm_impl=%s, use_simple_silu_ffn=%s",
             model_args.use_torch_layernorm,
+            resolved_norm_impl,
             model_args.use_simple_silu_ffn,
         )
 
-        norm_cls: type[nn.Module] = (
-            LPLayerNorm if model_args.use_torch_layernorm else nn.RMSNorm
-        )
+        prefer_torch_norm = _prefer_torch_layernorm(model_args)
 
         # Embedding normalization and scaling
         if model_args.use_embedding_norm:
-            if model_args.use_torch_layernorm:
-                self.embedding_norm = norm_cls(
-                    model_args.dim,
-                    eps=model_args.norm_eps,
-                    elementwise_affine=model_args.torch_layernorm_elementwise_affine,
-                    bias=model_args.torch_layernorm_bias,
-                )
-            else:
-                self.embedding_norm = norm_cls(model_args.dim, eps=model_args.norm_eps)
+            self.embedding_norm = build_norm_module(
+                model_args.dim,
+                eps=model_args.norm_eps,
+                prefer_torch=prefer_torch_norm,
+                elementwise_affine=model_args.torch_layernorm_elementwise_affine,
+                bias=model_args.torch_layernorm_bias if prefer_torch_norm else False,
+                torch_norm_cls=LPLayerNorm,
+                add_unit_offset=model_args.torch_layernorm_elementwise_affine,
+                force_bf16=model_args.force_rmsnorm_bf16,
+            )
         else:
             self.embedding_norm = None
 
@@ -454,15 +455,16 @@ class Transformer(BaseTransformer):
                 for layer_id in range(model_args.n_layers)
             }
         )
-        if model_args.use_torch_layernorm:
-            self.norm = norm_cls(
-                model_args.dim,
-                eps=model_args.norm_eps,
-                elementwise_affine=model_args.torch_layernorm_elementwise_affine,
-                bias=model_args.torch_layernorm_bias,
-            )
-        else:
-            self.norm = norm_cls(model_args.dim, eps=model_args.norm_eps)
+        self.norm = build_norm_module(
+            model_args.dim,
+            eps=model_args.norm_eps,
+            prefer_torch=prefer_torch_norm,
+            elementwise_affine=model_args.torch_layernorm_elementwise_affine,
+            bias=model_args.torch_layernorm_bias if prefer_torch_norm else False,
+            torch_norm_cls=LPLayerNorm,
+            add_unit_offset=model_args.torch_layernorm_elementwise_affine,
+            force_bf16=model_args.force_rmsnorm_bf16,
+        )
         if model_args.tie_word_embeddings:
             # Share embedding weights with the output projection when requested.
             self.output.weight = self.tok_embeddings.weight

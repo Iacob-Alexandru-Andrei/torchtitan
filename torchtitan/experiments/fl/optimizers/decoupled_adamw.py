@@ -14,6 +14,7 @@ it is recommended to use these optimizers over their native PyTorch equivalents.
 from __future__ import annotations
 
 import logging
+from torch.optim import Muon
 import math
 from typing import ClassVar, TYPE_CHECKING
 
