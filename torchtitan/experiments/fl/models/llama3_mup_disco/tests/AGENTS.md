@@ -51,7 +51,7 @@ You are analyzing a codebase dependency graph optimized for AI understanding. Th
 NODES:19 EDGES:10
 
 ## DIRECTORY_TREE
-ROOT: torchtitan/experiments/fl/models/llama3_mup/tests/
+ROOT: torchtitan/experiments/fl/models/llama3_mup_disco/tests/
 
 ## ARCHITECTURAL_CLUSTERS
 

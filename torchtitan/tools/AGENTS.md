@@ -48,7 +48,7 @@ You are analyzing a codebase dependency graph optimized for AI understanding. Th
 ---
 
 # CODE_GRAPH
-NODES:29 EDGES:2
+NODES:59 EDGES:14
 
 ## DIRECTORY_TREE
 ROOT: torchtitan/tools/
@@ -56,13 +56,14 @@ ROOT: torchtitan/tools/
 ## ARCHITECTURAL_CLUSTERS
 
 ### UTILITY_LAYER
-NODES:29 CALL_DEPTH:1
+NODES:59 CALL_DEPTH:4
 
-logging.py→[init_logger(void),warn_once((logger: logging.Logger,msg: str))] profiling.py→[] utils.py→[has_cuda_capability((major: int,minor: int)),get_device_info(void),__init__((self,gc_freq: int = 1000,debug: bool = False))[CTOR,DUNDER],run((self,step_count: int)),get_peak_flops((device_name: str)),check_if_feature_in_pytorch((feature_name: str,pull_request: str,min_nightly_version: Optional[str] = None,)),_round_up((x: int,y: int))] 
+checkpoint_conversion.py→[download_dist_cp_checkpoint((location: S3CheckpointLocation,output_root: Path,))→{_remote_key,_enumerate_remote_step_files,_remote_key,_remote_key,_read_latest_step,_ensure_remote},_enumerate_remote_step_files((location: S3CheckpointLocation,candidate_relatives: list[Path],))→{_listing_prefix,_build_listing_uri,_remote_key},_read_latest_step((remote: RemoteUploaderDownloader,location: S3CheckpointLocation,scratch_dir: Path,))→{_remote_key},_ensure_tokenizer((output_dir: Path,tokenizer: str | None,*,revision: str | None = None,))→{_materialize_tokenizer},prepare_torchtitan_checkpoint((*,bucket: str,remote_root: str,prefix: str = "",step: int | None = None,local_checkpoint_root: Path,hf_output_dir: Path,model_name: str,model_flavor: str,hf_assets_path: Path | None = None,client_config: Mapping[str,Any] | None = None,tokenizer: str | None = None,tokenizer_revision: str | None = None,num_attempts: int = 3,num_concurrent_transfers: int = 4,use_processes: bool = False,))→{download_dist_cp_checkpoint},_remote_key((relative_path: Path,remote_root: str | None)),_build_listing_uri((bucket: str,prefix: str,remote_key: str))[HOT],_listing_prefix((prefix: str,remote_key: str)),_ensure_remote((remote: RemoteUploaderDownloader,run_name: str)),_materialize_tokenizer((output_dir: Path,tokenizer_source: str,*,revision: str | None = None,)),_write_hf_config((output_dir: Path,model_args: Any,*,tokenizer_name: str | None,tokenizer_obj: Any | None,model_name: str,)),_verify_native_state_dict_layers((state_dict: Mapping[str,Any],expected_layers: int,))] logging.py→[init_logger(void),warn_once((logger: logging.Logger,msg: str))] profiling.py→[] utils.py→[has_cuda_capability((major: int,minor: int)),get_device_info(void),__init__((self,gc_freq: int = 1000,debug: bool = False))[CTOR,DUNDER],run((self,step_count: int)),get_peak_flops((device_name: str)),check_if_feature_in_pytorch((feature_name: str,pull_request: str,min_nightly_version: Optional[str] = None,)),_round_up((x: int,y: int))] 
 
 ## DEPENDENCY_PATTERNS
 
 ### EDGE_PATTERNS
+Call: 12 edges
 Contains: 2 edges
 
 ### CROSS_CLUSTER_FLOW

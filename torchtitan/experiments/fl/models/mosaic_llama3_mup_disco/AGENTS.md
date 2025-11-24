@@ -51,7 +51,7 @@ You are analyzing a codebase dependency graph optimized for AI understanding. Th
 NODES:9 EDGES:0
 
 ## DIRECTORY_TREE
-ROOT: torchtitan/experiments/fl/models/mosaic_llama3_mup/
+ROOT: torchtitan/experiments/fl/models/mosaic_llama3_mup_disco/
 
 ## ARCHITECTURAL_CLUSTERS
 

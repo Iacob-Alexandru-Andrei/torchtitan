@@ -48,7 +48,7 @@ You are analyzing a codebase dependency graph optimized for AI understanding. Th
 ---
 
 # CODE_GRAPH
-NODES:38 EDGES:10
+NODES:94 EDGES:41
 
 ## DIRECTORY_TREE
 ROOT: torchtitan/experiments/fl/tests/
@@ -56,15 +56,16 @@ ROOT: torchtitan/experiments/fl/tests/
 ## ARCHITECTURAL_CLUSTERS
 
 ### TESTS
-NODES:38 CALL_DEPTH:2
+NODES:94 CALL_DEPTH:3
 
-test_optimizer_builder.py→[test_default_builder_uses_core_optimizer(void)[HOT,TEST]→{_dims},test_default_builder_rejects_mosaic_only_optimizer(void)[HOT,TEST]→{_dims},__init__((self))[CTOR,DUNDER],_dims(void)] test_unigram_metrics.py→[__init__((self,*_args: object,**_kwargs: object))[CTOR,DUNDER],add_state((self,name: str,default: torch.Tensor,dist_reduce_fx: str | None = None,)),register_buffer((self,name: str,tensor: torch.Tensor)),__init__((self,*_args: object,**_kwargs: object))[CTOR,DUNDER],__init__((self,*_args: object,**_kwargs: object))[CTOR,DUNDER],get_peak_stats((self)),reset_peak_stats((self)),test_unigram_manager_aggregation_and_reset(void)[TEST],test_unigram_manager_teardown_removes_metric(void)[TEST],test_fl_metrics_processor_registers_expected_callbacks(void)[TEST],test_unigram_payload_reports_local_and_global_metrics(void)[TEST],test_unigram_local_metric_logged_before_global(void)[TEST]] 
+test_llama3_mup_scion.py→[test_scion_assigns_hidden_and_output_scales(void)[TEST]→{_find_group,_find_group,_build_param_groups},test_untied_embeddings_use_distinct_param_groups(void)[TEST]→{_find_group,_find_group,_build_param_groups_from_args},test_disco_assigns_sqrt_norms_when_untied(void)[TEST]→{_find_group,_find_group,_build_param_groups_from_args},test_use_disco_sets_sign_norm_for_embeddings(void)[TEST]→{_find_group,_build_param_groups},test_use_disco_sets_spectral_norm_for_hidden_weights(void)[TEST]→{_find_group,_build_param_groups},test_plain_scion_sets_spectral_norm_for_hidden_weights(void)[TEST]→{_find_group,_build_param_groups},test_plain_scion_sets_sign_norm_for_embeddings(void)[TEST]→{_find_group,_build_param_groups},test_scion_scale_overrides_respected_via_optimizer_config(void)[TEST]→{_find_group,_find_group},_build_param_groups((use_scion: bool,*,use_disco: bool = False))[HOT]→{_build_param_groups_from_args},test_attention_value_norm_bucketed_with_hidden_ln(void)[TEST]→{_bucketize_and_get},test_attention_output_norm_bucketed_with_hidden_ln(void)[TEST]→{_bucketize_and_get},test_mlp_mid_norm_bucketed_with_hidden_ln(void)[TEST]→{_bucketize_and_get},test_disco_embedding_init_matches_expected_norm(void)[TEST]→{_build_small_model},test_disco_output_init_matches_expected_norm(void)[TEST]→{_build_small_model},test_disco_hidden_inits_are_unit_norm(void)[TEST]→{_build_small_model},_build_model((use_scion: bool,*,use_disco: bool = False))[HOT],_build_small_model((use_scion: bool,*,use_disco: bool = False,**overrides: object))[HOT],_build_param_groups_from_args((model_args: TransformerModelArgs))[HOT],_find_group((param_groups: list[dict],parameter)),test_scion_preserves_width_multiplier_value(void)[TEST],test_scion_lr_scaling_ignores_width_multiplier(void)[TEST],test_layernorm_impl_overrides_flag(void)[TEST],test_qk_layernorm_impl_independent(void)[TEST],test_qk_layernorm_inherits_general_when_unset(void)[TEST],test_attention_value_norm_flag_creates_layer(void)[TEST],test_attention_output_norm_flag_creates_layer(void)[TEST],test_mlp_mid_norm_flag_creates_layer(void)[TEST],_bucketize_and_get((model: Transformer,param_name: str)),test_default_disco_init_types(void)[TEST],test_default_non_scion_init_types(void)[TEST],test_standard_scion_without_disco_uses_normal_init_types(void)[TEST],test_unembed_bucket_created_when_weights_untied(void)[TEST],test_custom_hidden_init_type_applied(void)[TEST],test_scion_skips_mup_input_output_alpha_scaling(void)[TEST],test_trunc_normal_init_respects_cutoff(void)[TEST]] test_optimizer_builder.py→[test_default_builder_uses_core_optimizer(void)[HOT,TEST]→{_dims},test_default_builder_rejects_mosaic_only_optimizer(void)[HOT,TEST]→{_dims},test_qhscion_builder_exposes_betas_and_vs(void)[HOT,TEST]→{_dims},test_qhscion_builder_prefers_scion_v_override(void)[HOT,TEST]→{_dims},test_scion_builder_accepts_custom_zeropower_coefficients(void)[HOT,TEST]→{_dims},__init__((self))[CTOR,DUNDER],_dims(void)] test_scion_optimizer.py→[test_qhscion_param_group_exposes_vs_tuple(void)[TEST]→{_param},test_qhscion_recovers_vs_from_legacy_v(void)[TEST]→{_param},_param(void),test_scion_scale_only_group_applies_radius(void)[TEST],test_scion_scale_applies_with_explicit_norm(void)[TEST],test_scion_sign_norm_respects_normalized_flag(void)[TEST]] test_unigram_metrics.py→
+[__init__((self,*_args: object,**_kwargs: object))[CTOR,DUNDER],add_state((self,name: str,default: torch.Tensor,dist_reduce_fx: str | None = None,)),register_buffer((self,name: str,tensor: torch.Tensor)),__init__((self,*_args: object,**_kwargs: object))[CTOR,DUNDER],__init__((self,*_args: object,**_kwargs: object))[CTOR,DUNDER],get_peak_stats((self)),reset_peak_stats((self)),test_unigram_manager_aggregation_and_reset(void)[TEST],test_unigram_manager_teardown_removes_metric(void)[TEST],test_fl_metrics_processor_registers_expected_callbacks(void)[TEST],test_unigram_payload_reports_local_and_global_metrics(void)[TEST],test_unigram_local_metric_logged_before_global(void)[TEST]] 
 
 ## DEPENDENCY_PATTERNS
 
 ### EDGE_PATTERNS
 Contains: 8 edges
-Call: 2 edges
+Call: 33 edges
 
 ### CROSS_CLUSTER_FLOW
 

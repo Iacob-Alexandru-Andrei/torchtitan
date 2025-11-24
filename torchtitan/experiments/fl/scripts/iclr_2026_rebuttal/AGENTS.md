@@ -48,22 +48,22 @@ You are analyzing a codebase dependency graph optimized for AI understanding. Th
 ---
 
 # CODE_GRAPH
-NODES:12 EDGES:1
+NODES:11 EDGES:4
 
 ## DIRECTORY_TREE
-ROOT: torchtitan/experiments/fl/models/llama3_mup_disco/infra/
+ROOT: torchtitan/experiments/fl/scripts/iclr_2026_rebuttal/
 
 ## ARCHITECTURAL_CLUSTERS
 
-### DATA_MODELS
-NODES:12 CALL_DEPTH:2
+### UTILITY_LAYER
+NODES:11 CALL_DEPTH:3
 
-__init__.py→[] parallelize.py→[parallelize_llama_mup((model: Transformer,parallel_dims: ParallelDims,job_config: JobConfig,))→{_apply_mup_tp},_apply_mup_tp((model: Transformer,tp_mesh: DeviceMesh,loss_parallel: bool,enable_float8_tensorwise_tp: bool,))] 
+upload_checkpoints.py→[main(void)[ENTRY]→{parse_args,sync_run,find_eligible_runs},find_eligible_runs((runs_root: Path,min_step: int))→{_has_step_beyond_target},parse_args(void),_has_step_beyond_target((entries: Iterable[Path],min_step: int)),sync_run((run_uuid: str,runs_root: Path,endpoint_url: str,bucket: str,prefix: str,dry_run: bool,))] 
 
 ## DEPENDENCY_PATTERNS
 
 ### EDGE_PATTERNS
-Call: 1 edges
+Call: 4 edges
 
 ### CROSS_CLUSTER_FLOW
 
