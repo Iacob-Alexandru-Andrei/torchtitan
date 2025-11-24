@@ -31,6 +31,14 @@ RIGHT_PROJ = "right"
 LEFT_PROJ = "left"
 FULL_PROJ = "full"
 REV_STD_PROJ = "reverse_std"
+PROJ_TO_CODE: dict[str, int] = {
+    STD_PROJ: 0,
+    REV_STD_PROJ: 1,
+    LEFT_PROJ: 2,
+    RIGHT_PROJ: 3,
+    FULL_PROJ: 4,
+}
+CODE_TO_PROJ: dict[int, str] = {code: name for name, code in PROJ_TO_CODE.items()}
 
 
 def _orthogonal_matrix(weights: Tensor, rank: int, proj_type: str) -> Tensor | list[Tensor]:
@@ -63,6 +71,14 @@ def _resolve_proj_choice(proj_type: str, tensor: Tensor) -> str:
     return proj_type
 
 
+def _proj_name_from_value(value: Any, default: str = STD_PROJ) -> str:
+    if isinstance(value, str) and value in PROJ_TO_CODE:
+        return value
+    if isinstance(value, int) and value in CODE_TO_PROJ:
+        return CODE_TO_PROJ[value]
+    return default
+
+
 def _maybe_refresh_projector(state: dict[str, Any], weights: Tensor, iteration: Tensor) -> None:
     meta = state.setdefault(
         "projector_meta",
@@ -70,15 +86,16 @@ def _maybe_refresh_projector(state: dict[str, Any], weights: Tensor, iteration: 
             "rank": None,
             "update_proj_gap": None,
             "scale": None,
-            "proj_type": None,
-            "resolved_proj_type": None,
+            "proj_type": PROJ_TO_CODE[STD_PROJ],
+            "resolved_proj_type": PROJ_TO_CODE[STD_PROJ],
         },
     )
     rank = meta["rank"]
     update_proj_gap = meta["update_proj_gap"]
-    proj_type = meta.get("proj_type") or meta.get("resolved_proj_type") or STD_PROJ
+    proj_type = _proj_name_from_value(meta.get("proj_type", STD_PROJ))
     resolved_proj_type = _resolve_proj_choice(proj_type, weights)
-    meta["resolved_proj_type"] = resolved_proj_type
+    meta["proj_type"] = PROJ_TO_CODE[proj_type]
+    meta["resolved_proj_type"] = PROJ_TO_CODE[resolved_proj_type]
     if rank is None or update_proj_gap is None:
         return
 
@@ -96,9 +113,10 @@ def _project(
         raise NotImplementedError("GaLore currently supports tensors up to rank 2.")
 
     meta = state.get("projector_meta", {})
-    proj_type = meta.get("proj_type") or meta.get("resolved_proj_type") or STD_PROJ
-    proj_type = _resolve_proj_choice(proj_type, full_rank_grad)
-    meta["resolved_proj_type"] = proj_type
+    proj_type_name = _proj_name_from_value(meta.get("proj_type", STD_PROJ))
+    proj_type = _resolve_proj_choice(proj_type_name, full_rank_grad)
+    meta["proj_type"] = PROJ_TO_CODE[proj_type_name]
+    meta["resolved_proj_type"] = PROJ_TO_CODE[proj_type]
     state["projector_meta"] = meta
     _maybe_refresh_projector(state, full_rank_grad, iteration)
     orthogonal = state.get("projector_basis")
