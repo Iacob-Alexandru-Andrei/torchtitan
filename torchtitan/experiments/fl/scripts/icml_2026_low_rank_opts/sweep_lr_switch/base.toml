@@ -33,7 +33,6 @@ lr = 0.001
 eps = 1e-8
 weight_decay = 0.0
 betas = [0.9, 0.999]
-galore_proj_type = "std"
 galore_update_proj_gap = 32
 galore_scale = 1.0
 galore_dim = 2
@@ -81,8 +80,6 @@ state_keys = ["exp_avg", "exp_avg_sq"]
 transform = "svd"
 proj_type = "std"
 shared_source = "exp_avg"
-column_count = null
-random_seed = null
 random_std = 1.0
 log_metrics = true
 
@@ -106,7 +103,7 @@ local_batch_size = 16
 global_batch_size = 64
 seq_len = 2048
 max_norm = 1.0  # grad norm clipping
-steps = 12288
+steps = 6144
 dataset = "c4_test"  # supported datasets: c4_test (2K), c4 (177M)
 
 
@@ -134,7 +131,7 @@ enable = true
 bucket = "checkpoints"
 prefix = ""  # Root of bucket
 download_on_start = true
-resume_from_run_step = "16M-baseline-20251029-095728/step-2048"
+resume_from_run_step = "warmup-16M-bs64-s2048-20251124-164650/step-2048"
 # run_uuid and remote_checkpoint_folder will be set via RUN_UUID environment variable
 
 [activation_checkpoint]

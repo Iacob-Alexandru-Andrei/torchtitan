@@ -30,10 +30,8 @@ lr = 0.01
 eps = 1e-8
 weight_decay = 0.0
 betas = [0.9, 0.999]
-galore_rank = null  # Enable only for selected params via regexes.
 galore_param_regexes = [
-  # Apply low-rank GaLore (rank=32) to attention projections and FFN up/down projections.
-  { param_str_match = "attention\\.w[qkv]|attention\\.wo|feed_forward\\.w[12]", rank = 32 },
+  { param_str_match = "attention\\.w[qkv]|attention\\.wo|feed_forward\\.w[12]", rank = 2 },
 ]
 implementation = "for-loop"
 

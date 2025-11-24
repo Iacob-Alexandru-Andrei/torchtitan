@@ -17,7 +17,7 @@ LR_VALUES=${LR_VALUES:-"0.0005 0.001 0.002 0.004"}
 
 RUN_INDEX=${RUN_INDEX:-}
 RUN_INDEX_OFFSET=${RUN_INDEX_OFFSET:-0}
-RUN_INDEX_RANGE=${RUN_INDEX_RANGE:-}
+RUN_INDEX_RANGE=${RUN_INDEX_RANGE:-0-0}
 USE_SBATCH=${USE_SBATCH:-false}
 DRY_RUN=${DRY_RUN:-false}
 SBATCH_CPUS_PER_TASK=${SBATCH_CPUS_PER_TASK:-8}
@@ -505,11 +505,11 @@ uv run --no-sync torchrun \
   --optimizer.name GaLore \
   --optimizer.lr "${lr_value}" \
   --training.global_batch_size 64 \
-  --training.local_batch_size 64 \
-  --training.steps 12288 \
+  --training.local_batch_size 16 \
+  --training.steps 6144 \
   --lr_scheduler.switch_step 2049 \
   --parallelism.data_parallel_replicate_degree 1 \
-  --fl_metrics.galore_projection.enabled true \
+  --fl_metrics.galore_projection.enabled \
   --fl_metrics.galore_projection.steps "${PROJECTION_STEP}" \
   --fl_metrics.galore_projection.target_ranks "${proj_rank}" \
   --fl_metrics.galore_projection.random_std "${PROJECTION_RANDOM_STD}" \
