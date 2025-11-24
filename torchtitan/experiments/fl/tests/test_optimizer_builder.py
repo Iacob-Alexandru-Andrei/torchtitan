@@ -28,6 +28,16 @@ class _TinyModule(nn.Module):
         self.weight = nn.Parameter(torch.ones(2, 2))
 
 
+class _ToyModel(nn.Module):
+    """Simple module with named submodules for regex param group tests."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.attn = nn.Linear(4, 4)
+        self.ffn = nn.Linear(4, 4)
+        self.other = nn.Linear(4, 4)
+
+
 def _dims() -> ParallelDims:
     return ParallelDims(
         1,
@@ -153,3 +163,91 @@ def test_galore_low_rank_states_follow_projected_grad_shape() -> None:
     assert state["exp_avg"].shape == state["exp_avg_sq"].shape
     assert state["exp_avg"].shape == projected_grad.shape
     assert state["exp_avg"].shape != module.weight.shape
+
+
+def test_galore_regex_param_groups_builds_expected_ranks() -> None:
+    """Regex param groups should override GaLore rank per pattern with global defaults as fallback."""
+    module = _ToyModel()
+    config = MosaicOptimizerConfig(
+        name="GaLore",
+        lr=0.01,
+        beta1=0.9,
+        beta2=0.95,
+        eps=1e-8,
+        weight_decay=0.1,
+        builder="mosaic",
+        galore_rank=8,
+        param_groups=[
+            {"param_str_match": "attn", "rank": 4, "update_proj_gap": 5, "scale": 0.5, "proj_type": "left"},
+            {"param_str_match": "ffn", "weight_decay": 0.0},
+        ],
+    )
+
+    optimizer = next(iter(build_mosaic_optimizers([module], config, _dims())))
+
+    def _group_params_ids(group: dict) -> set[int]:
+        return {id(p) for p in group["params"]}
+
+    attn_ids = {id(p) for p in module.attn.parameters()}
+    ffn_ids = {id(p) for p in module.ffn.parameters()}
+    other_ids = {id(p) for p in module.other.parameters()}
+
+    attn_group = next(g for g in optimizer.param_groups if _group_params_ids(g) == attn_ids)
+    ffn_group = next(g for g in optimizer.param_groups if _group_params_ids(g) == ffn_ids)
+    other_group = next(g for g in optimizer.param_groups if _group_params_ids(g) == other_ids)
+
+    assert attn_group["rank"] == 4
+    assert attn_group["update_proj_gap"] == 5
+    assert attn_group["scale"] == pytest.approx(0.5)
+    assert attn_group["proj_type"] == "left"
+
+    # ffn inherits the global rank while overriding weight decay.
+    assert ffn_group["rank"] == 8
+    assert ffn_group["weight_decay"] == pytest.approx(0.0)
+
+    # Unmatched params fall back to the global defaults.
+    assert other_group["rank"] == 8
+    assert other_group["weight_decay"] == pytest.approx(0.1)
+
+
+def test_galore_rank_regex_overrides_existing_param_groups() -> None:
+    """Regex rank overrides should split existing param groups without redefining full groups."""
+    module = _ToyModel()
+    base_group = {
+        "params": list(module.parameters()),
+        "lr": 0.01,
+        "betas": (0.9, 0.95),
+        "eps": 1e-8,
+        "weight_decay": 0.1,
+    }
+    config = MosaicOptimizerConfig(
+        name="GaLore",
+        lr=0.01,
+        beta1=0.9,
+        beta2=0.95,
+        eps=1e-8,
+        weight_decay=0.1,
+        builder="mosaic",
+        galore_rank=10,
+        galore_param_regexes=[
+            {"param_str_match": "attn", "rank": 4},
+            {"param_str_match": "ffn", "rank": 6},
+        ],
+    )
+
+    optimizer = next(iter(build_mosaic_optimizers([module], config, _dims(), param_groups=[base_group])))
+
+    def _group_params_ids(group: dict) -> set[int]:
+        return {id(p) for p in group["params"]}
+
+    attn_ids = {id(p) for p in module.attn.parameters()}
+    ffn_ids = {id(p) for p in module.ffn.parameters()}
+    other_ids = {id(p) for p in module.other.parameters()}
+
+    attn_group = next(g for g in optimizer.param_groups if _group_params_ids(g) == attn_ids)
+    ffn_group = next(g for g in optimizer.param_groups if _group_params_ids(g) == ffn_ids)
+    other_group = next(g for g in optimizer.param_groups if _group_params_ids(g) == other_ids)
+
+    assert attn_group["rank"] == 4
+    assert ffn_group["rank"] == 6
+    assert other_group["rank"] == 10

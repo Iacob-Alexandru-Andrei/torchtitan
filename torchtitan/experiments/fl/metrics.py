@@ -25,11 +25,16 @@ from torchtitan.experiments.fl.optimizers._metric_utils import (
     METRIC_COUNT_PREFIX,
     metric_count_key,
 )
-from torchtitan.experiments.fl.callbacks import (
-    Callback,
-    CallbackSetupContext,
-    CallbackStepContext,
-    CallbackValidationContext,
+from torchtitan.experiments.fl.callbacks import Callback, CallbackSetupContext, CallbackStepContext, CallbackValidationContext
+from torchtitan.experiments.fl.optimizers.galore import (
+    FULL_PROJ,
+    LEFT_PROJ,
+    RIGHT_PROJ,
+    REV_STD_PROJ,
+    STD_PROJ,
+    GaLore,
+    GaLoreProjector,
+    _orthogonal_matrix,
 )
 from torchtitan.tools.logging import logger
 
@@ -43,12 +48,37 @@ if TYPE_CHECKING:
     from torchtitan.experiments.fl.configs.config import (
         ActivationMonitorConfig,
         BetasMonitorConfig,
+        GaLoreMomentumProjectionConfig,
         HyperparameterSwitchConfig,
         LRMonitorConfig,
         MetricsConfig,
         OptimizerMonitorConfig,
         VSMonitorConfig,
     )
+
+
+ProjectionBasis = Tensor | list[Tensor]
+
+SVD_PROJECTION = "svd"
+COLUMN_PROJECTION = "columns"
+RANDOM_PROJECTION = "random"
+
+
+@dataclass(frozen=True)
+class GaLoreMomentumProjectionParams:
+    """Configuration payload for :class:`GaLoreMomentumProjectionCallback`."""
+
+    enabled: bool
+    steps: Sequence[int]
+    target_ranks: Sequence[int]
+    state_keys: Sequence[str]
+    transform: str
+    proj_type: str
+    shared_source: str | None
+    column_count: int | None
+    random_seed: int | None
+    random_std: float
+    log_metrics: bool
 
 
 @dataclass(frozen=True)
@@ -1049,6 +1079,319 @@ class VSMonitor(Callback):
             context.logger.log(metrics, context.step)
 
 
+def _resolve_galore_proj_type(param: Tensor, proj_type: str) -> str:
+    """Resolve the projection orientation for a GaLore parameter."""
+    if proj_type in {STD_PROJ, REV_STD_PROJ}:
+        if param.ndim < 2:
+            return RIGHT_PROJ if proj_type == STD_PROJ else LEFT_PROJ
+        if param.shape[0] >= param.shape[1]:
+            return RIGHT_PROJ if proj_type == STD_PROJ else LEFT_PROJ
+        return LEFT_PROJ if proj_type == STD_PROJ else RIGHT_PROJ
+    return proj_type
+
+
+def _clamp_galore_rank(params: Sequence[Tensor], target_rank: int) -> int:
+    """Clamp the requested rank to the smallest supported dimension."""
+    if target_rank <= 0:
+        msg = "GaLore projection rank must be positive."
+        raise ValueError(msg)
+
+    if not params:
+        return target_rank
+
+    min_dim = min(
+        int(param.numel()) if param.ndim <= 1 else int(min(param.shape))
+        for param in params
+    )
+    min_dim = max(1, min_dim)
+    if target_rank > min_dim:
+        logger.warning(
+            "Requested GaLore projection rank %s exceeds parameter dimensions; using %s instead.",
+            target_rank,
+            min_dim,
+        )
+    return min(target_rank, min_dim)
+
+
+def _build_column_basis(tensor: Tensor, rank: int, proj_type: str, column_count: int | None) -> ProjectionBasis:
+    """Construct a deterministic column/row selector basis."""
+    count = column_count if column_count is not None else rank
+    device = tensor.device
+    dtype = tensor.dtype
+
+    if proj_type == RIGHT_PROJ:
+        return torch.eye(tensor.shape[1], device=device, dtype=dtype)[:count, :]
+    if proj_type == LEFT_PROJ:
+        return torch.eye(tensor.shape[0], device=device, dtype=dtype)[:, :count]
+    if proj_type == FULL_PROJ:
+        left = torch.eye(tensor.shape[0], device=device, dtype=dtype)[:, :count]
+        right = torch.eye(tensor.shape[1], device=device, dtype=dtype)[:count, :]
+        return [left, right]
+    msg = f"Unsupported projection type {proj_type!r} for column projection."
+    raise ValueError(msg)
+
+
+def _build_random_basis(
+    tensor: Tensor,
+    rank: int,
+    proj_type: str,
+    *,
+    random_std: float,
+    generator: torch.Generator | None,
+) -> ProjectionBasis:
+    """Construct an orthonormal random projection basis."""
+    device = tensor.device
+    dtype = tensor.dtype
+    if proj_type == RIGHT_PROJ:
+        base = torch.randn(
+            (tensor.shape[1], rank),
+            device=device,
+            dtype=dtype,
+            generator=generator,
+        )
+        q_matrix, _ = torch.linalg.qr(base, mode="reduced")
+        return q_matrix.T * random_std
+    if proj_type == LEFT_PROJ:
+        base = torch.randn(
+            (tensor.shape[0], rank),
+            device=device,
+            dtype=dtype,
+            generator=generator,
+        )
+        q_matrix, _ = torch.linalg.qr(base, mode="reduced")
+        return q_matrix * random_std
+    if proj_type == FULL_PROJ:
+        left_base = torch.randn(
+            (tensor.shape[0], rank),
+            device=device,
+            dtype=dtype,
+            generator=generator,
+        )
+        right_base = torch.randn(
+            (tensor.shape[1], rank),
+            device=device,
+            dtype=dtype,
+            generator=generator,
+        )
+        left_q, _ = torch.linalg.qr(left_base, mode="reduced")
+        right_q, _ = torch.linalg.qr(right_base, mode="reduced")
+        return [left_q * random_std, right_q.T * random_std]
+    msg = f"Unsupported projection type {proj_type!r} for random projection."
+    raise ValueError(msg)
+
+
+def _build_projection_basis(
+    tensor: Tensor,
+    rank: int,
+    proj_type: str,
+    transform: str,
+    *,
+    column_count: int | None,
+    random_std: float,
+    generator: torch.Generator | None,
+) -> ProjectionBasis:
+    """Return the projection basis for the configured transform."""
+    if transform == SVD_PROJECTION:
+        return _orthogonal_matrix(tensor, rank, proj_type)
+    if transform == COLUMN_PROJECTION:
+        return _build_column_basis(tensor, rank, proj_type, column_count)
+    if transform == RANDOM_PROJECTION:
+        return _build_random_basis(
+            tensor,
+            rank,
+            proj_type,
+            random_std=random_std,
+            generator=generator,
+        )
+    msg = f"Unknown GaLore momentum projection transform {transform!r}."
+    raise ValueError(msg)
+
+
+def _apply_projection(tensor: Tensor, basis: ProjectionBasis, proj_type: str) -> Tensor:
+    """Project ``tensor`` with the provided basis and return the reduced tensor."""
+    working = tensor.float()
+    original_dtype = tensor.dtype
+
+    if isinstance(basis, list):
+        left_basis, right_basis = basis
+        projected = (
+            left_basis.T.to(device=working.device, dtype=working.dtype)
+            @ working
+            @ right_basis.T.to(device=working.device, dtype=working.dtype)
+        )
+    elif proj_type == RIGHT_PROJ:
+        projected = working @ basis.to(device=working.device, dtype=working.dtype).T
+    elif proj_type == LEFT_PROJ:
+        projected = basis.to(device=working.device, dtype=working.dtype).T @ working
+    elif proj_type == FULL_PROJ:
+        msg = "Full projection requires a pair of bases."
+        raise ValueError(msg)
+    else:
+        msg = f"Unknown projection type {proj_type!r}."
+        raise ValueError(msg)
+
+    return projected.to(device=tensor.device, dtype=original_dtype)
+
+
+class GaLoreMomentumProjectionCallback(Callback):
+    """Project GaLore optimizer momenta to a new rank at configured steps."""
+
+    def __init__(self, params: GaLoreMomentumProjectionParams) -> None:
+        ranks = tuple(int(rank) for rank in params.target_ranks)
+        steps = tuple(int(step) for step in params.steps)
+        self.step_ranks = self._build_step_rank_schedule(steps, ranks)
+        self.enabled = params.enabled and bool(self.step_ranks)
+        self.state_keys = tuple(params.state_keys)
+        self.transform = params.transform.lower()
+        self.proj_type = params.proj_type
+        self.shared_source = params.shared_source
+        self.column_count = params.column_count
+        self.random_seed = params.random_seed
+        self.random_std = params.random_std
+        self.log_metrics = params.log_metrics
+        self._applied_steps: set[int] = set()
+
+    def on_step_end(self, context: CallbackStepContext) -> None:
+        """Run the momentum projection when its scheduled step is reached."""
+        if not self.enabled:
+            return
+        target_rank = self.step_ranks.get(context.step)
+        if target_rank is None or context.step in self._applied_steps:
+            return
+
+        optimizers = context.optimizers
+        if optimizers is None:
+            return
+
+        generator = self._build_generator(context.step, optimizers)
+        applied = False
+        for optimizer in optimizers:
+            if isinstance(optimizer, GaLore):
+                self._apply_to_optimizer(optimizer, target_rank, generator)
+                applied = True
+
+        if applied:
+            self._applied_steps.add(context.step)
+            if self.log_metrics:
+                context.logger.log({"galore_projection/rank": float(target_rank)}, context.step)
+            logger.info("GaLore momentum projection applied at step %s to rank %s.", context.step, target_rank)
+
+    def _build_step_rank_schedule(self, steps: Sequence[int], ranks: Sequence[int]) -> dict[int, int]:
+        """Create a mapping of training step to target rank."""
+        if not steps or not ranks:
+            return {}
+        if len(ranks) not in {1, len(steps)}:
+            msg = "GaLore momentum projection ranks must be length 1 or match the number of steps."
+            raise ValueError(msg)
+        rank_values = ranks if len(ranks) == len(steps) else (ranks * len(steps))
+        if any(rank <= 0 for rank in rank_values):
+            msg = "GaLore momentum projection ranks must all be positive."
+            raise ValueError(msg)
+        return {step: rank_values[idx] for idx, step in enumerate(steps) if step >= 0}
+
+    def _build_generator(
+        self,
+        step: int,
+        optimizers: Sequence[torch.optim.Optimizer],
+    ) -> torch.Generator | None:
+        """Return a per-step generator for random projections."""
+        if self.transform != RANDOM_PROJECTION:
+            return None
+
+        device = torch.device("cpu")
+        for optimizer in optimizers:
+            for group in optimizer.param_groups:
+                params = group.get("params", [])
+                if params:
+                    first_param = params[0]
+                    if isinstance(first_param, torch.Tensor):
+                        device = first_param.device
+                    break
+        generator = torch.Generator(device=device)
+        if self.random_seed is not None:
+            generator.manual_seed(self.random_seed + step)
+        return generator
+
+    def _apply_to_optimizer(
+        self,
+        optimizer: GaLore,
+        target_rank: int,
+        generator: torch.Generator | None,
+    ) -> None:
+        """Update GaLore optimizer groups and project their momenta."""
+        for group in optimizer.param_groups:
+            params = [param for param in group.get("params", []) if isinstance(param, torch.Tensor)]
+            rank = _clamp_galore_rank(params, target_rank)
+            group["rank"] = rank
+            for param in params:
+                self._project_param_state(
+                    optimizer=optimizer,
+                    param=param,
+                    group=group,
+                    rank=rank,
+                    generator=generator,
+                )
+
+    def _project_param_state(
+        self,
+        optimizer: GaLore,
+        param: Tensor,
+        group: Mapping[str, Any],
+        rank: int,
+        generator: torch.Generator | None,
+    ) -> None:
+        """Project configured momentum buffers for a single parameter."""
+        state = optimizer.state[param]
+        has_targets = any(isinstance(state.get(key), Tensor) for key in self.state_keys)
+        if self.shared_source is not None:
+            has_targets = has_targets or isinstance(state.get(self.shared_source), Tensor)
+        if not has_targets:
+            return
+
+        resolved_proj_type = _resolve_galore_proj_type(param, group.get("proj_type", STD_PROJ))
+        state_basis: ProjectionBasis | None = None
+
+        if self.shared_source is not None:
+            source_tensor = state.get(self.shared_source)
+            if isinstance(source_tensor, Tensor):
+                state_basis = _build_projection_basis(
+                    source_tensor,
+                    rank,
+                    resolved_proj_type,
+                    self.transform,
+                    column_count=self.column_count,
+                    random_std=self.random_std,
+                    generator=generator,
+                )
+                state[self.shared_source] = _apply_projection(source_tensor, state_basis, resolved_proj_type)
+
+        for key in self.state_keys:
+            tensor = state.get(key)
+            if not isinstance(tensor, Tensor):
+                continue
+            if self.shared_source is not None and key == self.shared_source and state_basis is not None:
+                continue
+            basis = state_basis
+            if basis is None:
+                basis = _build_projection_basis(
+                    tensor,
+                    rank,
+                    resolved_proj_type,
+                    self.transform,
+                    column_count=self.column_count,
+                    random_std=self.random_std,
+                    generator=generator,
+                )
+            state[key] = _apply_projection(tensor, basis, resolved_proj_type)
+
+        state["projector"] = GaLoreProjector(
+            rank=rank,
+            update_proj_gap=group.get("update_proj_gap", 200),
+            scale=group.get("scale", 1.0),
+            proj_type=group.get("proj_type", STD_PROJ),
+        )
+
+
 class HyperparameterSwitchCallback(Callback):
     """Switch optimizer betas/vs at configured steps and optionally reset momenta."""
 
@@ -1174,6 +1517,7 @@ class FLMetricsProcessor(MetricsProcessor):
         self.lr_monitor: LRMonitor | None = None
         self.betas_monitor: BetasMonitor | None = None
         self.vs_monitor: VSMonitor | None = None
+        self.galore_projection: GaLoreMomentumProjectionCallback | None = None
         self.hyperparameter_switch: HyperparameterSwitchCallback | None = None
 
         if callbacks is None:
@@ -1207,6 +1551,10 @@ class FLMetricsProcessor(MetricsProcessor):
         if self.vs_monitor is not None:
             callbacks.append(self.vs_monitor)
 
+        self.galore_projection = self._init_galore_projection(metrics_config.galore_projection)
+        if self.galore_projection is not None:
+            callbacks.append(self.galore_projection)
+
         self.hyperparameter_switch = self._init_hyperparameter_switch(metrics_config.hyperparameter_switch)
         if self.hyperparameter_switch is not None:
             callbacks.append(self.hyperparameter_switch)
@@ -1219,6 +1567,10 @@ class FLMetricsProcessor(MetricsProcessor):
         self.lr_monitor = next((cb for cb in callbacks if isinstance(cb, LRMonitor)), None)
         self.betas_monitor = next((cb for cb in callbacks if isinstance(cb, BetasMonitor)), None)
         self.vs_monitor = next((cb for cb in callbacks if isinstance(cb, VSMonitor)), None)
+        self.galore_projection = next(
+            (cb for cb in callbacks if isinstance(cb, GaLoreMomentumProjectionCallback)),
+            None,
+        )
         self.hyperparameter_switch = next(
             (cb for cb in callbacks if isinstance(cb, HyperparameterSwitchCallback)),
             None,
@@ -1269,6 +1621,38 @@ class FLMetricsProcessor(MetricsProcessor):
             interval=vs_config.interval,
             enabled=vs_config.enabled,
         )
+
+    def _init_galore_projection(
+        self,
+        projection_config: GaLoreMomentumProjectionConfig,
+    ) -> GaLoreMomentumProjectionCallback | None:
+        if not (projection_config.enabled and projection_config.steps):
+            return None
+
+        ranks = tuple(int(rank) for rank in projection_config.target_ranks)
+        if not ranks:
+            target_rank = projection_config.target_rank
+            if target_rank is None:
+                return None
+            ranks = (int(target_rank),)
+
+        params = GaLoreMomentumProjectionParams(
+            enabled=projection_config.enabled,
+            steps=tuple(int(step) for step in projection_config.steps),
+            target_ranks=ranks,
+            state_keys=tuple(projection_config.state_keys),
+            transform=str(projection_config.transform).lower(),
+            proj_type=projection_config.proj_type,
+            shared_source=projection_config.shared_source,
+            column_count=projection_config.column_count,
+            random_seed=projection_config.random_seed,
+            random_std=float(projection_config.random_std),
+            log_metrics=projection_config.log_metrics,
+        )
+        projection_callback = GaLoreMomentumProjectionCallback(params)
+        if not projection_callback.enabled:
+            return None
+        return projection_callback
 
     def _init_hyperparameter_switch(
         self, hyper_switch_config: HyperparameterSwitchConfig

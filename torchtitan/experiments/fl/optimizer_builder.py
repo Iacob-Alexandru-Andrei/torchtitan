@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
+import re
 from typing import Any, TYPE_CHECKING
 
 import torch
@@ -211,6 +212,144 @@ def _build_optimizer_kwargs(config: MosaicOptimizerConfig, extra_kwargs: dict[st
     return optimizer_kwargs
 
 
+def _compute_galore_rank_overrides(
+    model_parts: list[torch.nn.Module],
+    config: MosaicOptimizerConfig,
+) -> dict[torch.nn.Parameter, int]:
+    """Cache regex-based GaLore rank overrides keyed by parameter."""
+    overrides: dict[torch.nn.Parameter, int] = {}
+    patterns = config.galore_param_regexes or []
+    if not patterns:
+        return overrides
+
+    compiled: list[tuple[re.Pattern[str], int]] = []
+    for spec in patterns:
+        pattern = spec.get("param_str_match")
+        rank = spec.get("rank")
+        if not pattern or not isinstance(rank, int):
+            continue
+        compiled.append((re.compile(pattern), rank))
+
+    if not compiled:
+        return overrides
+
+    for model in model_parts:
+        for name, param in model.named_parameters():
+            for regex, rank in compiled:
+                if regex.search(name):
+                    overrides[param] = rank
+                    break
+    return overrides
+
+
+def _base_galore_group_from_config(
+    params: list[torch.nn.Parameter],
+    config: MosaicOptimizerConfig,
+) -> dict[str, Any]:
+    return {
+        "params": params,
+        "lr": config.lr,
+        "betas": (config.beta1, config.beta2),
+        "eps": config.eps,
+        "weight_decay": config.weight_decay,
+        "rank": config.galore_rank,
+        "update_proj_gap": config.galore_update_proj_gap,
+        "scale": config.galore_scale,
+        "proj_type": config.galore_proj_type,
+        "dim": config.galore_dim,
+        "v1": config.galore_v1,
+    }
+
+
+def _apply_galore_rank_overrides_to_param_groups(
+    param_groups: list[dict[str, Any]],
+    overrides: dict[torch.nn.Parameter, int],
+    config: MosaicOptimizerConfig,
+) -> list[dict[str, Any]]:
+    """Split groups as needed so per-param rank overrides are respected."""
+    if not overrides:
+        return param_groups
+
+    updated_groups: list[dict[str, Any]] = []
+    for group in param_groups:
+        params = group.get("params", [])
+        if not isinstance(params, (list, tuple)):
+            updated_groups.append(group)
+            continue
+
+        buckets: dict[int | None, list[torch.nn.Parameter]] = {}
+        for param in params:
+            rank = overrides.get(param, group.get("rank", config.galore_rank))
+            buckets.setdefault(rank, []).append(param)
+
+        for rank, bucket_params in buckets.items():
+            if not bucket_params:
+                continue
+            new_group = dict(group)
+            new_group["params"] = bucket_params
+            new_group["rank"] = rank
+            updated_groups.append(new_group)
+
+    return updated_groups
+
+
+def _build_galore_param_groups(
+    model_parts: list[torch.nn.Module],
+    config: MosaicOptimizerConfig,
+) -> list[dict[str, Any]] | None:
+    """Construct per-parameter GaLore param groups from regex specs."""
+
+    if not config.param_groups:
+        return None
+
+    if len(model_parts) != 1:
+        msg = "optimizer.param_groups with regex matching is supported only for a single model part."
+        raise ValueError(msg)
+
+    named_parameters = dict(model_parts[0].named_parameters())
+    remaining = dict(named_parameters)
+    param_groups: list[dict[str, Any]] = []
+
+    default_rank = config.galore_rank
+
+    for spec in config.param_groups:
+        pattern = spec.get("param_str_match")
+        if not pattern:
+            continue
+        compiled = re.compile(pattern)
+        matched = [(name, param) for name, param in list(remaining.items()) if compiled.search(name)]
+        if not matched:
+            continue
+
+        params = [param for _, param in matched]
+        for name, _ in matched:
+            remaining.pop(name, None)
+
+        group_rank = spec.get("rank", default_rank)
+        param_groups.append(
+            {
+                "params": params,
+                "lr": spec.get("lr", config.lr),
+                "betas": spec.get("betas", (config.beta1, config.beta2)),
+                "eps": spec.get("eps", config.eps),
+                "weight_decay": spec.get("weight_decay", config.weight_decay),
+                "rank": group_rank,
+                "update_proj_gap": spec.get("update_proj_gap", config.galore_update_proj_gap),
+                "scale": spec.get("scale", config.galore_scale),
+                "proj_type": spec.get("proj_type", config.galore_proj_type),
+                "dim": spec.get("dim", config.galore_dim),
+                "v1": spec.get("v1", config.galore_v1),
+            }
+        )
+
+    if remaining:
+        # Assign any leftover parameters to a default group.
+        params = list(remaining.values())
+        param_groups.append(_base_galore_group_from_config(params, config))
+
+    return param_groups
+
+
 def _apply_mup_overrides(
     model_parts: list[torch.nn.Module],
     config: MosaicOptimizerConfig,
@@ -370,6 +509,30 @@ def build_mosaic_optimizers(
 
     optimizer_cls = _resolve_optimizer_class(normalized_config.name)
     optimizer_kwargs = _build_optimizer_kwargs(normalized_config, extra_kwargs)
+
+    if normalized_config.name == "GaLore":
+        rank_overrides = _compute_galore_rank_overrides(model_parts, normalized_config)
+
+        if param_groups is None:
+            built_groups = _build_galore_param_groups(model_parts, normalized_config)
+            if built_groups is not None:
+                param_groups = built_groups
+            elif rank_overrides:
+                if len(model_parts) != 1:
+                    msg = (
+                        "optimizer.galore_param_regexes with custom rank overrides "
+                        "requires a single model part when param_groups are not provided."
+                    )
+                    raise ValueError(msg)
+                all_params = [p for p in model_parts[0].parameters() if p.requires_grad]
+                param_groups = [_base_galore_group_from_config(all_params, normalized_config)]
+
+        if param_groups is not None:
+            param_groups = _apply_galore_rank_overrides_to_param_groups(
+                param_groups,
+                rank_overrides,
+                normalized_config,
+            )
 
     return _build_optimizer_container(
         OptimizerContainerRequest(

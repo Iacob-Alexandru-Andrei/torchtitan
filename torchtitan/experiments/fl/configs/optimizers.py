@@ -275,6 +275,12 @@ class MosaicOptimizerConfig(BaseOptimizer):
     galore_v1: float = 0.0
     """Quasi-hyperbolic coefficient for GaLore first momentum."""
 
+    param_groups: list[dict[str, Any]] | tuple[dict[str, Any], ...] | None = None
+    """Optional explicit optimizer param groups (e.g., regex-based GaLore overrides)."""
+
+    galore_param_regexes: list[dict[str, Any]] | tuple[dict[str, Any], ...] | None = None
+    """Optional lightweight GaLore rank overrides specified as regex patterns."""
+
     def __post_init__(self) -> None:
         """Auto-initialize beta1 and beta2 from betas if betas is provided."""
         builder = self.builder.lower()
@@ -323,6 +329,29 @@ class MosaicOptimizerConfig(BaseOptimizer):
                 msg = "optimizer.zeropower_coefficients must contain exactly three values."
                 raise ValueError(msg)
             object.__setattr__(self, "zeropower_coefficients", coeffs)
+        if self.param_groups is not None:
+            groups = []
+            for entry in self.param_groups:
+                if not isinstance(entry, dict):
+                    msg = "optimizer.param_groups entries must be mappings."
+                    raise TypeError(msg)
+                groups.append(dict(entry))
+            object.__setattr__(self, "param_groups", groups)
+        if self.galore_param_regexes is not None:
+            regexes = []
+            for entry in self.galore_param_regexes:
+                if not isinstance(entry, dict):
+                    msg = "optimizer.galore_param_regexes entries must be mappings."
+                    raise TypeError(msg)
+                if "param_str_match" not in entry or "rank" not in entry:
+                    msg = "optimizer.galore_param_regexes entries require 'param_str_match' and 'rank'."
+                    raise ValueError(msg)
+                rank = entry["rank"]
+                if not isinstance(rank, int) or rank <= 0:
+                    msg = "optimizer.galore_param_regexes.rank must be a positive integer."
+                    raise ValueError(msg)
+                regexes.append(dict(entry))
+            object.__setattr__(self, "galore_param_regexes", regexes)
 
     def get_betas_tuple(self) -> tuple[float, ...]:
         """Get the betas tuple, either from explicit betas or constructed from beta1/beta2.

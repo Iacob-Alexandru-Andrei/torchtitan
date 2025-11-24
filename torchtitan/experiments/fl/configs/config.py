@@ -18,6 +18,7 @@ from torchtitan.components.ft.config import FaultTolerance as FTFaultTolerance
 
 from torchtitan.config import JobConfig
 from torchtitan.experiments.fl.configs.optimizers import MosaicOptimizerConfig
+from torchtitan.experiments.fl.optimizers.galore import STD_PROJ
 
 
 DEFAULT_DATASET_SPLIT_KEYS = frozenset(
@@ -469,6 +470,94 @@ class FLLRSchedulerConfig:
 
 
 @dataclass
+class GaLoreMomentumProjectionConfig:
+    """Configuration for projecting GaLore momenta to a new rank mid-training."""
+
+    enabled: bool = field(
+        default=False,
+        metadata={"help": "Enable rank changes for GaLore momenta at specific steps."},
+    )
+
+    steps: tuple[int, ...] = field(
+        default_factory=tuple,
+        metadata={"help": "Training steps (1-based) at which to project GaLore momenta."},
+    )
+
+    target_rank: int | None = field(
+        default=None,
+        metadata={
+            "help": (
+                "Default target rank applied at each step when `target_ranks` is empty. "
+                "Must be positive when projection is enabled."
+            )
+        },
+    )
+
+    target_ranks: tuple[int, ...] = field(
+        default_factory=tuple,
+        metadata={
+            "help": (
+                "Optional per-step target ranks. Length must be 1 or match the number of steps when provided."
+            )
+        },
+    )
+
+    state_keys: tuple[str, ...] = field(
+        default_factory=lambda: ("exp_avg", "exp_avg_sq"),
+        metadata={"help": "Optimizer state keys that should be projected."},
+    )
+
+    transform: str = field(
+        default="svd",
+        metadata={
+            "help": "Projection transform to apply. Supported values: 'svd', 'columns', or 'random'."
+        },
+    )
+
+    proj_type: str = field(
+        default=STD_PROJ,
+        metadata={
+            "help": (
+                "Projection orientation. Uses GaLore semantics for 'std', 'reverse_std', 'left', 'right', or 'full'."
+            )
+        },
+    )
+
+    shared_source: str | None = field(
+        default=None,
+        metadata={
+            "help": (
+                "When set, reuse the projection basis computed from this state key for all other targeted states."
+            )
+        },
+    )
+
+    column_count: int | None = field(
+        default=None,
+        metadata={
+            "help": (
+                "Number of columns/rows to keep when transform='columns'. Defaults to the target rank when unset."
+            )
+        },
+    )
+
+    random_seed: int | None = field(
+        default=None,
+        metadata={"help": "Optional seed used when transform='random' for reproducible projections."},
+    )
+
+    random_std: float = field(
+        default=1.0,
+        metadata={"help": "Scaling factor applied to random projection bases."},
+    )
+
+    log_metrics: bool = field(
+        default=True,
+        metadata={"help": "If True, log the target rank when a projection is applied."},
+    )
+
+
+@dataclass
 class HyperparameterSwitchConfig:
     """Configuration for switching quasi-hyperbolic optimizer parameters mid-training."""
 
@@ -540,6 +629,15 @@ class MetricsConfig:
         metadata={"help": "Configuration for optimizer beta monitoring."},
     )
 
+    galore_projection: GaLoreMomentumProjectionConfig = field(
+        default_factory=GaLoreMomentumProjectionConfig,
+        metadata={
+            "help": (
+                "Configuration for mid-training GaLore momentum projections that change the target rank."
+            )
+        },
+    )
+
     vs_monitor: VSMonitorConfig = field(
         default_factory=VSMonitorConfig,
         metadata={"help": "Configuration for quasi-hyperbolic parameter monitoring."},
@@ -561,6 +659,7 @@ class MetricsConfig:
         activation_monitor_dict = _as_dict(data.get("activation_monitor"))
         lr_monitor_dict = _as_dict(data.get("lr_monitor"))
         betas_monitor_dict = _as_dict(data.get("betas_monitor"))
+        galore_projection_dict = _as_dict(data.get("galore_projection"))
         vs_monitor_dict = _as_dict(data.get("vs_monitor"))
         hyper_switch_dict = _as_dict(data.get("hyperparameter_switch"))
 
@@ -569,6 +668,7 @@ class MetricsConfig:
             activation_monitor=ActivationMonitorConfig(**activation_monitor_dict),
             lr_monitor=LRMonitorConfig(**lr_monitor_dict),
             betas_monitor=BetasMonitorConfig(**betas_monitor_dict),
+            galore_projection=GaLoreMomentumProjectionConfig(**galore_projection_dict),
             vs_monitor=VSMonitorConfig(**vs_monitor_dict),
             hyperparameter_switch=HyperparameterSwitchConfig(**hyper_switch_dict),
         )

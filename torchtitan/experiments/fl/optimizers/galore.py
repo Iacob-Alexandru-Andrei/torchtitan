@@ -18,7 +18,7 @@ from torch.optim import AdamW
 
 log = logging.getLogger(__name__)
 
-__all__ = ["GaLore", "GaLoreProjector", "classify_low_rank_parameters"]
+__all__ = ["GaLore", "GaLoreProjector", "classify_low_rank_parameters", ]
 
 GALORE_MAX_SUPPORT_DIM = 2
 _HIGH_WEIGHT_DECAY_WARNING = 1e-1
@@ -172,7 +172,7 @@ class GaLore(AdamW):
 
     @torch.no_grad()
     def step(self, closure: Callable[[], Tensor] | None = None) -> Tensor | None:
-        loss = None
+        loss = None 
         if closure is not None:
             with torch.enable_grad():
                 loss = closure()
@@ -260,14 +260,27 @@ def classify_low_rank_parameters(
     if not optimizer_config:
         return {}
     param_groups = optimizer_config.get("param_groups")
-    if not param_groups:
-        return {}
+    regex_overrides = optimizer_config.get("galore_param_regexes") or []
+    default_rank = optimizer_config.get("galore_rank")
 
     low_rank: dict[str, int] = {}
     remaining = set(parameter_names)
-    for group in param_groups:
-        pattern = group.get("param_str_match")
-        rank = group.get("rank")
+
+    if param_groups:
+        for group in param_groups:
+            pattern = group.get("param_str_match")
+            rank = group.get("rank", default_rank)
+            if not pattern or not isinstance(rank, int):
+                continue
+            compiled = re.compile(pattern)
+            for name in list(remaining):
+                if compiled.search(name):
+                    low_rank[name] = rank
+                    remaining.remove(name)
+
+    for override in regex_overrides:
+        pattern = override.get("param_str_match")
+        rank = override.get("rank")
         if not pattern or not isinstance(rank, int):
             continue
         compiled = re.compile(pattern)
@@ -275,4 +288,8 @@ def classify_low_rank_parameters(
             if compiled.search(name):
                 low_rank[name] = rank
                 remaining.remove(name)
+
+    if default_rank is not None:
+        for name in remaining:
+            low_rank[name] = default_rank
     return low_rank

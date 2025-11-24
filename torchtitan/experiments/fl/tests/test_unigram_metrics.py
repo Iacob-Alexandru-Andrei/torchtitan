@@ -167,6 +167,24 @@ class DummyVSMonitorConfig:
 
 
 @dataclass(slots=True)
+class DummyGaLoreMomentumProjectionConfig:
+    """GaLore momentum projection configuration for callback wiring tests."""
+
+    enabled: bool = False
+    steps: tuple[int, ...] = ()
+    target_rank: int | None = None
+    target_ranks: tuple[int, ...] = ()
+    state_keys: tuple[str, ...] = ("exp_avg", "exp_avg_sq")
+    transform: str = "svd"
+    proj_type: str = "std"
+    shared_source: str | None = None
+    column_count: int | None = None
+    random_seed: int | None = None
+    random_std: float = 1.0
+    log_metrics: bool = True
+
+
+@dataclass(slots=True)
 class DummyHyperparameterSwitchConfig:
     """Hyperparameter switch configuration for callback wiring tests."""
 
@@ -193,6 +211,9 @@ class MetricsConfig:
         default_factory=DummyBetasMonitorConfig
     )
     vs_monitor: DummyVSMonitorConfig = field(default_factory=DummyVSMonitorConfig)
+    galore_projection: DummyGaLoreMomentumProjectionConfig = field(
+        default_factory=DummyGaLoreMomentumProjectionConfig
+    )
     hyperparameter_switch: DummyHyperparameterSwitchConfig = field(
         default_factory=DummyHyperparameterSwitchConfig
     )

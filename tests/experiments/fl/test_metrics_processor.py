@@ -43,10 +43,12 @@ HyperparameterSwitchCallback = fl_metrics.HyperparameterSwitchCallback
 LRMonitor = fl_metrics.LRMonitor
 OptimizerMonitor = fl_metrics.OptimizerMonitor
 VSMonitor = fl_metrics.VSMonitor
+GaLoreMomentumProjectionCallback = fl_metrics.GaLoreMomentumProjectionCallback
 
 ActivationMonitorConfig = config_module.ActivationMonitorConfig
 BetasMonitorConfig = config_module.BetasMonitorConfig
 HyperparameterSwitchConfig = config_module.HyperparameterSwitchConfig
+GaLoreMomentumProjectionConfig = config_module.GaloreMomentumProjectionConfig
 LRMonitorConfig = config_module.LRMonitorConfig
 MetricsConfig = config_module.MetricsConfig
 MosaicJobConfig = config_module.MosaicJobConfig
@@ -79,6 +81,7 @@ def test_default_callbacks_include_optimizer_lr_and_activation() -> None:
     assert ActivationMonitor in types
     assert BetasMonitor not in types
     assert VSMonitor not in types
+    assert GaLoreMomentumProjectionCallback not in types
     assert HyperparameterSwitchCallback not in types
 
 
@@ -133,6 +136,38 @@ def test_hyperparameter_switch_requires_steps(
     processor = _build_processor(metrics_cfg)
     types = _callback_types(processor)
     assert (HyperparameterSwitchCallback in types) is expected
+
+
+@pytest.mark.parametrize(
+    "config,expected",
+    [
+        (GaloreMomentumProjectionConfig(enabled=True, steps=()), False),
+        (
+            GaloreMomentumProjectionConfig(enabled=True, steps=(10,), target_rank=4),
+            True,
+        ),
+        (
+            GaloreMomentumProjectionConfig(enabled=True, steps=(5,), target_ranks=(2,)),
+            True,
+        ),
+        (
+            GaloreMomentumProjectionConfig(enabled=True, steps=(3, 8), target_ranks=(1,)),
+            True,
+        ),
+        (
+            GaloreMomentumProjectionConfig(enabled=True, steps=(3, 8), target_ranks=()),
+            False,
+        ),
+    ],
+)
+def test_galore_projection_schedule_requires_rank(
+    config: GaloreMomentumProjectionConfig, expected: bool
+) -> None:
+    base_cfg = MosaicJobConfig().fl_metrics
+    metrics_cfg = replace(base_cfg, galore_projection=config)
+    processor = _build_processor(metrics_cfg)
+    types = _callback_types(processor)
+    assert (GaLoreMomentumProjectionCallback in types) is expected
 
 
 def test_lr_monitor_can_be_disabled() -> None:
