@@ -71,17 +71,20 @@ def _maybe_refresh_projector(state: dict[str, Any], weights: Tensor, iteration: 
             "update_proj_gap": None,
             "scale": None,
             "proj_type": None,
+            "resolved_proj_type": None,
         },
     )
     rank = meta["rank"]
     update_proj_gap = meta["update_proj_gap"]
-    proj_type = meta["proj_type"]
-    if rank is None or update_proj_gap is None or proj_type is None:
+    proj_type = meta["proj_type"] or STD_PROJ
+    resolved_proj_type = _resolve_proj_choice(proj_type, weights)
+    meta["resolved_proj_type"] = resolved_proj_type
+    if rank is None or update_proj_gap is None:
         return
 
     orthogonal = state.get("projector_basis")
     if orthogonal is None or (iteration % update_proj_gap).item() == 0:
-        state["projector_basis"] = _orthogonal_matrix(weights, rank, proj_type)
+        state["projector_basis"] = _orthogonal_matrix(weights, rank, resolved_proj_type)
 
 
 def _project(
@@ -92,7 +95,10 @@ def _project(
     if full_rank_grad.ndim > GALORE_MAX_SUPPORT_DIM:
         raise NotImplementedError("GaLore currently supports tensors up to rank 2.")
 
-    proj_type = _resolve_proj_choice(state.get("projector_meta", {}).get("proj_type", STD_PROJ), full_rank_grad)
+    meta = state.get("projector_meta", {})
+    proj_type = _resolve_proj_choice(meta.get("proj_type", STD_PROJ), full_rank_grad)
+    meta["resolved_proj_type"] = proj_type
+    state["projector_meta"] = meta
     _maybe_refresh_projector(state, full_rank_grad, iteration)
     orthogonal = state.get("projector_basis")
     if orthogonal is None:
