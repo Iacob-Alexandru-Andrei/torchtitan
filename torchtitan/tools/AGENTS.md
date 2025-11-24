@@ -78,8 +78,8 @@ checkpoint_conversion.py→[download_dist_cp_checkpoint((location: S3CheckpointL
 ## DEPENDENCY_PATTERNS
 
 ### EDGE_PATTERNS
-Contains: 2 edges
 Call: 12 edges
+Contains: 2 edges
 
 ### CROSS_CLUSTER_FLOW
 

@@ -79,8 +79,8 @@ __init__.py→[] dataloader.py→[_build_mosaic_dataloader((request: DataloaderB
 ## DEPENDENCY_PATTERNS
 
 ### EDGE_PATTERNS
-Call: 40 edges
 Contains: 18 edges
+Call: 40 edges
 
 ### CROSS_CLUSTER_FLOW
 

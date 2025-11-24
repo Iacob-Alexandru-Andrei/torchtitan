@@ -20,7 +20,7 @@ save_for_all_ranks = true
 
 [model]
 name = "mosaic_llama3_mup"
-flavor = "125M"
+flavor = "16M"
 hf_assets_path = "./tests/assets/tokenizer"
 
 [optimizer]
@@ -63,10 +63,10 @@ switch_step = 2048
 switch_scale = 1.0
 
 [training]
-local_batch_size = 64
-global_batch_size = 256
+local_batch_size = 32
+global_batch_size = 64
 seq_len = 2048
-max_norm = 0.5
+max_norm = 1.0
 steps = 2048
 dataset = "c4_test"
 

@@ -81,8 +81,8 @@ integration_tests.py→[run_single_test((test_flavor: OverrideDefinitions,full_p
 ## DEPENDENCY_PATTERNS
 
 ### EDGE_PATTERNS
-Call: 3 edges
 Contains: 3 edges
+Call: 3 edges
 
 ### CROSS_CLUSTER_FLOW
 

@@ -82,8 +82,8 @@ permute_indices_testing.py→[fill_indices_cpu((tokens_per_expert_group: torch.T
 ## DEPENDENCY_PATTERNS
 
 ### EDGE_PATTERNS
-Contains: 7 edges
 Call: 5 edges
+Contains: 7 edges
 
 ### CROSS_CLUSTER_FLOW
 TESTS→UTILITY_LAYER: 5

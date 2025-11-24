@@ -94,8 +94,8 @@ __init__.py→[_register_base_specs(void),_update_vocab_sizes((base_spec: TrainS
 ## DEPENDENCY_PATTERNS
 
 ### EDGE_PATTERNS
-Call: 23 edges
 Contains: 75 edges
+Call: 23 edges
 
 ### CROSS_CLUSTER_FLOW
 
