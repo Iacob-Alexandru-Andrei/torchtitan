@@ -83,8 +83,8 @@ __init__.py→[build_mup_optimizers((model_parts: list[nn.Module],optimizer_conf
 ## DEPENDENCY_PATTERNS
 
 ### EDGE_PATTERNS
-Call: 16 edges
 Contains: 33 edges
+Call: 16 edges
 
 ### CROSS_CLUSTER_FLOW
 

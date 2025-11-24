@@ -78,8 +78,8 @@ __init__.py→[] disco_init.py→[initialize_tensor((tensor: Tensor,*,init_type:
 ## DEPENDENCY_PATTERNS
 
 ### EDGE_PATTERNS
-Contains: 23 edges
 Call: 15 edges
+Contains: 23 edges
 
 ### CROSS_CLUSTER_FLOW
 

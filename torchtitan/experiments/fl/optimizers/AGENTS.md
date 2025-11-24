@@ -82,8 +82,8 @@ __init__.py→[] _decoupled_decay.py→[_compute_decay_factor((lr: float | Tenso
 ## DEPENDENCY_PATTERNS
 
 ### EDGE_PATTERNS
-Call: 113 edges
 Contains: 69 edges
+Call: 113 edges
 
 ### CROSS_CLUSTER_FLOW
 

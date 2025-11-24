@@ -78,8 +78,8 @@ __init__.py→[] engine.py→[close((self))] example_train.py→[batch_generator
 ## DEPENDENCY_PATTERNS
 
 ### EDGE_PATTERNS
-Call: 2 edges
 Contains: 7 edges
+Call: 2 edges
 
 ### CROSS_CLUSTER_FLOW
 
