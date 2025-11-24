@@ -76,7 +76,7 @@ def _maybe_refresh_projector(state: dict[str, Any], weights: Tensor, iteration: 
     )
     rank = meta["rank"]
     update_proj_gap = meta["update_proj_gap"]
-    proj_type = meta["proj_type"] or STD_PROJ
+    proj_type = meta.get("proj_type") or meta.get("resolved_proj_type") or STD_PROJ
     resolved_proj_type = _resolve_proj_choice(proj_type, weights)
     meta["resolved_proj_type"] = resolved_proj_type
     if rank is None or update_proj_gap is None:
@@ -96,7 +96,8 @@ def _project(
         raise NotImplementedError("GaLore currently supports tensors up to rank 2.")
 
     meta = state.get("projector_meta", {})
-    proj_type = _resolve_proj_choice(meta.get("proj_type", STD_PROJ), full_rank_grad)
+    proj_type = meta.get("proj_type") or meta.get("resolved_proj_type") or STD_PROJ
+    proj_type = _resolve_proj_choice(proj_type, full_rank_grad)
     meta["resolved_proj_type"] = proj_type
     state["projector_meta"] = meta
     _maybe_refresh_projector(state, full_rank_grad, iteration)
