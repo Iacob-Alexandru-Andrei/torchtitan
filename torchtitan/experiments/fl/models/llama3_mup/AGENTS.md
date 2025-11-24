@@ -1,3 +1,18 @@
+# Development Standards
+- Setup the environment by running the commands in `torchtitan/experiments/fl/scripts/setup/setup_env.sh`.
+- Versions are brittle; when invoking uv run commands, always include `--no-sync` (for example, `uv run --no-sync ...`). Use the setup script for the initial `uv sync`.
+- This fork centralizes new features and experiments under `torchtitan/experiments/fl`; keep changes elsewhere minimal and compatibility-focused.
+- Keep compatibility with upstream torchtitan simple by reusing existing imports and functionality whenever possible.
+- When modifying a torchtitan component, model, or layer, create a subclass with the required changes. If compatibility must be broken, look for a higher-level base class before rebuilding from scratch.
+- If two versions of a component must coexist, provide an explicit selector (for example, model-name strings or config booleans) and keep legacy behavior intact.
+- Follow the linting and typing style used in `torchtitan/experiments/fl`: add docstrings with parameters, types, and returns, and type every symbol.
+- Always run linting and the relevant tests (or pre-commit) before sending changes.
+- Keep experimental behaviors behind feature flags or config options; defaults should remain backward compatible.
+- Prefer small, well-documented diffs; note new configs or model names and keep logging clear for debugging.
+- Avoid hardcoding environment-specific paths or secrets; keep inputs configurable.
+- Add focused unit tests for compatibility layers and behavioral changes, especially around experiment routing and model selection.
+- Profile before altering performance-sensitive paths; avoid regressions in hot kernels or distributed code.
+
 # EMBARGO: LLM-Optimized Codebase Dependency Graph
 
 **SYSTEM PROMPT FOR LLM INTERPRETATION:**
@@ -67,8 +82,8 @@ __init__.py→[build_mup_optimizers((model_parts: list[nn.Module],optimizer_conf
 ## DEPENDENCY_PATTERNS
 
 ### EDGE_PATTERNS
-Call: 6 edges
 Contains: 39 edges
+Call: 6 edges
 
 ### CROSS_CLUSTER_FLOW
 

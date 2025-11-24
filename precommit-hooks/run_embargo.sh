@@ -1,13 +1,34 @@
 #!/bin/bash
 
 # This script recursively generates AGENTS.md files by running embargo on all
-# non-underscore-prefixed folders, splits their lines, and stages the results.
-# This consolidated process ensures a predictable two-step commit when changes occur.
+# non-underscore-prefixed folders, adds a development standards preamble to
+# every AGENTS.md (top-level and per-directory), splits their lines, and stages
+# the results. This consolidated process ensures a predictable two-step commit
+# when changes occur.
 
 # --- Configuration ---
 PROJECT_PATH=$(git rev-parse --show-toplevel)
 # Define the path to the line splitter script
 LINE_SPLITTER_SCRIPT="$PROJECT_PATH/precommit-hooks/split_long_lines.py"
+
+# Development standards preamble applied to all AGENTS.md files
+GLOBAL_PREAMBLE=$(cat <<'EOF'
+# Development Standards
+- Setup the environment by running the commands in `torchtitan/experiments/fl/scripts/setup/setup_env.sh`.
+- Versions are brittle; when invoking uv run commands, always include `--no-sync` (for example, `uv run --no-sync ...`). Use the setup script for the initial `uv sync`.
+- This fork centralizes new features and experiments under `torchtitan/experiments/fl`; keep changes elsewhere minimal and compatibility-focused.
+- Keep compatibility with upstream torchtitan simple by reusing existing imports and functionality whenever possible.
+- When modifying a torchtitan component, model, or layer, create a subclass with the required changes. If compatibility must be broken, look for a higher-level base class before rebuilding from scratch.
+- If two versions of a component must coexist, provide an explicit selector (for example, model-name strings or config booleans) and keep legacy behavior intact.
+- Follow the linting and typing style used in `torchtitan/experiments/fl`: add docstrings with parameters, types, and returns, and type every symbol.
+- Always run linting and the relevant tests (or pre-commit) before sending changes.
+- Keep experimental behaviors behind feature flags or config options; defaults should remain backward compatible.
+- Prefer small, well-documented diffs; note new configs or model names and keep logging clear for debugging.
+- Avoid hardcoding environment-specific paths or secrets; keep inputs configurable.
+- Add focused unit tests for compatibility layers and behavioral changes, especially around experiment routing and model selection.
+- Profile before altering performance-sensitive paths; avoid regressions in hot kernels or distributed code.
+EOF
+)
 
 # --- Functions ---
 
@@ -35,8 +56,11 @@ process_directory() {
         return 1
     fi
 
-    echo "Step 2: Moving EMBARGO.md to target directory and renaming to AGENTS.md..."
-    mv "$embargo_file" "$agents_file"
+    echo "Step 2: Writing AGENTS.md with development standards preamble..."
+    {
+        printf "%s\n\n" "$GLOBAL_PREAMBLE"
+        cat "$embargo_file"
+    } > "$agents_file"
 
     echo "Step 3: Splitting long lines in AGENTS.md..."
     # Call the Python script to process the newly created file
@@ -75,16 +99,25 @@ if [ ! -f "$PROJECT_PATH/EMBARGO.md" ]; then
     exit 1
 fi
 
-echo "Step 2: Renaming EMBARGO.md to AGENTS.md..."
-mv "$PROJECT_PATH/EMBARGO.md" "$PROJECT_PATH/AGENTS.md"
+echo "Step 2: Writing top-level AGENTS.md with development standards preamble..."
+{
+    printf "%s\n\n" "$GLOBAL_PREAMBLE"
+    cat "$PROJECT_PATH/EMBARGO.md"
+} > "$PROJECT_PATH/AGENTS.md"
 
 echo "Step 3: Splitting long lines in top-level AGENTS.md..."
 python3 "$LINE_SPLITTER_SCRIPT" "$PROJECT_PATH/AGENTS.md"
 
-echo "Step 4: Copying top-level AGENTS.md to torchtitan/AGENTS.md..."
-cp "$PROJECT_PATH/AGENTS.md" "$TORCHTITAN_DIR/AGENTS.md"
+echo "Step 4: Creating torchtitan/AGENTS.md with development standards preamble..."
+{
+    printf "%s\n\n" "$GLOBAL_PREAMBLE"
+    cat "$PROJECT_PATH/EMBARGO.md"
+} > "$TORCHTITAN_DIR/AGENTS.md"
 
-echo "Step 5: Staging both AGENTS.md files..."
+echo "Step 5: Splitting long lines in torchtitan/AGENTS.md..."
+python3 "$LINE_SPLITTER_SCRIPT" "$TORCHTITAN_DIR/AGENTS.md"
+
+echo "Step 6: Staging both AGENTS.md files..."
 git add "$PROJECT_PATH/AGENTS.md"
 git add "$TORCHTITAN_DIR/AGENTS.md"
 
@@ -117,7 +150,7 @@ find "$TORCHTITAN_DIR" -type d \
 done
 
 # Cleanup: Remove any stray EMBARGO.md files that might be left
-echo "Step 6: Cleaning up any stray EMBARGO.md files..."
+echo "Step 7: Cleaning up any stray EMBARGO.md files..."
 find "$PROJECT_PATH" -name "EMBARGO.md" -type f -delete
 echo "✓ Cleanup complete"
 echo ""

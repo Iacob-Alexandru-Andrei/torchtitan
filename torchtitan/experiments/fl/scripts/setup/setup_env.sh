@@ -1,6 +1,6 @@
 #!/bin/bash
 uv sync
-uv run pre-commit install --no-sync
+uv run --no-sync pre-commit install
 uv pip install llm-foundry==0.22.0
 uv pip install --pre --force-reinstall \
   --index-url https://download.pytorch.org/whl/nightly/cu128 \
