@@ -1,6 +1,6 @@
 # MosaicML Streaming Integration for TorchTitan
 
-This directory contains a refactored and generalized integration for using MosaicML's streaming datasets with TorchTitan. This integration is designed to be model-agnostic, allowing you to use Mosaic streaming with any model supported by TorchTitan through simple configuration changes.
+This directory contains a refactored and generalized integration for using MosaicML's streaming datasets with TorchTitan. The Mosaic trainer is a thin wrapper around the core `torchtitan.train.Trainer` that swaps in Mosaic-aware dataloaders, tokenizer setup, and optional monitoring without changing the default Trainer behaviour. This integration is designed to be model-agnostic, allowing you to use Mosaic streaming with any model supported by TorchTitan through simple configuration changes.
 
 ## Overview
 
@@ -10,7 +10,17 @@ The integration consists of three main components:
 
 2.  **Configuration (`configs/`)**: Includes `MosaicJobConfig`, a custom configuration class that inherits from `JobConfig` and adds fields for Mosaic-specific settings. This provides a clean separation of concerns and makes the integration more modular. An example configuration file, `mosaic_job.toml`, demonstrates how to set up a training job.
 
-3.  **Model Utilities (`models/`)**: Provides a `get_mosaic_train_spec` function that takes a base `TrainSpec` and dynamically replaces its dataloader and tokenizer builders with the Mosaic versions. This is the key to the model-agnostic design of the integration.
+3.  **Model Utilities (`models/`)**: Provides Mosaic adapters that take a base `TrainSpec` and dynamically replace its dataloader and tokenizer builders with the Mosaic versions. This is the key to the model-agnostic design of the integration.
+
+### Additional Dependencies
+
+The Mosaic integration pulls in a few optional packages that are not required for the core TorchTitan install:
+
+* **Mosaic Streaming** (`mosaicml-streaming`) – powers the streaming dataloader.
+* **S3 Helpers** – the S3 checkpoint wrapper depends on `boto3` (or another compatible client) and environment credentials to download/upload checkpoints.
+* **TorchFT** – optional semi-synchronous fault tolerance support used in FL experiments; only needed when you enable the FT features in the job config.
+
+These dependencies are listed in `torchtitan/experiments/fl/requirements-mosaic.txt` so they can be installed separately from the core package.
 
 ## How to Run
 
