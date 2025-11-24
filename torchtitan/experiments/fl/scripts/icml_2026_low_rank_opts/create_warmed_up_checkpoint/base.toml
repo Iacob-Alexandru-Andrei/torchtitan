@@ -157,7 +157,7 @@ batching_method = "random"
 [mosaic_dataloader.dataset.train]
 split = "train"
 root_remote = "s3://smollm-corpus/shared"
-root_local = "/nfs-share/datasets/photon/dataset_cache/smollm-corpus-shared"
+root_local = "/nfs-share/datasets/photon/dataset_cache/smollm-corpus-shared-val"
 sampling_groups_mode = "grouped"
 
 [mosaic_dataloader.dataset.train.streams.client_streams.stream_0]
