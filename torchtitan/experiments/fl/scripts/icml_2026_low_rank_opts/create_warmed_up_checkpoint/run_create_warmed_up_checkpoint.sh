@@ -6,7 +6,7 @@ set -euo pipefail
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 CONFIG_FILE=${CONFIG_FILE:-"${SCRIPT_DIR}/base.toml"}
 TRAIN_MODULE=${TRAIN_MODULE:-"torchtitan.experiments.fl.train"}
-MODEL_SIZE=${MODEL_SIZE:-"125M"}
+MODEL_SIZE=${MODEL_SIZE:-"16M"}
 GLOBAL_BATCH_SIZE=${GLOBAL_BATCH_SIZE:-64}
 TARGET_STEPS=${TARGET_STEPS:-2048}
 LEARNING_RATE=${LEARNING_RATE:-0.01}
@@ -30,7 +30,7 @@ usage() {
 Usage: run_create_warmed_up_checkpoint.sh [options] [-- extra trainer args]
 
 Options:
-  --model-size SIZE           Model flavor to train (default: 125M).
+  --model-size SIZE           Model flavor to train (default: 16M).
   --global-batch-size N       Global batch size (default: 256).
   --steps N                   Number of optimizer steps, also used for warmup (default: 2048).
   --lr VALUE                  Learning rate (default: 0.01).
