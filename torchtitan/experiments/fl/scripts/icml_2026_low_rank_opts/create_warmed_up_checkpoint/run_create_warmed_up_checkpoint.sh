@@ -10,11 +10,12 @@ MODEL_SIZE=${MODEL_SIZE:-"16M"}
 GLOBAL_BATCH_SIZE=${GLOBAL_BATCH_SIZE:-64}
 TARGET_STEPS=${TARGET_STEPS:-2048}
 LEARNING_RATE=${LEARNING_RATE:-0.01}
-OPTIMIZER_NAME=${OPTIMIZER_NAME:-"QHAdamW"}
+OPTIMIZER_NAME=${OPTIMIZER_NAME:-"GaLore"}
 OPTIMIZER_BUILDER=${OPTIMIZER_BUILDER:-"mosaic"}
 OPTIMIZER_BETA1=${OPTIMIZER_BETA1:-0.9}
 OPTIMIZER_BETA2=${OPTIMIZER_BETA2:-0.999}
-OPTIMIZER_VS=${OPTIMIZER_VS:-"1.0"}
+OPTIMIZER_EPS=${OPTIMIZER_EPS:-"1e-8"}
+OPTIMIZER_WEIGHT_DECAY=${OPTIMIZER_WEIGHT_DECAY:-0.0}
 WORKER_COUNT=${WORKER_COUNT:-1}
 LOG_RANK=${LOG_RANK:-0}
 RUN_PREFIX=${RUN_PREFIX:-"warmup"}
@@ -34,10 +35,11 @@ Options:
   --global-batch-size N       Global batch size (default: 256).
   --steps N                   Number of optimizer steps, also used for warmup (default: 2048).
   --lr VALUE                  Learning rate (default: 0.01).
-  --optimizer NAME            Optimizer to use (default: QHAdamW).
+  --optimizer NAME            Optimizer to use (default: GaLore with projections disabled).
   --beta1 VALUE               Optimizer beta1 (default: 0.9).
   --beta2 VALUE               Optimizer beta2 (default: 0.999).
-  --vs VALUE                  Optimizer v schedule entry (default: 1.0). Accepts scalars or Hydra lists.
+  --eps VALUE                 Optimizer epsilon (default: 1e-8).
+  --weight-decay VALUE        Optimizer weight decay (default: 0.0).
   --workers N                 Data-parallel worker count (default: 4).
   --config FILE               Base TOML config (default: base.toml in this folder).
   --train-module MODULE       Python module to launch (default: torchtitan.experiments.fl.train).
@@ -70,7 +72,8 @@ while [[ $# -gt 0 ]]; do
     --optimizer) OPTIMIZER_NAME=$2; shift 2 ;;
     --beta1) OPTIMIZER_BETA1=$2; shift 2 ;;
     --beta2) OPTIMIZER_BETA2=$2; shift 2 ;;
-    --vs) OPTIMIZER_VS=$2; shift 2 ;;
+    --eps) OPTIMIZER_EPS=$2; shift 2 ;;
+    --weight-decay) OPTIMIZER_WEIGHT_DECAY=$2; shift 2 ;;
     --workers) WORKER_COUNT=$2; shift 2 ;;
     --config) CONFIG_FILE=$2; shift 2 ;;
     --train-module) TRAIN_MODULE=$2; shift 2 ;;
@@ -159,7 +162,9 @@ CMD=(
   --optimizer.lr "${LEARNING_RATE}"
   --optimizer.beta1 "${OPTIMIZER_BETA1}"
   --optimizer.beta2 "${OPTIMIZER_BETA2}"
-  --optimizer.vs "${OPTIMIZER_VS}"
+  --optimizer.eps "${OPTIMIZER_EPS}"
+  --optimizer.weight_decay "${OPTIMIZER_WEIGHT_DECAY}"
+  # Low-rank GaLore projection is disabled by leaving galore_rank unset.
   --training.global_batch_size "${GLOBAL_BATCH_SIZE}"
   --training.local_batch_size "${LOCAL_BATCH_SIZE}"
   --training.steps "${TARGET_STEPS}"

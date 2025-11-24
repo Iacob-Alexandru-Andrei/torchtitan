@@ -16,6 +16,7 @@ from torch import nn
 from torchtitan.components.optimizer import OptimizersContainer
 from torchtitan.distributed import ParallelDims
 from torchtitan.experiments.fl.configs.optimizers import MosaicOptimizerConfig
+from torchtitan.experiments.fl.optimizers.galore import GaLore
 from torchtitan.experiments.fl.optimizer_builder import build_mosaic_optimizers
 
 
@@ -135,3 +136,20 @@ def test_scion_builder_accepts_custom_zeropower_coefficients() -> None:
     optimizer = next(iter(build_mosaic_optimizers([module], config, _dims())))
     coeffs = tuple(optimizer.param_groups[0]["zeropower_coeffs"])
     assert coeffs == pytest.approx((1.0, 2.0, 3.0))
+
+
+def test_galore_low_rank_states_follow_projected_grad_shape() -> None:
+    """GaLore moments should match the projected gradient shape, not parameter shape."""
+    module = _TinyModule()
+    optimizer = GaLore(module.parameters(), lr=0.01, betas=(0.9, 0.95), rank=1, update_proj_gap=1)
+
+    module.weight.grad = torch.ones_like(module.weight)
+    optimizer.step()
+
+    state = optimizer.state[module.weight]
+    projector = state["projector"]
+    projected_grad = projector.project(module.weight.grad, state["step"])
+
+    assert state["exp_avg"].shape == state["exp_avg_sq"].shape
+    assert state["exp_avg"].shape == projected_grad.shape
+    assert state["exp_avg"].shape != module.weight.shape

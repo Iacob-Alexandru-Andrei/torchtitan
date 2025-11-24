@@ -8,10 +8,9 @@
 from __future__ import annotations
 
 import logging
-import math
 import re
 from dataclasses import dataclass
-from typing import Iterable
+from typing import Callable, Iterable
 
 import torch
 from torch import Tensor
@@ -172,15 +171,21 @@ class GaLore(AdamW):
             group["initial_lr"] = group["lr"]
 
     @torch.no_grad()
-    def step(self, closure: None = None) -> None:
+    def step(self, closure: Callable[[], Tensor] | None = None) -> Tensor | None:
+        loss = None
+        if closure is not None:
+            with torch.enable_grad():
+                loss = closure()
+
         for group in self.param_groups:
             beta1, beta2 = group["betas"]
             eps = group["eps"]
             lr = group["lr"]
             weight_decay = group["weight_decay"]
             rank = group.get("rank")
+            use_low_rank = rank is not None
             dim = group.get("dim", GALORE_MAX_SUPPORT_DIM)
-            if dim > GALORE_MAX_SUPPORT_DIM:
+            if use_low_rank and dim > GALORE_MAX_SUPPORT_DIM:
                 raise NotImplementedError("GaLore supports tensors up to 2 dimensions.")
 
             for param in group["params"]:
@@ -191,32 +196,45 @@ class GaLore(AdamW):
                     raise RuntimeError("GaLore does not support sparse gradients.")
 
                 state = self.state[param]
-                if len(state) == 0:
+                if "step" not in state:
                     state["step"] = torch.zeros((), dtype=torch.float32, device=param.device)
-                    state["exp_avg"] = torch.zeros_like(param)
-                    state["exp_avg_sq"] = torch.zeros_like(param)
-                    if rank is not None:
-                        state["projector"] = GaLoreProjector(
-                            rank=rank,
-                            update_proj_gap=group["update_proj_gap"],
-                            scale=group["scale"],
-                            proj_type=group["proj_type"],
-                        )
 
                 projector = state.get("projector")
+                if use_low_rank and projector is None:
+                    projector = GaLoreProjector(
+                        rank=rank,
+                        update_proj_gap=group["update_proj_gap"],
+                        scale=group["scale"],
+                        proj_type=group["proj_type"],
+                    )
+                    state["projector"] = projector
+
                 if projector is not None:
                     grad = projector.project(grad, state["step"])
 
+                if "exp_avg" not in state:
+                    state["exp_avg"] = torch.zeros_like(
+                        grad,
+                        memory_format=torch.preserve_format,
+                    )
+                    state["exp_avg_sq"] = torch.zeros_like(
+                        grad,
+                        memory_format=torch.preserve_format,
+                    )
+
                 exp_avg = state["exp_avg"]
                 exp_avg_sq = state["exp_avg_sq"]
-                state["step"] += 1
+                state["step"].add_(1)
 
                 exp_avg.mul_(beta1).add_(grad, alpha=1 - beta1)
                 exp_avg_sq.mul_(beta2).addcmul_(grad, grad, value=1 - beta2)
 
-                bias_correction1 = 1 - beta1 ** state["step"]
-                bias_correction2 = 1 - beta2 ** state["step"]
-                denom = exp_avg_sq.sqrt() / math.sqrt(bias_correction2) + eps
+                step_count = state["step"]
+                beta1_t = step_count.new_tensor(beta1)
+                beta2_t = step_count.new_tensor(beta2)
+                bias_correction1 = 1 - torch.pow(beta1_t, step_count)
+                bias_correction2 = 1 - torch.pow(beta2_t, step_count)
+                denom = exp_avg_sq.sqrt() / bias_correction2.sqrt() + eps
 
                 if self.v1 == 0.0:
                     step_tensor = (exp_avg / bias_correction1) / denom
@@ -230,6 +248,7 @@ class GaLore(AdamW):
                 param.add_(step_tensor, alpha=-lr)
                 if weight_decay > 0.0:
                     param.add_(param, alpha=-lr * weight_decay)
+        return loss
 
 
 def classify_low_rank_parameters(
