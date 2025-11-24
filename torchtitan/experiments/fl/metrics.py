@@ -100,6 +100,7 @@ class AggregationType(Enum):
     MIN = "min"
     MAX = "max"
     ZERO_COUNT = "zero_count"
+    MEAN = "mean"
 
 
 class PureUnigramCrossEntropy(Metric):
@@ -865,6 +866,7 @@ class OptimizerMonitor(Callback):
         # Dynamically aggregate all metric names found in optimizer_metrics
         agg_type_values = {agg_type.value for agg_type in AggregationType}
         agg_dict: dict[tuple[AggregationType, str], float] = {}
+        agg_counts: dict[tuple[AggregationType, str], int] = {}
         metric_parts_required = 2
 
         # Initialize aggregation dictionary
@@ -893,6 +895,9 @@ class OptimizerMonitor(Callback):
                         agg_dict[key] = float("-inf")
                     case AggregationType.ZERO_COUNT:
                         agg_dict[key] = 0.0
+                    case AggregationType.MEAN:
+                        agg_dict[key] = 0.0
+                        agg_counts[key] = 0
 
         # Aggregate metrics
         for metric in optimizer_metrics:
@@ -919,6 +924,9 @@ class OptimizerMonitor(Callback):
                     agg_dict[key] = max(agg_dict[key], value)
                 case AggregationType.ZERO_COUNT:
                     agg_dict[key] += value
+                case AggregationType.MEAN:
+                    agg_dict[key] += value
+                    agg_counts[key] = agg_counts.get(key, 0) + 1
 
         # Report all aggregated metrics as agg_type/metric_name/global
         for (agg_type, metric_name), agg_value in agg_dict.items():
@@ -930,6 +938,9 @@ class OptimizerMonitor(Callback):
                     final_value = agg_value
                 case AggregationType.ZERO_COUNT:
                     final_value = agg_value
+                case AggregationType.MEAN:
+                    count = agg_counts.get((agg_type, metric_name), 0)
+                    final_value = agg_value / count if count > 0 else float("nan")
 
             optimizer_metrics[f"{agg_type.value}/{metric_name}/global"] = final_value
 
@@ -1320,6 +1331,16 @@ class GaLoreMomentumProjectionCallback(Callback):
     ) -> None:
         """Update GaLore optimizer groups and project their momenta."""
         for group in optimizer.param_groups:
+            initial_rank = group.get("rank")
+            has_projector = any(
+                isinstance(optimizer.state.get(param, {}).get("projector"), GaLoreProjector)
+                for param in group.get("params", [])
+                if isinstance(param, torch.Tensor)
+            )
+            use_low_rank = initial_rank is not None or has_projector
+            if not use_low_rank:
+                continue
+
             params = [param for param in group.get("params", []) if isinstance(param, torch.Tensor)]
             rank = _clamp_galore_rank(params, target_rank)
             group["rank"] = rank

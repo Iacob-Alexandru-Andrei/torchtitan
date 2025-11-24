@@ -114,3 +114,38 @@ def test_galore_projection_reuses_shared_basis() -> None:
     assert projected_exp_avg_sq.shape == (2, 1)
     assert torch.allclose(projected_exp_avg, expected_exp_avg)
     assert torch.allclose(projected_exp_avg_sq, expected_exp_avg_sq)
+
+
+def test_galore_projection_respects_non_galore_groups() -> None:
+    p_low = nn.Parameter(torch.ones(2, 2))
+    p_full = nn.Parameter(torch.arange(4.0).reshape(2, 2))
+    optimizer = GaLore(
+        [{"params": [p_low], "rank": 1}, {"params": [p_full], "rank": None}],
+        lr=0.1,
+        rank=None,
+    )
+    optimizer.state[p_low]["exp_avg"] = torch.ones_like(p_low)
+    optimizer.state[p_low]["exp_avg_sq"] = torch.ones_like(p_low) * 2
+    optimizer.state[p_full]["exp_avg"] = torch.ones_like(p_full) * 3
+
+    params = GaLoreMomentumProjectionParams(
+        enabled=True,
+        steps=(1,),
+        target_ranks=(1,),
+        state_keys=("exp_avg", "exp_avg_sq"),
+        transform="columns",
+        proj_type=STD_PROJ,
+        shared_source=None,
+        column_count=1,
+        random_seed=None,
+        random_std=1.0,
+        log_metrics=False,
+    )
+    callback = GaLoreMomentumProjectionCallback(params)
+    context = _build_context(optimizer, step=1)
+
+    callback.on_step_end(context)
+
+    assert optimizer.state[p_low]["exp_avg"].shape == (2, 1)
+    assert optimizer.state[p_low]["exp_avg_sq"].shape == (2, 1)
+    assert optimizer.state[p_full]["exp_avg"].shape == (2, 2)
