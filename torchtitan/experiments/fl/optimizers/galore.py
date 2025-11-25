@@ -7,10 +7,12 @@
 
 from __future__ import annotations
 
+import inspect
 import logging
 import math
 import re
-from typing import Any, Callable, Iterable
+from collections.abc import Callable, Iterable
+from typing import Any
 
 import torch
 from torch import Tensor
@@ -39,6 +41,34 @@ PROJ_TO_CODE: dict[str, int] = {
     FULL_PROJ: 4,
 }
 CODE_TO_PROJ: dict[int, str] = {code: name for name, code in PROJ_TO_CODE.items()}
+
+
+def _in_optimizer_state_initialization() -> bool:
+    """Detect whether torch.distributed.checkpoint is priming optimizer state."""
+
+    frame = inspect.currentframe()
+    while frame:
+        if frame.f_code.co_name == "_init_optim_state":
+            return True
+        frame = frame.f_back
+    return False
+
+
+def _infer_projector_rank(
+    orthogonal: Tensor | list[Tensor] | None,
+    resolved_proj_type: str | None,
+) -> int | None:
+    if orthogonal is None:
+        return None
+    if isinstance(orthogonal, Tensor):
+        if resolved_proj_type == LEFT_PROJ:
+            return orthogonal.shape[1]
+        return orthogonal.shape[0]
+    if isinstance(orthogonal, list) and orthogonal:
+        left_matrix = orthogonal[0]
+        if isinstance(left_matrix, Tensor):
+            return left_matrix.shape[1]
+    return None
 
 
 def _orthogonal_matrix(weights: Tensor, rank: int, proj_type: str) -> Tensor | list[Tensor]:
@@ -202,6 +232,7 @@ class GaLore(AdamW):
         scale: float = 1.0,
         proj_type: str = STD_PROJ,
         dim: int = 2,
+        rank_overrides: dict[Tensor | int, int] | None = None,
     ) -> None:
         if lr < 0.0:
             raise ValueError(f"Invalid learning rate: {lr}")
@@ -229,6 +260,12 @@ class GaLore(AdamW):
             "proj_type": proj_type,
             "dim": dim,
         }
+        overrides: dict[int, int] = {}
+        if rank_overrides:
+            for key, override_rank in rank_overrides.items():
+                param_id = key if isinstance(key, int) else id(key)
+                overrides[param_id] = override_rank
+        self._param_rank_overrides = overrides
         for group in self.param_groups:
             group.setdefault("rank", rank)
             group.setdefault("update_proj_gap", update_proj_gap)
@@ -237,6 +274,10 @@ class GaLore(AdamW):
             group.setdefault("dim", dim)
             group["initial_lr"] = group["lr"]
 
+        self.register_load_state_dict_post_hook(
+            lambda optimizer: optimizer._repair_projector_states()  # type: ignore[attr-defined]
+        )
+
     @torch.no_grad()
     def step(self, closure: Callable[[], Tensor] | None = None) -> Tensor | None:
         loss = None 
@@ -244,16 +285,17 @@ class GaLore(AdamW):
             with torch.enable_grad():
                 loss = closure()
 
+        suppress_low_rank = False
+        if not self.state:
+            suppress_low_rank = _in_optimizer_state_initialization()
+
         for group in self.param_groups:
             beta1, beta2 = group["betas"]
             eps = group["eps"]
             lr = group["lr"]
             weight_decay = group["weight_decay"]
-            rank = group.get("rank")
-            use_low_rank = rank is not None
+            base_rank = group.get("rank")
             dim = group.get("dim", GALORE_MAX_SUPPORT_DIM)
-            if use_low_rank and dim > GALORE_MAX_SUPPORT_DIM:
-                raise NotImplementedError("GaLore supports tensors up to 2 dimensions.")
 
             for param in group["params"]:
                 grad = param.grad
@@ -261,6 +303,11 @@ class GaLore(AdamW):
                     continue
                 if grad.is_sparse:
                     raise RuntimeError("GaLore does not support sparse gradients.")
+
+                rank = self._resolve_rank_for_param(param, base_rank)
+                use_low_rank = rank is not None and not suppress_low_rank
+                if use_low_rank and dim > GALORE_MAX_SUPPORT_DIM:
+                    raise NotImplementedError("GaLore supports tensors up to 2 dimensions.")
 
                 state = self.state[param]
                 if "step" not in state:
@@ -417,6 +464,59 @@ class GaLore(AdamW):
                     optimizer_metrics[f"mean/projection_eigenvalue_product/{name}"] = eig_product
 
         return optimizer_metrics
+
+    def _repair_projector_states(self) -> None:
+        """Ensure projector metadata matches the configured rank after load."""
+
+        for group in self.param_groups:
+            base_rank = group.get("rank")
+            update_proj_gap = group.get("update_proj_gap")
+            scale = group.get("scale")
+            proj_type_name = _proj_name_from_value(group.get("proj_type", STD_PROJ))
+            for param in group["params"]:
+                desired_rank = self._resolve_rank_for_param(param, base_rank)
+                if desired_rank is None or param not in self.state:
+                    continue
+                state = self.state[param]
+                meta = state.setdefault(
+                    "projector_meta",
+                    {
+                        "rank": desired_rank,
+                        "update_proj_gap": update_proj_gap,
+                        "scale": scale,
+                        "proj_type": PROJ_TO_CODE[proj_type_name],
+                        "resolved_proj_type": PROJ_TO_CODE[
+                            _resolve_proj_choice(proj_type_name, param)
+                        ],
+                    },
+                )
+                meta["rank"] = desired_rank
+                meta["update_proj_gap"] = update_proj_gap
+                meta["scale"] = scale
+                meta_proj_type = _proj_name_from_value(meta.get("proj_type", proj_type_name))
+                meta["proj_type"] = PROJ_TO_CODE[meta_proj_type]
+                resolved_proj_type = _resolve_proj_choice(meta_proj_type, param)
+                meta["resolved_proj_type"] = PROJ_TO_CODE[resolved_proj_type]
+
+                current_rank = _infer_projector_rank(
+                    state.get("projector_basis"), resolved_proj_type
+                )
+                if current_rank is None or current_rank == desired_rank:
+                    continue
+
+                log.warning(
+                    "Resetting projector basis for %s: checkpoint rank %s != configured rank %s.",
+                    getattr(param, "_base_name", "<unnamed_param>"),
+                    current_rank,
+                    desired_rank,
+                )
+                state.pop("projector_basis", None)
+
+    def _resolve_rank_for_param(self, param: Tensor, fallback: int | None) -> int | None:
+        override = self._param_rank_overrides.get(id(param))
+        if override is not None:
+            return override
+        return fallback
 
 
 def classify_low_rank_parameters(
