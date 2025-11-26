@@ -468,6 +468,7 @@ def _run_eval_only(trainer: Trainer, job_config: MosaicJobConfig) -> None:
         trainer.step,
     )
     trainer._apply_pending_hyperparameter_switches_on_resume()
+    trainer._apply_pending_galore_projection_on_resume()
 
     logger.info("[EvalOnly] Running validation at step %s.", trainer.step)
     with trainer.loss_fn.no_rescale():

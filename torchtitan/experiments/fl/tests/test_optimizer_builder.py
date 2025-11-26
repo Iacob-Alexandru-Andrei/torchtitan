@@ -210,7 +210,7 @@ def test_galore_regex_param_groups_builds_expected_ranks() -> None:
 
 
 def test_galore_rank_regex_overrides_existing_param_groups() -> None:
-    """Regex rank overrides should split existing param groups without redefining full groups."""
+    """Regex rank overrides should respect existing param groups while storing per-param ranks."""
     module = _ToyModel()
     base_group = {
         "params": list(module.parameters()),
@@ -239,14 +239,20 @@ def test_galore_rank_regex_overrides_existing_param_groups() -> None:
     def _group_params_ids(group: dict) -> set[int]:
         return {id(p) for p in group["params"]}
 
+    # Existing param groups should remain intact.
+    assert len(optimizer.param_groups) == 1
+    assert _group_params_ids(optimizer.param_groups[0]) == _group_params_ids(base_group)
+    assert optimizer.param_groups[0]["rank"] == 10
+
+    overrides = optimizer._param_rank_overrides  # type: ignore[attr-defined]
+
     attn_ids = {id(p) for p in module.attn.parameters()}
     ffn_ids = {id(p) for p in module.ffn.parameters()}
     other_ids = {id(p) for p in module.other.parameters()}
 
-    attn_group = next(g for g in optimizer.param_groups if _group_params_ids(g) == attn_ids)
-    ffn_group = next(g for g in optimizer.param_groups if _group_params_ids(g) == ffn_ids)
-    other_group = next(g for g in optimizer.param_groups if _group_params_ids(g) == other_ids)
-
-    assert attn_group["rank"] == 4
-    assert ffn_group["rank"] == 6
-    assert other_group["rank"] == 10
+    for param_id in attn_ids:
+        assert overrides[param_id] == 4
+    for param_id in ffn_ids:
+        assert overrides[param_id] == 6
+    for param_id in other_ids:
+        assert param_id not in overrides

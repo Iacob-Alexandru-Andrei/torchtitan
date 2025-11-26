@@ -1239,7 +1239,6 @@ def _apply_projection(tensor: Tensor, basis: ProjectionBasis, proj_type: str) ->
     else:
         msg = f"Unknown projection type {proj_type!r}."
         raise ValueError(msg)
-
     return projected.to(device=tensor.device, dtype=original_dtype)
 
 

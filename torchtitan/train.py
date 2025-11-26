@@ -666,6 +666,7 @@ class Trainer(torch.distributed.checkpoint.stateful.Stateful):
             f"[RESUME DEBUG] After checkpoint load: loaded={loaded}, self.step = {self.step}"
         )
         self._apply_pending_hyperparameter_switches_on_resume()
+        self._apply_pending_galore_projection_on_resume()
         logger.info(f"Training starts at step {self.step + 1}")
 
         leaf_folder = (
@@ -796,6 +797,60 @@ class Trainer(torch.distributed.checkpoint.stateful.Stateful):
 
             logger.info(
                 f"Applied pending hyperparameter switch at step {switch_step} on resume"
+            )
+
+    def _apply_pending_galore_projection_on_resume(self) -> None:
+        """Ensure GaLore momentum projection runs before the next optimizer step."""
+        if not getattr(self.metrics_processor, "galore_projection", None):
+            logger.info("No GaLore projection callback present on resume.")
+            return
+
+        projection_cb = self.metrics_processor.galore_projection  # type: ignore[attr-defined]
+        if not getattr(projection_cb, "enabled", False):
+            logger.info("GaLore projection callback is disabled; skipping resume hook.")
+            return
+
+        ensure_callbacks = getattr(self.metrics_processor, "_ensure_callbacks_setup", None)
+        if callable(ensure_callbacks):
+            ensure_callbacks()
+
+        mesh = None
+        if getattr(self.parallel_dims, "dp_cp_enabled", False):
+            mesh = self.parallel_dims.world_mesh["dp_cp"]
+
+        step_ranks = getattr(projection_cb, "step_ranks", {}) or {}
+        if not step_ranks:
+            logger.info("GaLore projection callback has no scheduled steps; nothing to apply.")
+            return
+        print(f"[RESUME DEBUG] step_ranks: {step_ranks}")
+        applicable_steps = [step for step in sorted(step_ranks) if step <= self.step]
+        if not applicable_steps:
+            logger.info(
+                "No GaLore projection steps are due (current step=%s).", self.step
+            )
+            return
+
+        for proj_step in applicable_steps:
+            projection_cb._applied_steps.discard(proj_step)
+            logger.info(
+                "Forcing GaLore momentum projection for configured step %s during resume",
+                proj_step,
+            )
+
+            context = CallbackStepContext(
+                step=proj_step,
+                model_parts=self.model_parts,
+                optimizers=self.optimizers,
+                logger=self.metrics_processor.logger,
+                mesh=mesh,
+            )
+
+            projection_cb.on_step_end(context)
+
+            projection_cb._applied_steps.add(proj_step)
+            logger.info(
+                "Applied pending GaLore momentum projection at step %s on resume",
+                proj_step,
             )
 
     def state_dict(self) -> dict[str, Any]:

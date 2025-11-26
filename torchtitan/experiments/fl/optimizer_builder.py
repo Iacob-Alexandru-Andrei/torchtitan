@@ -261,37 +261,6 @@ def _base_galore_group_from_config(
     }
 
 
-def _apply_galore_rank_overrides_to_param_groups(
-    param_groups: list[dict[str, Any]],
-    overrides: dict[torch.nn.Parameter, int],
-    config: MosaicOptimizerConfig,
-) -> list[dict[str, Any]]:
-    """Split groups as needed so per-param rank overrides are respected."""
-    if not overrides:
-        return param_groups
-
-    updated_groups: list[dict[str, Any]] = []
-    for group in param_groups:
-        params = group.get("params", [])
-        if not isinstance(params, (list, tuple)):
-            updated_groups.append(group)
-            continue
-
-        buckets: dict[int | None, list[torch.nn.Parameter]] = {}
-        for param in params:
-            rank = overrides.get(param, group.get("rank", config.galore_rank))
-            buckets.setdefault(rank, []).append(param)
-
-        for rank, bucket_params in buckets.items():
-            if not bucket_params:
-                continue
-            new_group = dict(group)
-            new_group["params"] = bucket_params
-            new_group["rank"] = rank
-            updated_groups.append(new_group)
-
-    return updated_groups
-
 
 def _build_galore_param_groups(
     model_parts: list[torch.nn.Module],
@@ -508,8 +477,8 @@ def build_mosaic_optimizers(
         )
 
     optimizer_cls = _resolve_optimizer_class(normalized_config.name)
-    optimizer_kwargs = _build_optimizer_kwargs(normalized_config, extra_kwargs)
 
+    effective_extra_kwargs = extra_kwargs
     if normalized_config.name == "GaLore":
         rank_overrides = _compute_galore_rank_overrides(model_parts, normalized_config)
 
@@ -517,22 +486,11 @@ def build_mosaic_optimizers(
             built_groups = _build_galore_param_groups(model_parts, normalized_config)
             if built_groups is not None:
                 param_groups = built_groups
-            elif rank_overrides:
-                if len(model_parts) != 1:
-                    msg = (
-                        "optimizer.galore_param_regexes with custom rank overrides "
-                        "requires a single model part when param_groups are not provided."
-                    )
-                    raise ValueError(msg)
-                all_params = [p for p in model_parts[0].parameters() if p.requires_grad]
-                param_groups = [_base_galore_group_from_config(all_params, normalized_config)]
 
-        if param_groups is not None:
-            param_groups = _apply_galore_rank_overrides_to_param_groups(
-                param_groups,
-                rank_overrides,
-                normalized_config,
-            )
+        effective_extra_kwargs = dict(extra_kwargs)
+        effective_extra_kwargs["rank_overrides"] = rank_overrides
+
+    optimizer_kwargs = _build_optimizer_kwargs(normalized_config, effective_extra_kwargs)
 
     return _build_optimizer_container(
         OptimizerContainerRequest(

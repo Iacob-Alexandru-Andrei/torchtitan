@@ -223,10 +223,15 @@ class OptimizersContainer(Optimizer, Stateful, Generic[T]):
         # functionality such as hooks. When custom param groups are provided, keep the
         # grouping by forwarding them to the base Optimizer so that features like
         # TorchFT perceive the correct optimizer layout.
+        # Optimizer defaults should only contain serializable values; drop
+        # GaLore's Parameter-keyed rank overrides so checkpoints stay loadable.
+        sanitized_kwargs = dict(optimizer_kwargs)
+        sanitized_kwargs.pop("rank_overrides", None)
+
         if param_groups:
-            Optimizer.__init__(self, param_groups, optimizer_kwargs)
+            Optimizer.__init__(self, param_groups, sanitized_kwargs)
         else:
-            Optimizer.__init__(self, all_params, optimizer_kwargs)
+            Optimizer.__init__(self, all_params, sanitized_kwargs)
 
     def _refresh_views(self) -> None:
         """Keep Optimizer-level views aligned with wrapped optimizers."""
