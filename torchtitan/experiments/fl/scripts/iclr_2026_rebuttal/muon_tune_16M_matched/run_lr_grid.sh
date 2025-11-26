@@ -19,6 +19,7 @@ RUN_INDEX_OFFSET=${RUN_INDEX_OFFSET:-0}
 RUN_INDEX_RANGE=${RUN_INDEX_RANGE:-}
 USE_SBATCH=${USE_SBATCH:-false}
 DRY_RUN=${DRY_RUN:-false}
+REVERSE_RUNS=${REVERSE_RUNS:-false}
 SBATCH_CPUS_PER_TASK=${SBATCH_CPUS_PER_TASK:-8}
 SBATCH_GPUS_PER_TASK=${SBATCH_GPUS_PER_TASK:-1}
 SBATCH_MAX_CHAINS=${SBATCH_MAX_CHAINS:-1}
@@ -42,6 +43,7 @@ Options mirror run_adamw_sweep.sh (range filtering, sbatch toggles, etc.).
 Environment overrides:
   MUON_LR_VALUES (space-separated), ADAMW_LR_VALUES (space-separated),
   RUN_INDEX, RUN_INDEX_OFFSET, RUN_INDEX_RANGE, USE_SBATCH, DRY_RUN,
+  REVERSE_RUNS (true/false to flip launch order),
   SBATCH_* controls, GPU_IDS for local launches.
 EOF
 }
@@ -61,6 +63,7 @@ while [[ $# -gt 0 ]]; do
     --sbatch) USE_SBATCH=true; shift ;;
     --no-sbatch) USE_SBATCH=false; shift ;;
     --dry-run) DRY_RUN=true; shift ;;
+    --reverse) REVERSE_RUNS=true; shift ;;
     -h|--help) usage; exit 0 ;;
     --) shift; if [[ $# -gt 0 ]]; then TRAINING_ARGS+=("$@"); fi; break ;;
     *) TRAINING_ARGS+=("$1"); shift ;;
@@ -78,6 +81,7 @@ normalize_bool() {
 
 USE_SBATCH=$(normalize_bool "${USE_SBATCH}")
 DRY_RUN=$(normalize_bool "${DRY_RUN}")
+REVERSE_RUNS=$(normalize_bool "${REVERSE_RUNS}")
 
 if ! [[ "${SBATCH_MAX_CHAINS}" =~ ^[0-9]+$ ]] || (( SBATCH_MAX_CHAINS < 1 )); then
   echo "SBATCH_MAX_CHAINS must be a positive integer (got ${SBATCH_MAX_CHAINS})." >&2
@@ -281,6 +285,23 @@ for flavor in "${FLAVOR_ARRAY[@]}"; do
     done
   done
 done
+
+if [[ "${REVERSE_RUNS}" == "true" ]]; then
+  declare -a REVERSED_INDICES=()
+  declare -a REVERSED_MUON=()
+  declare -a REVERSED_ADAM=()
+  declare -a REVERSED_FLAVOR=()
+  for ((rev_idx=${#RUN_PLAN_INDICES[@]}-1; rev_idx>=0; --rev_idx)); do
+    REVERSED_INDICES+=("${RUN_PLAN_INDICES[rev_idx]}")
+    REVERSED_MUON+=("${RUN_PLAN_MUON[rev_idx]}")
+    REVERSED_ADAM+=("${RUN_PLAN_ADAM[rev_idx]}")
+    REVERSED_FLAVOR+=("${RUN_PLAN_FLAVOR[rev_idx]}")
+  done
+  RUN_PLAN_INDICES=("${REVERSED_INDICES[@]}")
+  RUN_PLAN_MUON=("${REVERSED_MUON[@]}")
+  RUN_PLAN_ADAM=("${REVERSED_ADAM[@]}")
+  RUN_PLAN_FLAVOR=("${REVERSED_FLAVOR[@]}")
+fi
 
 SELECTED_RUNS=${#RUN_PLAN_INDICES[@]}
 
