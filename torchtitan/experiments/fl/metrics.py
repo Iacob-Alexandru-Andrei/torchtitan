@@ -805,31 +805,34 @@ class OptimizerMonitor(Callback):
             return
 
         optimizer_metrics: dict = {}
-        optimizer = optimizers.optimizers[0]
+        for optimizer in optimizers.optimizers:
+            if not callable(getattr(optimizer, "report_per_parameter_metrics", None)):
+                continue
 
-        for name, p in model.named_parameters():
-            if p.grad is not None and p.requires_grad:
+            per_opt_metrics: dict = {}
+            for name, p in model.named_parameters():
+                if p.grad is None or not p.requires_grad:
+                    continue
                 metric_reporter: Callable[[Any, Any, Any], dict] | None = getattr(
                     optimizer,
                     "report_per_parameter_metrics",
                     None,
                 )
-                if callable(metric_reporter) and self.log_optimizer_metrics:
-                    optimizer_metrics.update(
-                        metric_reporter(p, name, optimizer_metrics),
-                    )
+                if metric_reporter is not None:
+                    per_opt_metrics.update(metric_reporter(p, name, per_opt_metrics))
 
-        if mesh is not None and self.log_optimizer_metrics:
-            # Pre-process metrics before reduction
-            pre_reduce_metrics: Callable[[Any]] | None = getattr(
-                optimizer,
-                "pre_reduce_metrics",
-                None,
-            )
-            if callable(pre_reduce_metrics):
-                optimizer_metrics = pre_reduce_metrics(optimizer_metrics)
+            if mesh is not None and self.log_optimizer_metrics:
+                pre_reduce_metrics: Callable[[Any]] | None = getattr(
+                    optimizer,
+                    "pre_reduce_metrics",
+                    None,
+                )
+                if callable(pre_reduce_metrics):
+                    per_opt_metrics = pre_reduce_metrics(per_opt_metrics)
 
-            # Reduce metrics across all ranks using TorchTitan's distributed utilities
+            optimizer_metrics.update(per_opt_metrics)
+
+        if mesh is not None and self.log_optimizer_metrics and optimizer_metrics:
             optimizer_metrics = self._reduce_metrics_across_ranks(optimizer_metrics, mesh)
 
         # Dynamically aggregate all metric names found in optimizer_metrics
@@ -974,6 +977,10 @@ class BetasMonitor(Callback):
                         f"beta{beta_idx}-{name}/group{group_idx}",
                         self._as_float(beta_value),
                     )
+
+            momentum = group.get("momentum")
+            if momentum is not None:
+                yield (f"momentum-{name}/group{group_idx}", self._as_float(momentum))
 
             epsilon = self._get_epsilon(group)
             if epsilon is not None:

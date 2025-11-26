@@ -97,7 +97,6 @@ class TransformerModelArgs(BaseTransformerModelArgs):
     qk_layernorm_impl: Literal["torch", "rms"] | None = None
     use_attention_value_norm: bool = False
     use_attention_output_norm: bool = False
-    use_mlp_mid_norm: bool = False
     torch_layernorm_elementwise_affine: bool = True
     qk_norm_elementwise_affine: bool = True
     torch_layernorm_bias: bool = False

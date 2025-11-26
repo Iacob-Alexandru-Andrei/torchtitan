@@ -56,23 +56,36 @@ class Attention(MuPAttention):
         self._trunc_normal_cutoff = init_config.trunc_normal_cutoff
         self._use_custom_init = model_args.use_disco or init_config.hidden_init is not None
 
-    def _build_head_norm(self, model_args: TransformerModelArgsMuP) -> nn.Module:
-        prefer_torch = model_args.use_torch_qk_layernorm
-        if prefer_torch is None:
+    def _build_head_norm(
+        self,
+        model_args: TransformerModelArgsMuP,
+        *,
+        prefer_torch: bool | None = None,
+        elementwise_affine: bool | None = None,
+        bias: bool | None = None,
+    ) -> nn.Module:
+        resolved_prefer_torch = prefer_torch
+        if resolved_prefer_torch is None:
             if model_args.qk_layernorm_impl is not None:
-                prefer_torch = model_args.qk_layernorm_impl == "torch"
+                resolved_prefer_torch = model_args.qk_layernorm_impl == "torch"
             elif model_args.layernorm_impl is not None:
-                prefer_torch = model_args.layernorm_impl == "torch"
+                resolved_prefer_torch = model_args.layernorm_impl == "torch"
             else:
-                prefer_torch = model_args.use_torch_layernorm
+                resolved_prefer_torch = model_args.use_torch_layernorm
+        resolved_elementwise_affine = (
+            model_args.qk_norm_elementwise_affine if elementwise_affine is None else elementwise_affine
+        )
+        resolved_bias = (
+            (model_args.qk_norm_bias if resolved_prefer_torch else False) if bias is None else bias
+        )
         return build_norm_module(
             self.head_dim,
             eps=model_args.norm_eps,
-            prefer_torch=prefer_torch,
-            elementwise_affine=model_args.qk_norm_elementwise_affine,
-            bias=model_args.qk_norm_bias,
+            prefer_torch=resolved_prefer_torch,
+            elementwise_affine=resolved_elementwise_affine,
+            bias=resolved_bias,
             torch_norm_cls=LPLayerNorm,
-            add_unit_offset=model_args.qk_norm_elementwise_affine,
+            add_unit_offset=resolved_elementwise_affine,
             force_bf16=model_args.force_rmsnorm_bf16,
         )
 

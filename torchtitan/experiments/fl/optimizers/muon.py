@@ -120,8 +120,9 @@ class Muon(TorchMuon):
 
     def _find_param_group(self, param: Tensor) -> dict[str, Any]:
         for group in self.param_groups:
-            if param in group["params"]:
-                return group
+            for group_param in group["params"]:
+                if group_param is param:
+                    return group
         return self.param_groups[0]
 
     def _prepare_step_tensor(

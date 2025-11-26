@@ -200,13 +200,6 @@ def test_attention_output_norm_flag_creates_layer() -> None:
     assert not isinstance(attn.o_norm, nn.Identity)
 
 
-def test_mlp_mid_norm_flag_creates_layer() -> None:
-    base_args = replace(llama3_mup_configs["16M"], use_mlp_mid_norm=True)
-    ffn = FeedForward(base_args)
-    assert not isinstance(ffn.mid_norm, nn.Identity)
-
-
-
 def _bucketize_and_get(model: Transformer, param_name: str) -> str:
     params = model._iter_trainable_params()
     model._bucketize_parameters(params)
@@ -224,13 +217,6 @@ def test_attention_output_norm_bucketed_with_hidden_ln() -> None:
     args = replace(llama3_mup_configs["16M"], use_attention_output_norm=True)
     model = Transformer(args)
     bucket = _bucketize_and_get(model, "layers.0.attention.o_norm.weight")
-    assert bucket == "hidden_ln"
-
-
-def test_mlp_mid_norm_bucketed_with_hidden_ln() -> None:
-    args = replace(llama3_mup_configs["16M"], use_mlp_mid_norm=True)
-    model = Transformer(args)
-    bucket = _bucketize_and_get(model, "layers.0.feed_forward.mid_norm.weight")
     assert bucket == "hidden_ln"
 
 

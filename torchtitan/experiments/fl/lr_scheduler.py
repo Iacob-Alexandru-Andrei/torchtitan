@@ -142,4 +142,6 @@ def build_fl_lr_schedulers(
             factor *= switch_scale
         return factor
 
-    return LRSchedulersContainer(optimizers, lr_lambda)
+    # Provide one lambda per optimizer so each can be scheduled independently if needed.
+    lr_lambdas = [lr_lambda for _ in optimizers]
+    return LRSchedulersContainer(optimizers, lr_lambdas)

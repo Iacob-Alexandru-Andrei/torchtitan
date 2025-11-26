@@ -26,6 +26,26 @@ _MIN_BETAS_LENGTH = 2
 
 
 @dataclass
+class CompositeOptimizerSpec:
+    """Specification for routing a parameter subset to a specific optimizer."""
+
+    name: str
+    """Optimizer name for this shard (e.g., 'AdamW', 'Muon')."""
+
+    labels: tuple[str, ...] | list[str] | None = None
+    """Optional MuP bucket labels to claim (e.g., ('emb', 'decay_lr'))."""
+
+    patterns: tuple[str, ...] | list[str] | None = None
+    """Optional fnmatch globs against parameter names when MuP labels are unavailable."""
+
+    config_overrides: dict[str, Any] | None = None
+    """Optional overrides applied to the base optimizer config for this shard."""
+
+    default: bool = False
+    """When True, picks up any parameters not claimed by other specs."""
+
+
+@dataclass
 class DesLocStreamingConfig:
     """Configuration options for the streaming DES-LOC variant."""
 
@@ -207,6 +227,9 @@ class MosaicOptimizerConfig(BaseOptimizer):
     * ``"mosaic"`` uses the FL-specific builder with Mosaic optimizers and DES-LOC support.
     * ``"default"`` delegates to the core TorchTitan optimizer builder.
     """
+
+    composite: Suppress[list[CompositeOptimizerSpec] | None] = None
+    """Optional list of optimizer shards routed by labels/patterns."""
 
     norm: str = "Auto"
     """Norm backend to use with Scion optimizers."""

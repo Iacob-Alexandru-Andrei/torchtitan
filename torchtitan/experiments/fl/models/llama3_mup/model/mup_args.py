@@ -55,6 +55,8 @@ class TransformerModelArgs(BaseTransformerModelArgs):
     use_simple_silu_ffn: bool = False
     head_dim: int | None = None
     qk_norm: bool = True
+    use_attention_value_norm: bool = False
+    use_attention_output_norm: bool = False
     torch_layernorm_elementwise_affine: bool = True
     qk_norm_elementwise_affine: bool = True
     torch_layernorm_bias: bool = False

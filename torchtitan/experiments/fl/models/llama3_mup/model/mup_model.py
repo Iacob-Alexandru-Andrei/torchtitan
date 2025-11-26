@@ -20,7 +20,9 @@ from torch.nn.parameter import Parameter
 # Import reusable components from the base llama3 model
 from torchtitan.experiments.qwen3.model.model import (
     Attention as QwenAttention,
+    apply_rotary_emb,
     precompute_rope_cache,
+    repeat_kv,
 )
 from torchtitan.experiments.fl.models.llama3_mup.model.rms_norm import build_norm_module
 from torchtitan.models.llama3.model.model import (
@@ -155,13 +157,30 @@ class Attention(QwenAttention):
     def __init__(self, model_args: TransformerModelArgsMuP) -> None:
         super().__init__(model_args)
         self.mup_config = model_args.mup_config_obj
+        self.v_norm: nn.Module | None = None
+        self.o_norm: nn.Module | None = None
+        prefer_torch_qk = _prefer_torch_qk_layernorm(model_args)
         if model_args.qk_norm and self.q_norm is not None and self.k_norm is not None:
-            self.q_norm = self._build_head_norm(model_args)
-            self.k_norm = self._build_head_norm(model_args)
+            self.q_norm = self._build_head_norm(model_args, prefer_torch=prefer_torch_qk)
+            self.k_norm = self._build_head_norm(model_args, prefer_torch=prefer_torch_qk)
             logger.info(
                 "MuP QK head normalization enabled: head_dim=%d, norm_type=%s",
                 self.head_dim,
                 self.q_norm.__class__.__name__,
+            )
+        if model_args.use_attention_value_norm:
+            self.v_norm = self._build_head_norm(model_args, prefer_torch=prefer_torch_qk)
+            logger.info(
+                "MuP value head normalization enabled: head_dim=%d, norm_type=%s",
+                self.head_dim,
+                type(self.v_norm).__name__,
+            )
+        if model_args.use_attention_output_norm:
+            self.o_norm = self._build_output_norm(model_args)
+            logger.info(
+                "MuP attention output normalization enabled: dim=%d, norm_type=%s",
+                model_args.dim,
+                type(self.o_norm).__name__,
             )
         if (
             self.mup_config.mup_enabled
@@ -200,22 +219,84 @@ class Attention(QwenAttention):
         )
         for linear in (self.wq, self.wk, self.wv, self.wo):
             nn.init.normal_(linear.weight, mean=0.0, std=init_std)
-        for norm in (self.q_norm, self.k_norm):
+        for norm in (self.q_norm, self.k_norm, self.v_norm, self.o_norm):
             if norm is not None:
                 norm.reset_parameters()
 
-    def _build_head_norm(self, model_args: TransformerModelArgsMuP) -> nn.Module:
-        prefer_torch = _prefer_torch_qk_layernorm(model_args)
+    def _build_head_norm(
+        self,
+        model_args: TransformerModelArgsMuP,
+        *,
+        prefer_torch: bool | None = None,
+        elementwise_affine: bool | None = None,
+        bias: bool | None = None,
+    ) -> nn.Module:
+        resolved_prefer_torch = _prefer_torch_qk_layernorm(model_args) if prefer_torch is None else prefer_torch
+        resolved_elementwise_affine = (
+            model_args.qk_norm_elementwise_affine if elementwise_affine is None else elementwise_affine
+        )
+        resolved_bias = (
+            (model_args.qk_norm_bias if resolved_prefer_torch else False) if bias is None else bias
+        )
         return build_norm_module(
             self.head_dim,
             eps=model_args.norm_eps,
-            prefer_torch=prefer_torch,
-            elementwise_affine=model_args.qk_norm_elementwise_affine,
-            bias=model_args.qk_norm_bias if prefer_torch else False,
+            prefer_torch=resolved_prefer_torch,
+            elementwise_affine=resolved_elementwise_affine,
+            bias=resolved_bias,
             torch_norm_cls=LPLayerNorm,
-            add_unit_offset=model_args.qk_norm_elementwise_affine,
+            add_unit_offset=resolved_elementwise_affine,
             force_bf16=model_args.force_rmsnorm_bf16,
         )
+
+    def _build_output_norm(self, model_args: TransformerModelArgsMuP) -> nn.Module:
+        prefer_torch = _prefer_torch_layernorm(model_args)
+        return build_norm_module(
+            model_args.dim,
+            eps=model_args.norm_eps,
+            prefer_torch=prefer_torch,
+            elementwise_affine=model_args.torch_layernorm_elementwise_affine,
+            bias=model_args.torch_layernorm_bias if prefer_torch else False,
+            torch_norm_cls=LPLayerNorm,
+            add_unit_offset=model_args.torch_layernorm_elementwise_affine,
+            force_bf16=model_args.force_rmsnorm_bf16,
+        )
+
+    def forward(
+        self,
+        x: torch.Tensor,
+        rope_cache: torch.Tensor,
+    ) -> torch.Tensor:
+        """Forward pass with optional value/output normalization."""
+        bs, seqlen, _ = x.shape
+        xq, xk, xv = self.wq(x), self.wk(x), self.wv(x)
+
+        xq = xq.view(bs, seqlen, -1, self.head_dim)
+        xk = xk.view(bs, seqlen, -1, self.head_dim)
+        xv = xv.view(bs, seqlen, -1, self.head_dim)
+
+        if self.q_norm:
+            xq = self.q_norm(xq)
+        if self.k_norm:
+            xk = self.k_norm(xk)
+        if self.v_norm is not None:
+            xv = self.v_norm(xv)
+
+        xq, xk = apply_rotary_emb(xq, xk, rope_cache)
+
+        keys = repeat_kv(xk, self.n_rep)
+        values = repeat_kv(xv, self.n_rep)
+
+        xq = xq.transpose(1, 2)
+        xk = keys.transpose(1, 2)
+        xv = values.transpose(1, 2)
+
+        output = self.sdpa(xq, xk, xv, scale=self.scaling)
+        output = output.transpose(1, 2).contiguous()
+        output = output.view(bs, seqlen, -1)
+        if self.o_norm is not None:
+            output = self.o_norm(output)
+        return self.wo(output)
 
 
 class FeedForward(BaseFeedForward):
@@ -397,6 +478,7 @@ class Transformer(BaseTransformer):
         self.init_config = model_args.init_config_obj
         self._logged_bucket_assignments = False
         self._last_bucket_assignments: dict[str, str] = {}
+        prefer_torch_norm = _prefer_torch_layernorm(model_args)
         resolved_norm_impl = "torch" if prefer_torch_norm else "rms"
 
         logger.info(
@@ -431,8 +513,6 @@ class Transformer(BaseTransformer):
             resolved_norm_impl,
             model_args.use_simple_silu_ffn,
         )
-
-        prefer_torch_norm = _prefer_torch_layernorm(model_args)
 
         # Embedding normalization and scaling
         if model_args.use_embedding_norm:
@@ -524,6 +604,7 @@ class Transformer(BaseTransformer):
         """Group parameters according to MuP-specific update rules."""
         buckets: dict[str, list[Parameter]] = {
             "emb": [],
+            "unembed": [],
             "hidden_ln": [],
             "decay_lr": [],
             "hidden_bias": [],
@@ -533,14 +614,28 @@ class Transformer(BaseTransformer):
         bucket_assignments: dict[str, str] = {}
 
         embed_suffixes = ["tok_embeddings.weight"]
-        if not self.model_args.tie_word_embeddings:
+        unembed_suffixes: list[str] = []
+        if self.model_args.tie_word_embeddings:
             embed_suffixes.append("output.weight")
+        else:
+            unembed_suffixes.append("output.weight")
 
-        hidden_ln_suffixes = ["attention_norm.weight", "ffn_norm.weight"]
+        hidden_ln_suffixes: list[str] = []
+
+        def _extend_norm_suffixes(names: list[str]) -> None:
+            for base in names:
+                hidden_ln_suffixes.append(f"{base}.weight")
+                hidden_ln_suffixes.append(f"{base}.bias")
+
+        _extend_norm_suffixes(["attention_norm", "ffn_norm"])
         if self.model_args.use_peri_norm:
-            hidden_ln_suffixes.extend(["post_attn_norm.weight", "post_ffn_norm.weight"])
+            _extend_norm_suffixes(["post_attn_norm", "post_ffn_norm"])
+        if self.model_args.use_attention_value_norm:
+            _extend_norm_suffixes(["attention.v_norm"])
+        if self.model_args.use_attention_output_norm:
+            _extend_norm_suffixes(["attention.o_norm"])
 
-        no_decay_suffixes = ["embedding_norm.weight", "norm.weight"]
+        no_decay_suffixes = ["embedding_norm.weight", "norm.weight", "embedding_norm.bias", "norm.bias"]
         decay_weight_suffixes = [
             "wq.weight",
             "wk.weight",
@@ -555,6 +650,7 @@ class Transformer(BaseTransformer):
             bucket_key = self._resolve_bucket_name(
                 name,
                 embed_suffixes,
+                unembed_suffixes,
                 hidden_ln_suffixes,
                 no_decay_suffixes,
                 decay_weight_suffixes,
@@ -587,6 +683,7 @@ class Transformer(BaseTransformer):
         self,
         name: str,
         embed_suffixes: list[str],
+        unembed_suffixes: list[str],
         hidden_ln_suffixes: list[str],
         no_decay_suffixes: list[str],
         decay_weight_suffixes: list[str],
@@ -594,6 +691,8 @@ class Transformer(BaseTransformer):
         """Return the MuP bucket identifier for a parameter name."""
         if any(name.endswith(suffix) for suffix in embed_suffixes):
             return "emb"
+        if any(name.endswith(suffix) for suffix in unembed_suffixes):
+            return "unembed"
         if any(name.endswith(suffix) for suffix in hidden_ln_suffixes):
             return "hidden_ln"
         if name.endswith(".bias"):
@@ -668,6 +767,7 @@ class Transformer(BaseTransformer):
         """Construct optimizer parameter groups based on MuP buckets."""
         param_groups = [
             {"params": buckets["emb"], "weight_decay": weight_decay, "lr": base_lr},
+            {"params": buckets["unembed"], "weight_decay": weight_decay, "lr": base_lr},
             {
                 "params": buckets["hidden_ln"],
                 "weight_decay": 0.0,
@@ -686,7 +786,7 @@ class Transformer(BaseTransformer):
             {"params": buckets["no_decay"], "weight_decay": 0.0, "lr": base_lr},
         ]
 
-        group_labels = ["emb", "hidden_ln", "decay_lr", "hidden_bias", "no_decay"]
+        group_labels = ["emb", "unembed", "hidden_ln", "decay_lr", "hidden_bias", "no_decay"]
 
         filtered_groups: list[dict[str, Any]] = []
         filtered_labels: list[str] = []

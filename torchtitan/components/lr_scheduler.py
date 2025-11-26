@@ -48,12 +48,24 @@ class LRSchedulersContainer(Stateful):
 
     schedulers: list[LRScheduler]
 
-    def __init__(self, optimizers: OptimizersContainer, lr_lambda: Callable) -> None:
-        assert (
-            len(optimizers) > 0
-        ), "Must have at least one optimizer to create LRScheduler"
+    def __init__(
+        self,
+        optimizers: OptimizersContainer,
+        lr_lambda: Callable | list[Callable],
+    ) -> None:
+        assert len(optimizers) > 0, "Must have at least one optimizer to create LRScheduler"
 
-        self.schedulers = [LambdaLR(optimizer, lr_lambda) for optimizer in optimizers]
+        if isinstance(lr_lambda, list):
+            assert len(lr_lambda) == len(
+                optimizers
+            ), "lr_lambda list length must match optimizers"
+            lambdas = lr_lambda
+        else:
+            lambdas = [lr_lambda for _ in optimizers]
+
+        self.schedulers = [
+            LambdaLR(optimizer, opt_lambda) for optimizer, opt_lambda in zip(optimizers, lambdas, strict=True)
+        ]
 
     def __iter__(self) -> Iterator[LRScheduler]:
         return iter(self.schedulers)
