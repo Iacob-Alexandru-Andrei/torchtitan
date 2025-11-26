@@ -8,10 +8,10 @@ TRAIN_MODULE=${TRAIN_MODULE:-"torchtitan.experiments.fl.train"}
 RUN_PREFIX=${RUN_PREFIX:-"icml2026-galore"}
 LOG_RANK=${LOG_RANK:-0}
 
-PROJECTION_STEP=${PROJECTION_STEP:-2049}
+PROJECTION_STEP=${PROJECTION_STEP:-2048}
 PROJECTION_RANDOM_SEED_BASE=${PROJECTION_RANDOM_SEED_BASE:-1337}
 PROJECTION_RANDOM_STD=${PROJECTION_RANDOM_STD:-1.0}
-PROJECTION_MODES=${PROJECTION_MODES:-"svd_shared random_shared columns_shared"}
+PROJECTION_MODES=${PROJECTION_MODES:-"columns_shared random_shared"} # svd_shared to be fixed
 PROJECTION_RANKS=${PROJECTION_RANKS:-"8 16 32 64 128 256"}
 LR_VALUES=${LR_VALUES:-"0.0005 0.001 0.002 0.004"}
 
@@ -315,6 +315,74 @@ LIGHTHOUSE_BASE_PORT=${LIGHTHOUSE_BASE_PORT:-46100}
 PORT_STRIDE=${PORT_STRIDE:-4}
 LIGHTHOUSE_PROTOCOL=${LIGHTHOUSE_PROTOCOL:-"http"}
 POLL_INTERVAL_SEC=${POLL_INTERVAL_SEC:-5}
+GALORE_REGEX_PATTERN=${GALORE_REGEX_PATTERN:-"attention\\.w[qkv]|attention\\.wo|feed_forward\\.w[12]"}
+GENERATED_CONFIG_DIR=${GENERATED_CONFIG_DIR:-"${SCRIPT_DIR}/generated_configs"}
+
+generate_run_config() {
+  local run_uuid=$1
+  local target_rank=$2
+  local output_path="${GENERATED_CONFIG_DIR}/${run_uuid}.toml"
+
+  BASE_CONFIG_PATH="${CONFIG_FILE}" \
+  OUTPUT_CONFIG_PATH="${output_path}" \
+  SWEEP_REGEX_PATTERN="${GALORE_REGEX_PATTERN}" \
+  TARGET_RANK="${target_rank}" \
+  uv run --no-sync python3  <<'PY'
+import os
+import sys
+from copy import deepcopy
+from pathlib import Path
+
+try:  # Python >=3.11
+    import tomllib
+except ModuleNotFoundError:  # pragma: no cover - fallback for older versions
+    import tomli as tomllib  # type: ignore
+
+import tomli_w
+
+base = Path(os.environ["BASE_CONFIG_PATH"])
+output = Path(os.environ["OUTPUT_CONFIG_PATH"])
+pattern = os.environ["SWEEP_REGEX_PATTERN"]
+rank = int(os.environ["TARGET_RANK"])
+
+data = tomllib.loads(base.read_text(encoding="utf-8"))
+optimizer = data.setdefault("optimizer", {})
+regex_entries = optimizer.get("galore_param_regexes")
+
+normalized: list[dict] = []
+if isinstance(regex_entries, (list, tuple)):
+    for entry in regex_entries:
+        if isinstance(entry, dict):
+            normalized.append(deepcopy(entry))
+        else:
+            try:
+                normalized.append(dict(entry))
+            except Exception:
+                continue
+elif regex_entries is None:
+    normalized = []
+else:
+    normalized = [dict(regex_entries)] if isinstance(regex_entries, dict) else []
+
+updated = False
+for entry in normalized:
+    if entry.get("param_str_match") == pattern:
+        entry["rank"] = rank
+        updated = True
+        break
+
+if not updated:
+    normalized.append({"param_str_match": pattern, "rank": rank})
+
+optimizer["galore_param_regexes"] = normalized
+output.parent.mkdir(parents=True, exist_ok=True)
+output.write_text(tomli_w.dumps(data), encoding="utf-8")
+PY
+
+  echo "${output_path}"
+}
+
+
 
 if [[ ! -f "${CONFIG_FILE}" ]]; then
   echo "Base config not found at ${CONFIG_FILE}" >&2
@@ -456,6 +524,7 @@ submit_sbatch_job() {
   local projection_args=$9
   local dependency_job=${10}
   local chain_index=${11}
+  local run_config_path=${12}
 
   local job_name="${RUN_PREFIX}-${SWEEP_HASH}-idx${combo_index_label}"
   local sbatch_opts=(--parsable "-c" "${SBATCH_CPUS_PER_TASK}" "--gres=gpu:${SBATCH_GPUS_PER_TASK}" "--job-name=${job_name}")
@@ -500,7 +569,7 @@ uv run --no-sync torchrun \
   --role rank \
   --tee 3 \
   -m "${TRAIN_MODULE}" \
-  --job.config_file "${CONFIG_FILE}" \
+  --job.config_file "${run_config_path}" \
   --optimizer.builder mosaic \
   --optimizer.name GaLore \
   --optimizer.lr "${lr_value}" \
@@ -567,7 +636,6 @@ for idx in "${!RUN_PLAN_INDICES[@]}"; do
     if [[ -n "${PROJ_RANDOM_SEED}" ]]; then
       PROJECTION_ARGS+=(--fl_metrics.galore_projection.random_seed "${PROJ_RANDOM_SEED}")
     fi
-
     PROJECTION_ARGS_ESCAPED=$(serialize_args_array "${PROJECTION_ARGS[@]}")
 
     proj_label=$(sanitize_value "${proj_mode}")
@@ -575,6 +643,13 @@ for idx in "${!RUN_PLAN_INDICES[@]}"; do
     lr_label=$(sanitize_value "${lr_value}")
     run_uuid="${RUN_PREFIX}-${SWEEP_HASH}-${proj_label}-r${rank_label}-lr${lr_label}-${timestamp_global}-idx${combination_index_zero}"
     run_progress="run ${combination_index}/${TOTAL_RUNS}"
+
+    if [[ "${DRY_RUN}" != "true" ]]; then
+      mkdir -p "${GENERATED_CONFIG_DIR}"
+      run_config_path=$(generate_run_config "${run_uuid}" "${proj_rank}")
+    else
+      run_config_path="${CONFIG_FILE}"
+    fi
 
     if [[ "${DRY_RUN}" == "true" ]]; then
       if [[ "${USE_SBATCH}" == "true" ]]; then
@@ -600,7 +675,7 @@ for idx in "${!RUN_PLAN_INDICES[@]}"; do
       else
         echo "[SBATCH] Chain ${chain_index}: submitting ${run_uuid} with no dependency." >&2
       fi
-      job_id=$(submit_sbatch_job "${run_uuid}" "${run_progress}" "${rdzv_endpoint}" "${lighthouse_url}" "${combination_index_zero}" "${proj_mode}" "${proj_rank}" "${lr_value}" "${PROJECTION_ARGS_ESCAPED}" "${dependency_job}" "${chain_index}")
+      job_id=$(submit_sbatch_job "${run_uuid}" "${run_progress}" "${rdzv_endpoint}" "${lighthouse_url}" "${combination_index_zero}" "${proj_mode}" "${proj_rank}" "${lr_value}" "${PROJECTION_ARGS_ESCAPED}" "${dependency_job}" "${chain_index}" "${run_config_path}")
       if [[ -z "${job_id}" ]]; then
         echo "Aborting sweep after failed sbatch submission." >&2
         exit 1
@@ -634,7 +709,7 @@ uv run --no-sync torchrun \
   --role rank \
   --tee 3 \
   -m "${TRAIN_MODULE}" \
-  --job.config_file "${CONFIG_FILE}" \
+  --job.config_file "${run_config_path}" \
   --optimizer.builder mosaic \
   --optimizer.name GaLore \
   --optimizer.lr "${lr_value}" \

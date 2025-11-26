@@ -73,7 +73,7 @@ interval = 16
 
 [fl_metrics.galore_projection]
 enabled = true
-steps = [2049]
+steps = [2048]
 # Default target rank will be overridden by the sweep script.
 target_rank = 64
 state_keys = ["exp_avg", "exp_avg_sq"]
@@ -131,7 +131,8 @@ enable = true
 bucket = "checkpoints"
 prefix = ""  # Root of bucket
 download_on_start = true
-resume_from_run_step = "warmup-16M-bs64-s2048-20251124-164650/step-2048"
+resume_from_run_step = "warmup-16M-bs64-s2048-20251125-130519/step-2048"
+# resume_from_run_step = "warmup-16M-bs64-s2048-20251124-164650/step-2048"
 # run_uuid and remote_checkpoint_folder will be set via RUN_UUID environment variable
 
 [activation_checkpoint]
