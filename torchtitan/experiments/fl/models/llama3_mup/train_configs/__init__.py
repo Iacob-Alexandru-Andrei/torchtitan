@@ -293,6 +293,47 @@ llama3_mup_configs = {
             "output_mult": None,  # No special output scaling
         },
     ),
+     "125M_VAL": TransformerModelArgs(
+        dim=768,
+        n_layers=12,
+        n_heads=12,
+        vocab_size=50368,
+        rope_theta=10_000,
+        # FFN expansion ratio of 4x (4 * 768 = 3072)
+        ffn_dim_multiplier=None,
+        # MuP features
+        use_embedding_norm=True,
+        use_peri_norm=True,
+        tie_word_embeddings=True,
+        use_torch_layernorm=True,
+        use_simple_silu_ffn=False,
+        qk_norm=True,
+        qk_norm_bias=False,
+        torch_layernorm_bias=False,
+        torch_layernorm_elementwise_affine=True,
+        qk_norm_elementwise_affine=True,
+        use_attention_value_norm=True,
+        # Flex attention
+        use_flex_attn=True,
+        attn_mask_type="block_causal",
+        mup_config={
+            "mup_enabled": True,
+            "mup_disable_attention_scaling": True,
+            "mup_disable_hidden_lr_scaling": False,
+            "mup_width_multiplier": 3.0,
+            "mup_input_alpha": 1.0,
+            "mup_output_alpha": 1.0,
+            "completep_depth_alpha_enabled": True,
+            "completep_depth_multiplier": 3.0,
+            "completep_depth_alpha_exp": 1.0,
+            "completep_eps_scaling_enabled": False,
+        },
+        init_config={
+            "init_std": 0.02,
+            "emb_init_std": 0.02,  # Will default to init_std
+            "output_mult": None,  # No special output scaling
+        },
+    ),
     "360M": TransformerModelArgs(
         dim=1024,
         n_layers=24,
@@ -312,6 +353,47 @@ llama3_mup_configs = {
         torch_layernorm_bias=False,
         torch_layernorm_elementwise_affine=True,
         qk_norm_elementwise_affine=True,
+        # Flex attention
+        use_flex_attn=True,
+        attn_mask_type="block_causal",
+        mup_config={
+            "mup_enabled": True,
+            "mup_disable_attention_scaling": True,
+            "mup_disable_hidden_lr_scaling": False,
+            "mup_width_multiplier": 4.0,
+            "mup_input_alpha": 1.0,
+            "mup_output_alpha": 1.0,
+            "completep_depth_alpha_enabled": True,
+            "completep_depth_multiplier": 6.0,
+            "completep_depth_alpha_exp": 1.0,
+            "completep_eps_scaling_enabled": False,
+        },
+        init_config={
+            "init_std": 0.02,
+            "emb_init_std": 0.02,  # Will default to init_std
+            "output_mult": None,  # No special output scaling
+        },
+    ),
+    "360M_VAL": TransformerModelArgs(
+        dim=1024,
+        n_layers=24,
+        n_heads=16,
+        vocab_size=50368,
+        rope_theta=10_000,
+        # FFN expansion ratio of 4x (4 * 768 = 3072)
+        ffn_dim_multiplier=None,
+        # MuP features
+        use_embedding_norm=True,
+        use_peri_norm=True,
+        tie_word_embeddings=True,
+        use_torch_layernorm=True,
+        use_simple_silu_ffn=False,
+        qk_norm=True,
+        qk_norm_bias=False,
+        torch_layernorm_bias=False,
+        torch_layernorm_elementwise_affine=True,
+        qk_norm_elementwise_affine=True,
+        use_attention_value_norm=True,
         # Flex attention
         use_flex_attn=True,
         attn_mask_type="block_causal",
@@ -373,6 +455,47 @@ llama3_mup_configs = {
             "output_mult": None,  # No special output scaling
         },
     ),
+    "720M_VAL": TransformerModelArgs(
+        dim=2048,
+        n_layers=12,
+        n_heads=16,
+        vocab_size=50368,
+        rope_theta=10_000,
+        # FFN expansion ratio of 4x (4 * 768 = 3072)
+        ffn_dim_multiplier=None,
+        # MuP features
+        use_embedding_norm=True,
+        use_peri_norm=True,
+        tie_word_embeddings=True,
+        use_torch_layernorm=True,
+        use_simple_silu_ffn=False,
+        qk_norm=True,
+        qk_norm_bias=False,
+        torch_layernorm_bias=False,
+        torch_layernorm_elementwise_affine=True,
+        qk_norm_elementwise_affine=True,
+        use_attention_value_norm=True,
+        # Flex attention
+        use_flex_attn=True,
+        attn_mask_type="block_causal",
+        mup_config={
+            "mup_enabled": True,
+            "mup_disable_attention_scaling": True,
+            "mup_disable_hidden_lr_scaling": False,
+            "mup_width_multiplier": 8.0,
+            "mup_input_alpha": 1.0,
+            "mup_output_alpha": 1.0,
+            "completep_depth_alpha_enabled": True,
+            "completep_depth_multiplier": 3.0,
+            "completep_depth_alpha_exp": 1.0,
+            "completep_eps_scaling_enabled": False,
+        },
+        init_config={
+            "init_std": 0.02,
+            "emb_init_std": 0.02,  # Will default to init_std
+            "output_mult": None,  # No special output scaling
+        },
+    ),
     "1B": TransformerModelArgs(
         dim=2048,
         n_layers=24,
@@ -392,6 +515,47 @@ llama3_mup_configs = {
         torch_layernorm_bias=False,
         torch_layernorm_elementwise_affine=True,
         qk_norm_elementwise_affine=True,
+        # Flex attention
+        use_flex_attn=True,
+        attn_mask_type="block_causal",
+        mup_config={
+            "mup_enabled": True,
+            "mup_disable_attention_scaling": True,
+            "mup_disable_hidden_lr_scaling": False,
+            "mup_width_multiplier": 8.0,
+            "mup_input_alpha": 1.0,
+            "mup_output_alpha": 1.0,
+            "completep_depth_alpha_enabled": True,
+            "completep_depth_multiplier": 6.0,
+            "completep_depth_alpha_exp": 1.0,
+            "completep_eps_scaling_enabled": False,
+        },
+        init_config={
+            "init_std": 0.02,
+            "emb_init_std": 0.02,  # Will default to init_std
+            "output_mult": None,  # No special output scaling
+        },
+    ),
+    "1B_VAL": TransformerModelArgs(
+        dim=2048,
+        n_layers=24,
+        n_heads=16,
+        vocab_size=50368,
+        rope_theta=10_000,
+        # FFN expansion ratio of 4x (4 * 768 = 3072)
+        ffn_dim_multiplier=None,
+        # MuP features
+        use_embedding_norm=True,
+        use_peri_norm=True,
+        tie_word_embeddings=True,
+        use_torch_layernorm=True,
+        use_simple_silu_ffn=False,
+        qk_norm=True,
+        qk_norm_bias=False,
+        torch_layernorm_bias=False,
+        torch_layernorm_elementwise_affine=True,
+        qk_norm_elementwise_affine=True,
+        use_attention_value_norm=True,
         # Flex attention
         use_flex_attn=True,
         attn_mask_type="block_causal",

@@ -634,6 +634,8 @@ class Transformer(BaseTransformer):
             _extend_norm_suffixes(["attention.v_norm"])
         if self.model_args.use_attention_output_norm:
             _extend_norm_suffixes(["attention.o_norm"])
+        if self.model_args.qk_norm:
+            _extend_norm_suffixes(["attention.q_norm", "attention.k_norm"])
 
         no_decay_suffixes = ["embedding_norm.weight", "norm.weight", "embedding_norm.bias", "norm.bias"]
         decay_weight_suffixes = [

@@ -155,6 +155,23 @@ class TestMuPLlamaModel(unittest.TestCase):
             optimizer.defaults["eps"], expected_eps, rel_tol=0.0, abs_tol=1e-12
         )
 
+    def test_qk_layernorm_bucketed_with_hidden_ln(self) -> None:
+        """Q/K layernorm weights should map to the hidden_ln MuP bucket."""
+        overrides = self.model.build_mup_optimizer_overrides(
+            lr=0.01,
+            eps=DEFAULT_EPS,
+            weight_decay=0.1,
+        )
+        assert overrides is not None
+        bucket_assignments = getattr(self.model, "_last_bucket_assignments", {})
+        qk_params = {
+            name: bucket
+            for name, bucket in bucket_assignments.items()
+            if "q_norm" in name or "k_norm" in name
+        }
+        assert qk_params, "Expected q_norm/k_norm parameters to be present."
+        assert all(bucket == "hidden_ln" for bucket in qk_params.values())
+
     def test_mosaic_builder_desloc_requires_ft(self) -> None:
         """DES-LOC validation should still trigger when overrides are present."""
         config = MosaicOptimizerConfig(
