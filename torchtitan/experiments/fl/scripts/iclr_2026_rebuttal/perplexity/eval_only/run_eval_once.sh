@@ -12,8 +12,8 @@ cd "${REPO_ROOT}"
 
 CONFIG_FILE="${SCRIPT_DIR}/base_eval.toml"
 TRAIN_MODULE="torchtitan.experiments.fl.train"
-NGPU=1
-RDZV_ENDPOINT="localhost:0"
+NGPU=${NGPU:-1}
+RDZV_ENDPOINT=${RDZV_ENDPOINT:-"localhost:0"}
 
 MODEL_SIZE=""
 TARGET_RUN_UUID=""
@@ -37,8 +37,10 @@ Optional arguments:
 
 Environment overrides:
   HF_ASSETS_PATH      When set, overrides model.hf_assets_path.
-  WANDB_MODE          Defaults to "offline" to prevent accidental uploads.
+  WANDB_MODE          Defaults to "online" (override to "offline" if desired).
   S3_ENDPOINT_URL     Passed through when defined by the caller.
+  NGPU                Override number of processes per node (default: 1).
+  RDZV_ENDPOINT       Override rendezvous endpoint (default: localhost:0).
   EVAL_SWEEP_INDEX    Optional integer suffix used for deterministic eval UUIDs.
 EOF
 }
@@ -86,6 +88,13 @@ fi
 if [[ "${VAL_BATCH_SIZE}" -lt 1 || "${VAL_STEPS}" -lt 1 ]]; then
   echo "Validation batch size and steps must be positive integers." >&2
   exit 1
+fi
+if ! [[ "${NGPU}" =~ ^[0-9]+$ ]] || (( NGPU < 1 )); then
+  echo "NGPU must be a positive integer (got ${NGPU})." >&2
+  exit 1
+fi
+if [[ -z "${RDZV_ENDPOINT}" ]]; then
+  RDZV_ENDPOINT="localhost:0"
 fi
 
 export WANDB_PROJECT="${WANDB_PROJECT:-torchtitan_validation}"

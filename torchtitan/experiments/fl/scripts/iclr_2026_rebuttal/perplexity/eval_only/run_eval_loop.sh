@@ -97,6 +97,20 @@ SBATCH_COMMENT=${SBATCH_COMMENT:-}
 SBATCH_LOG_DIR=${SBATCH_LOG_DIR:-"${SCRIPT_DIR}/logs"}
 SBATCH_ADDITIONAL_ARGS=${SBATCH_ADDITIONAL_ARGS:-}
 SBATCH_NODE=${SBATCH_NODE:-"ruapehu"}
+GPU_IDS=${GPU_IDS:-""}
+RDZV_HOST=${RDZV_HOST:-"127.0.0.1"}
+RDZV_BASE_PORT=${RDZV_BASE_PORT:-47000}
+PORT_STRIDE=${PORT_STRIDE:-4}
+POLL_INTERVAL_SEC=${POLL_INTERVAL_SEC:-5}
+LOG_DIR=${LOG_DIR:-"${SCRIPT_DIR}/logs"}
+GPU_IDS_AUTO_SOURCE=""
+GPU_IDS_DEDUPED_COUNT=0
+TOTAL_GPUS=0
+declare -a GPU_ARRAY=()
+declare -a GPU_PIDS=()
+declare -a GPU_LABELS=()
+declare -a ALL_PIDS=()
+RUN_COUNTER=0
 
 # ============================================================================
 
@@ -109,9 +123,13 @@ Environment variables:
   STEP_LIST             Space-separated steps (defaults to 2048..40960 every 2048).
   VAL_BATCH_SIZE        Validation local batch size (default: 4).
   VAL_STEPS             Validation steps (default: 32).
+  GPU_IDS               Comma/space list or 'auto' to use all GPUs (local mode).
+  RDZV_BASE_PORT        Base rendezvous port for local runs (default: 47000).
+  PORT_STRIDE           Port stride between local launches (default: 4).
+  LOG_DIR               Local log directory (default: ./logs).
   USE_SBATCH            true/false (default: true).
   DRY_RUN               true/false (default: false).
-  SBATCH_MAX_CHAINS     Number of sbatch dependency chains (default: 2).
+  SBATCH_MAX_CHAINS     Number of sbatch dependency chains (default: 1).
   SBATCH_*              Mirrors fields from other sweep scripts (CPUs, GPUs, etc.).
 
 Example:
@@ -165,6 +183,96 @@ fi
 serialize_csv() {
   local IFS=','
   printf "%s" "$*"
+}
+
+detect_available_gpu_ids() {
+  if [[ -n "${CUDA_VISIBLE_DEVICES:-}" ]]; then
+    local normalized=${CUDA_VISIBLE_DEVICES//,/ }
+    local -a ids=()
+    read -r -a ids <<< "${normalized}"
+    if (( ${#ids[@]} > 0 )); then
+      GPU_IDS_AUTO_SOURCE="CUDA_VISIBLE_DEVICES"
+      printf "%s\n" "${ids[*]}"
+      return 0
+    fi
+  fi
+
+  if command -v nvidia-smi >/dev/null 2>&1; then
+    local -a ids=()
+    while IFS= read -r line; do
+      line=${line//$'\r'/}
+      line=${line//[[:space:]]/}
+      [[ -z "${line}" ]] && continue
+      ids+=("${line}")
+    done < <(nvidia-smi --query-gpu=index --format=csv,noheader 2>/dev/null)
+    if (( ${#ids[@]} > 0 )); then
+      GPU_IDS_AUTO_SOURCE="nvidia-smi"
+      printf "%s\n" "${ids[*]}"
+      return 0
+    fi
+  fi
+
+  GPU_IDS_AUTO_SOURCE=""
+  return 1
+}
+
+set_gpu_array_from_string() {
+  local raw="${1:-}"
+  local cleaned=${raw//,/ }
+  read -r -a parsed <<< "${cleaned}"
+  local -A seen=()
+  local -a unique=()
+  GPU_IDS_DEDUPED_COUNT=0
+
+  for token in "${parsed[@]}"; do
+    token=${token//[[:space:]]/}
+    [[ -z "${token}" ]] && continue
+    if [[ ! "${token}" =~ ^[0-9]+$ ]]; then
+      echo "GPU id '${token}' must be a non-negative integer. Provide GPU_IDS as digits or set GPU_IDS=auto." >&2
+      return 1
+    fi
+    if [[ -n "${seen[$token]-}" ]]; then
+      ((GPU_IDS_DEDUPED_COUNT++))
+      continue
+    fi
+    unique+=("${token}")
+    seen["$token"]=1
+  done
+
+  GPU_ARRAY=("${unique[@]}")
+  return 0
+}
+
+cleanup() {
+  if [[ "${USE_SBATCH}" == "true" ]]; then
+    return
+  fi
+  for pid in "${ALL_PIDS[@]}"; do
+    if [[ -n "${pid}" ]] && kill -0 "${pid}" 2>/dev/null; then
+      kill "${pid}" 2>/dev/null || true
+    fi
+  done
+}
+trap cleanup INT TERM
+
+wait_for_gpu() {
+  while true; do
+    for idx in "${!GPU_ARRAY[@]}"; do
+      pid=${GPU_PIDS[idx]:-}
+      if [[ -z "${pid}" ]]; then
+        echo "${idx}"
+        return
+      fi
+      if ! kill -0 "${pid}" 2>/dev/null; then
+        wait "${pid}" 2>/dev/null || true
+        GPU_PIDS[idx]=''
+        GPU_LABELS[idx]=''
+        echo "${idx}"
+        return
+      fi
+    done
+    sleep "${POLL_INTERVAL_SEC}"
+  done
 }
 
 wandb_run_exists() {
@@ -278,6 +386,9 @@ TOTAL_STEPS=${#STEP_ARRAY[@]}
 if [[ -n "${SBATCH_LOG_DIR}" ]]; then
   mkdir -p "${SBATCH_LOG_DIR}"
 fi
+if [[ -n "${LOG_DIR}" ]]; then
+  mkdir -p "${LOG_DIR}"
+fi
 read -r -a SBATCH_EXTRA_ARRAY <<< "${SBATCH_ADDITIONAL_ARGS}"
 if [[ -z "${SBATCH_ADDITIONAL_ARGS}" ]]; then
   SBATCH_EXTRA_ARRAY=()
@@ -287,6 +398,40 @@ declare -a SBATCH_JOB_IDS=()
 if [[ "${USE_SBATCH}" == "true" ]]; then
   for ((chain_idx = 0; chain_idx < SBATCH_MAX_CHAINS; ++chain_idx)); do
     SBATCH_CHAIN_LAST_IDS[chain_idx]=''
+  done
+fi
+
+if [[ "${USE_SBATCH}" != "true" ]]; then
+  GPU_IDS_EFFECTIVE="${GPU_IDS:-}"
+  if [[ -z "${GPU_IDS_EFFECTIVE}" || "${GPU_IDS_EFFECTIVE,,}" == "auto" ]]; then
+    if ! GPU_IDS_EFFECTIVE=$(detect_available_gpu_ids); then
+      echo "GPU_IDS not provided (or set to 'auto') and automatic GPU detection failed. Set GPU_IDS explicitly." >&2
+      exit 1
+    fi
+  else
+    GPU_IDS_AUTO_SOURCE=""
+  fi
+
+  if ! set_gpu_array_from_string "${GPU_IDS_EFFECTIVE}"; then
+    exit 1
+  fi
+
+  TOTAL_GPUS=${#GPU_ARRAY[@]}
+  if [[ "${DRY_RUN}" != "true" && ${TOTAL_GPUS} -eq 0 ]]; then
+    echo "GPU_IDS resolved to zero GPUs; provide GPU ids or set GPU_IDS=auto." >&2
+    exit 1
+  fi
+
+  if [[ -n "${GPU_IDS_AUTO_SOURCE}" ]]; then
+    echo "Auto-detected ${TOTAL_GPUS} GPU id(s) via ${GPU_IDS_AUTO_SOURCE}: ${GPU_ARRAY[*]}." >&2
+  fi
+  if (( GPU_IDS_DEDUPED_COUNT > 0 )); then
+    echo "Removed ${GPU_IDS_DEDUPED_COUNT} duplicate GPU id(s); using GPU set: ${GPU_ARRAY[*]}." >&2
+  fi
+
+  for idx in "${!GPU_ARRAY[@]}"; do
+    GPU_PIDS[idx]=''
+    GPU_LABELS[idx]=''
   done
 fi
 
@@ -390,7 +535,7 @@ total_jobs=${#RUN_MODELS[@]}
 if [[ "${USE_SBATCH}" == "true" ]]; then
   dispatch_mode="sbatch (per-run, ${SBATCH_MAX_CHAINS} chain(s))"
 else
-  dispatch_mode="local"
+  dispatch_mode="local (${TOTAL_GPUS} GPU slot(s))"
 fi
 echo "Dispatching ${total_jobs} eval run(s) (${TOTAL_STEPS} checkpoint(s) per run) via ${dispatch_mode}."
 
@@ -442,7 +587,23 @@ for spec in "${RUN_MODELS[@]}"; do
     SBATCH_JOB_IDS+=("${job_id}")
     ((++sbatch_dispatched))
   else
-    run_steps_locally "${model_size}" "${run_uuid}" "${job_counter}" "${total_jobs}" "${steps_csv}" "${indices_csv}"
+    gpu_slot=$(wait_for_gpu)
+    gpu_id=${GPU_ARRAY[gpu_slot]}
+    launch_index=$((RUN_COUNTER + 1))
+    rdzv_port=$((RDZV_BASE_PORT + launch_index * PORT_STRIDE))
+    rdzv_endpoint="${RDZV_HOST}:${rdzv_port}"
+    RUN_COUNTER=${launch_index}
+    log_file="${LOG_DIR}/${run_uuid}.log"
+    echo "[EvalLoop][GPU ${gpu_id}] Queue ${model_size} | ${run_uuid} (${pending_count} step(s)) on slot ${gpu_slot} | rdzv ${rdzv_endpoint}" >&2
+    (
+      export CUDA_VISIBLE_DEVICES="${gpu_id}"
+      export RDZV_ENDPOINT="${rdzv_endpoint}"
+      run_steps_locally "${model_size}" "${run_uuid}" "${job_counter}" "${total_jobs}" "${steps_csv}" "${indices_csv}"
+    ) |& tee "${log_file}" &
+    pid=$!
+    GPU_PIDS[gpu_slot]=$pid
+    GPU_LABELS[gpu_slot]="${model_size}-${run_uuid}"
+    ALL_PIDS+=("${pid}")
   fi
 done
 
@@ -461,5 +622,9 @@ elif [[ "${USE_SBATCH}" == "true" ]]; then
     echo "  - Chain ${chain_idx}: ${status_msg}" >&2
   done
 else
+  echo "[EvalLoop] Waiting for ${#ALL_PIDS[@]} local job(s) across ${TOTAL_GPUS} GPU(s)." >&2
+  if [[ ${#ALL_PIDS[@]} -gt 0 ]]; then
+    wait "${ALL_PIDS[@]}" 2>/dev/null || true
+  fi
   echo "[EvalLoop] Completed ${job_counter} run(s) locally." >&2
 fi
