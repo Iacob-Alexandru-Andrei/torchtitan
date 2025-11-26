@@ -16,6 +16,7 @@ RUN_INDEX_OFFSET=${RUN_INDEX_OFFSET:-0}
 RUN_INDEX_RANGE=${RUN_INDEX_RANGE:-}
 USE_SBATCH=${USE_SBATCH:-false}
 DRY_RUN=${DRY_RUN:-false}
+REVERSE_RUNS=${REVERSE_RUNS:-false}
 SBATCH_CPUS_PER_TASK=${SBATCH_CPUS_PER_TASK:-8}
 SBATCH_GPUS_PER_TASK=${SBATCH_GPUS_PER_TASK:-1}
 SBATCH_MAX_CHAINS=${SBATCH_MAX_CHAINS:-2}
@@ -38,6 +39,7 @@ Options:
   --range START-END        Run only the 0-indexed inclusive range of sweep jobs.
   --run-index INDEX        Run only the 1-indexed job at INDEX.
   --run-index-offset N     Skip the first N jobs before applying other filters.
+  --reverse                Launch selected runs in reverse order (tail-first).
   --sbatch                 Submit runs via sbatch instead of launching locally.
   --no-sbatch              Force local execution (default).
   --dry-run                Print matching runs without launching anything.
@@ -46,6 +48,7 @@ Options:
 
 Environment knobs:
   RUN_INDEX, RUN_INDEX_OFFSET, RUN_INDEX_RANGE, USE_SBATCH, DRY_RUN
+  REVERSE_RUNS (true/false to flip launch order)
   SBATCH_* variables for Slurm submission
   GPU_IDS (space separated, used for local launches)
   BASE_LR, WARMUP_SWITCH_STEP, SWITCH_APPLY_STEP, CONFIG_FILE
@@ -84,6 +87,10 @@ while [[ $# -gt 0 ]]; do
       DRY_RUN=true
       shift
       ;;
+    --reverse)
+      REVERSE_RUNS=true
+      shift
+      ;;
     -h|--help)
       usage
       exit 0
@@ -113,6 +120,7 @@ normalize_bool() {
 
 USE_SBATCH=$(normalize_bool "${USE_SBATCH}")
 DRY_RUN=$(normalize_bool "${DRY_RUN}")
+REVERSE_RUNS=$(normalize_bool "${REVERSE_RUNS}")
 
 if ! [[ "${SBATCH_MAX_CHAINS}" =~ ^[0-9]+$ ]] || (( SBATCH_MAX_CHAINS < 1 )); then
   echo "SBATCH_MAX_CHAINS must be a positive integer (got ${SBATCH_MAX_CHAINS})." >&2
@@ -287,6 +295,20 @@ for new_v in "${NEW_V_ARRAY[@]}"; do
   done
 done
 
+if [[ "${REVERSE_RUNS}" == "true" ]]; then
+  declare -a REVERSED_INDICES=()
+  declare -a REVERSED_NEW_V=()
+  declare -a REVERSED_SWITCHES=()
+  for ((rev_idx=${#RUN_PLAN_INDICES[@]}-1; rev_idx>=0; --rev_idx)); do
+    REVERSED_INDICES+=("${RUN_PLAN_INDICES[rev_idx]}")
+    REVERSED_NEW_V+=("${RUN_PLAN_NEW_V[rev_idx]}")
+    REVERSED_SWITCHES+=("${RUN_PLAN_SWITCHES[rev_idx]}")
+  done
+  RUN_PLAN_INDICES=("${REVERSED_INDICES[@]}")
+  RUN_PLAN_NEW_V=("${REVERSED_NEW_V[@]}")
+  RUN_PLAN_SWITCHES=("${REVERSED_SWITCHES[@]}")
+fi
+
 SWEEP_CONFIG_STRING="new_v=${QHADAM_NEW_V_VALUES}|switch=${SWITCH_SCALE_VALUES}|lr=${BASE_LR}|switch_step=${WARMUP_SWITCH_STEP}|config=${CONFIG_FILE}"
 if command -v sha1sum >/dev/null 2>&1; then
   SWEEP_HASH=$(printf "%s" "${SWEEP_CONFIG_STRING}" | sha1sum | awk '{print $1}')
@@ -414,7 +436,13 @@ declare -a SBATCH_CHAIN_LAST_IDS=()
 RUN_COUNTER=0
 
 if [[ "${USE_SBATCH}" == "true" && "${DRY_RUN}" != "true" ]]; then
-  command -v sbatch >/dev/null 2>&1 || { echo "USE_SBATCH=true but sbatch not found." >&2; exit 1; }
+  if ! command -v sbatch >/dev/null 2>&1; then
+    echo "sbatch not found; falling back to local multi-GPU execution." >&2
+    USE_SBATCH="false"
+  fi
+fi
+
+if [[ "${USE_SBATCH}" == "true" && "${DRY_RUN}" != "true" ]]; then
   [[ -z "${SBATCH_LOG_DIR}" ]] || mkdir -p "${SBATCH_LOG_DIR}"
   for ((chain_idx = 0; chain_idx < SBATCH_MAX_CHAINS; ++chain_idx)); do
     SBATCH_CHAIN_LAST_IDS[chain_idx]=''

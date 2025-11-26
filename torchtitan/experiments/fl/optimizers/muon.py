@@ -63,7 +63,7 @@ class Muon(TorchMuon):
         ns_coefficients: tuple[float, float, float] = (3.4445, -4.7750, 2.0315),
         eps: float = 1e-7,
         ns_steps: int = 5,
-        adjust_lr_fn: Optional[str] = None,
+        adjust_lr_fn: Optional[str] = "match_rms_adamw",
     ) -> None:
         """Initialize the Muon optimizer wrapper.
 

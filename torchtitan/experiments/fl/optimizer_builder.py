@@ -534,6 +534,7 @@ def _normalize_mosaic_optimizer_config(
         extra_kwargs["vs"] = config.vs
         extra_kwargs["nesterov"] = config.muon_nesterov
         extra_kwargs["ns_coefficients"] = config.resolved_zeropower_coefficients()
+        extra_kwargs["adjust_lr_fn"] = config.adjust_lr_fn
     if name in {"DecoupledAdamW", "AggMoAdopt", "AggMoAdamW"}:
         extra_kwargs["decouple"] = config.decouple
     if name in {"Scion", "ScionLight", "ScionQH", "ScionAggMo"}:
@@ -569,6 +570,7 @@ def _normalize_mosaic_optimizer_config(
                 "momentum": config.beta1,
                 "nesterov": config.muon_nesterov,
                 "ns_coefficients": config.resolved_zeropower_coefficients(),
+                "adjust_lr_fn": config.adjust_lr_fn,
             }
         )
 
@@ -764,6 +766,9 @@ def _build_composite_optimizers(
     non_default_specs = [spec for spec in specs if not spec.default]
 
     mup_ctx = _build_mup_context(model, config.eps)
+    mup_eps_scale: float | None = None
+    if mup_ctx and mup_ctx.adjusted_eps is not None and config.eps != 0.0:
+        mup_eps_scale = mup_ctx.adjusted_eps / config.eps
     assigned: set[torch.nn.Parameter] = set()
     assignments: list[tuple[CompositeOptimizerSpec, list[torch.nn.Parameter]]] = []
 
@@ -838,7 +843,11 @@ def _build_composite_optimizers(
                 msg = f"Invalid config_overrides for composite spec {spec.name!r}: {exc}"
                 raise ValueError(msg) from exc
         if mup_ctx and mup_ctx.adjusted_eps is not None:
-            spec_config = replace(spec_config, eps=mup_ctx.adjusted_eps)
+            if mup_eps_scale is None:
+                spec_eps = mup_ctx.adjusted_eps
+            else:
+                spec_eps = spec_config.eps * mup_eps_scale
+            spec_config = replace(spec_config, eps=spec_eps)
 
         spec_config, extra_kwargs = _normalize_mosaic_optimizer_config(spec_config)
         optimizer_cls = _resolve_optimizer_class(spec_config.name)

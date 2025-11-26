@@ -1,247 +1,184 @@
 Dispatching 2 eval run(s) (20 checkpoint(s) per run) via sbatch (per-run, 1 chain(s)).
-[wandb-check] Searching 'camlsys/torchtitan_validation' for run 'iclr2026-noclip_qhmtdao125M-20251120-083432_0'
+[wandb-check] Searching 'camlsys/torchtitan_validation' for run 'iclr2026-k1mtdao125M-20251126-093209_0'
+[wandb-check]   - Filter 'config.run_uuid.value': found 'iclr2026-k1mtdao125M-20251126-093209_0-worker0-rep0-rank0' (https://wandb.ai/camlsys/torchtitan_validation/runs/cieae2ho)
+[EvalLoop] Skipping 125M | iclr2026-k1mtdao125M-20251126-093209_0 (already on W&B).
+[wandb-check] Searching 'camlsys/torchtitan_validation' for run 'iclr2026-k1mtdao125M-20251126-093209_1'
+[wandb-check]   - Filter 'config.run_uuid.value': found 'iclr2026-k1mtdao125M-20251126-093209_1-worker0-rep0-rank0' (https://wandb.ai/camlsys/torchtitan_validation/runs/98c1j43e)
+[EvalLoop] Skipping 125M | iclr2026-k1mtdao125M-20251126-093209_1 (already on W&B).
+[wandb-check] Searching 'camlsys/torchtitan_validation' for run 'iclr2026-k1mtdao125M-20251126-093209_2'
+[wandb-check]   - Filter 'config.run_uuid.value': found 'iclr2026-k1mtdao125M-20251126-093209_2-worker0-rep0-rank0' (https://wandb.ai/camlsys/torchtitan_validation/runs/msy8dnue)
+[EvalLoop] Skipping 125M | iclr2026-k1mtdao125M-20251126-093209_2 (already on W&B).
+[wandb-check] Searching 'camlsys/torchtitan_validation' for run 'iclr2026-k1mtdao125M-20251126-093209_3'
+[wandb-check]   - Filter 'config.run_uuid.value': found 'iclr2026-k1mtdao125M-20251126-093209_3-worker0-rep0-rank0' (https://wandb.ai/camlsys/torchtitan_validation/runs/ww7wqmqy)
+[EvalLoop] Skipping 125M | iclr2026-k1mtdao125M-20251126-093209_3 (already on W&B).
+[wandb-check] Searching 'camlsys/torchtitan_validation' for run 'iclr2026-k1mtdao125M-20251126-093209_4'
+[wandb-check]   - Filter 'config.run_uuid.value': found 'iclr2026-k1mtdao125M-20251126-093209_4-worker0-rep0-rank0' (https://wandb.ai/camlsys/torchtitan_validation/runs/j980iygv)
+[EvalLoop] Skipping 125M | iclr2026-k1mtdao125M-20251126-093209_4 (already on W&B).
+[wandb-check] Searching 'camlsys/torchtitan_validation' for run 'iclr2026-k1mtdao125M-20251126-093209_5'
+[wandb-check]   - Filter 'config.run_uuid.value': found 'iclr2026-k1mtdao125M-20251126-093209_5-worker0-rep0-rank0' (https://wandb.ai/camlsys/torchtitan_validation/runs/yzw37cda)
+[EvalLoop] Skipping 125M | iclr2026-k1mtdao125M-20251126-093209_5 (already on W&B).
+[wandb-check] Searching 'camlsys/torchtitan_validation' for run 'iclr2026-k1mtdao125M-20251126-093209_6'
+[wandb-check]   - Filter 'config.run_uuid.value': found 'iclr2026-k1mtdao125M-20251126-093209_6-worker0-rep0-rank0' (https://wandb.ai/camlsys/torchtitan_validation/runs/bhqb8xva)
+[EvalLoop] Skipping 125M | iclr2026-k1mtdao125M-20251126-093209_6 (already on W&B).
+[wandb-check] Searching 'camlsys/torchtitan_validation' for run 'iclr2026-k1mtdao125M-20251126-093209_7'
+[wandb-check]   - Filter 'config.run_uuid.value': found 'iclr2026-k1mtdao125M-20251126-093209_7-worker0-rep0-rank0' (https://wandb.ai/camlsys/torchtitan_validation/runs/5pc6ztny)
+[EvalLoop] Skipping 125M | iclr2026-k1mtdao125M-20251126-093209_7 (already on W&B).
+[wandb-check] Searching 'camlsys/torchtitan_validation' for run 'iclr2026-k1mtdao125M-20251126-093209_8'
+[wandb-check]   - Filter 'config.run_uuid.value': found 'iclr2026-k1mtdao125M-20251126-093209_8-worker0-rep0-rank0' (https://wandb.ai/camlsys/torchtitan_validation/runs/jrjk1kjt)
+[EvalLoop] Skipping 125M | iclr2026-k1mtdao125M-20251126-093209_8 (already on W&B).
+[wandb-check] Searching 'camlsys/torchtitan_validation' for run 'iclr2026-k1mtdao125M-20251126-093209_9'
 [wandb-check]   - Filter 'config.run_uuid.value': no matches
 [wandb-check]   - Filter 'group': no matches
 [wandb-check]   - Filter 'display_name': no matches
 [wandb-check]   - Filter 'display_name regex': no matches
-[wandb-check] No matches for 'iclr2026-noclip_qhmtdao125M-20251120-083432_0' in 'camlsys/torchtitan_validation'
-[wandb-check] Searching 'camlsys/torchtitan_validation' for run 'iclr2026-noclip_qhmtdao125M-20251120-083432_1'
+[wandb-check] No matches for 'iclr2026-k1mtdao125M-20251126-093209_9' in 'camlsys/torchtitan_validation'
+[wandb-check] Searching 'camlsys/torchtitan_validation' for run 'iclr2026-k1mtdao125M-20251126-093209_10'
 [wandb-check]   - Filter 'config.run_uuid.value': no matches
 [wandb-check]   - Filter 'group': no matches
 [wandb-check]   - Filter 'display_name': no matches
 [wandb-check]   - Filter 'display_name regex': no matches
-[wandb-check] No matches for 'iclr2026-noclip_qhmtdao125M-20251120-083432_1' in 'camlsys/torchtitan_validation'
-[wandb-check] Searching 'camlsys/torchtitan_validation' for run 'iclr2026-noclip_qhmtdao125M-20251120-083432_2'
+[wandb-check] No matches for 'iclr2026-k1mtdao125M-20251126-093209_10' in 'camlsys/torchtitan_validation'
+[wandb-check] Searching 'camlsys/torchtitan_validation' for run 'iclr2026-k1mtdao125M-20251126-093209_11'
 [wandb-check]   - Filter 'config.run_uuid.value': no matches
 [wandb-check]   - Filter 'group': no matches
 [wandb-check]   - Filter 'display_name': no matches
 [wandb-check]   - Filter 'display_name regex': no matches
-[wandb-check] No matches for 'iclr2026-noclip_qhmtdao125M-20251120-083432_2' in 'camlsys/torchtitan_validation'
-[wandb-check] Searching 'camlsys/torchtitan_validation' for run 'iclr2026-noclip_qhmtdao125M-20251120-083432_3'
+[wandb-check] No matches for 'iclr2026-k1mtdao125M-20251126-093209_11' in 'camlsys/torchtitan_validation'
+[wandb-check] Searching 'camlsys/torchtitan_validation' for run 'iclr2026-k1mtdao125M-20251126-093209_12'
 [wandb-check]   - Filter 'config.run_uuid.value': no matches
 [wandb-check]   - Filter 'group': no matches
 [wandb-check]   - Filter 'display_name': no matches
 [wandb-check]   - Filter 'display_name regex': no matches
-[wandb-check] No matches for 'iclr2026-noclip_qhmtdao125M-20251120-083432_3' in 'camlsys/torchtitan_validation'
-[wandb-check] Searching 'camlsys/torchtitan_validation' for run 'iclr2026-noclip_qhmtdao125M-20251120-083432_4'
+[wandb-check] No matches for 'iclr2026-k1mtdao125M-20251126-093209_12' in 'camlsys/torchtitan_validation'
+[wandb-check] Searching 'camlsys/torchtitan_validation' for run 'iclr2026-k1mtdao125M-20251126-093209_13'
 [wandb-check]   - Filter 'config.run_uuid.value': no matches
 [wandb-check]   - Filter 'group': no matches
 [wandb-check]   - Filter 'display_name': no matches
 [wandb-check]   - Filter 'display_name regex': no matches
-[wandb-check] No matches for 'iclr2026-noclip_qhmtdao125M-20251120-083432_4' in 'camlsys/torchtitan_validation'
-[wandb-check] Searching 'camlsys/torchtitan_validation' for run 'iclr2026-noclip_qhmtdao125M-20251120-083432_5'
+[wandb-check] No matches for 'iclr2026-k1mtdao125M-20251126-093209_13' in 'camlsys/torchtitan_validation'
+[wandb-check] Searching 'camlsys/torchtitan_validation' for run 'iclr2026-k1mtdao125M-20251126-093209_14'
 [wandb-check]   - Filter 'config.run_uuid.value': no matches
 [wandb-check]   - Filter 'group': no matches
 [wandb-check]   - Filter 'display_name': no matches
 [wandb-check]   - Filter 'display_name regex': no matches
-[wandb-check] No matches for 'iclr2026-noclip_qhmtdao125M-20251120-083432_5' in 'camlsys/torchtitan_validation'
-[wandb-check] Searching 'camlsys/torchtitan_validation' for run 'iclr2026-noclip_qhmtdao125M-20251120-083432_6'
+[wandb-check] No matches for 'iclr2026-k1mtdao125M-20251126-093209_14' in 'camlsys/torchtitan_validation'
+[wandb-check] Searching 'camlsys/torchtitan_validation' for run 'iclr2026-k1mtdao125M-20251126-093209_15'
 [wandb-check]   - Filter 'config.run_uuid.value': no matches
 [wandb-check]   - Filter 'group': no matches
 [wandb-check]   - Filter 'display_name': no matches
 [wandb-check]   - Filter 'display_name regex': no matches
-[wandb-check] No matches for 'iclr2026-noclip_qhmtdao125M-20251120-083432_6' in 'camlsys/torchtitan_validation'
-[wandb-check] Searching 'camlsys/torchtitan_validation' for run 'iclr2026-noclip_qhmtdao125M-20251120-083432_7'
+[wandb-check] No matches for 'iclr2026-k1mtdao125M-20251126-093209_15' in 'camlsys/torchtitan_validation'
+[wandb-check] Searching 'camlsys/torchtitan_validation' for run 'iclr2026-k1mtdao125M-20251126-093209_16'
 [wandb-check]   - Filter 'config.run_uuid.value': no matches
 [wandb-check]   - Filter 'group': no matches
 [wandb-check]   - Filter 'display_name': no matches
 [wandb-check]   - Filter 'display_name regex': no matches
-[wandb-check] No matches for 'iclr2026-noclip_qhmtdao125M-20251120-083432_7' in 'camlsys/torchtitan_validation'
-[wandb-check] Searching 'camlsys/torchtitan_validation' for run 'iclr2026-noclip_qhmtdao125M-20251120-083432_8'
+[wandb-check] No matches for 'iclr2026-k1mtdao125M-20251126-093209_16' in 'camlsys/torchtitan_validation'
+[wandb-check] Searching 'camlsys/torchtitan_validation' for run 'iclr2026-k1mtdao125M-20251126-093209_17'
 [wandb-check]   - Filter 'config.run_uuid.value': no matches
 [wandb-check]   - Filter 'group': no matches
 [wandb-check]   - Filter 'display_name': no matches
 [wandb-check]   - Filter 'display_name regex': no matches
-[wandb-check] No matches for 'iclr2026-noclip_qhmtdao125M-20251120-083432_8' in 'camlsys/torchtitan_validation'
-[wandb-check] Searching 'camlsys/torchtitan_validation' for run 'iclr2026-noclip_qhmtdao125M-20251120-083432_9'
+[wandb-check] No matches for 'iclr2026-k1mtdao125M-20251126-093209_17' in 'camlsys/torchtitan_validation'
+[wandb-check] Searching 'camlsys/torchtitan_validation' for run 'iclr2026-k1mtdao125M-20251126-093209_18'
 [wandb-check]   - Filter 'config.run_uuid.value': no matches
 [wandb-check]   - Filter 'group': no matches
 [wandb-check]   - Filter 'display_name': no matches
 [wandb-check]   - Filter 'display_name regex': no matches
-[wandb-check] No matches for 'iclr2026-noclip_qhmtdao125M-20251120-083432_9' in 'camlsys/torchtitan_validation'
-[wandb-check] Searching 'camlsys/torchtitan_validation' for run 'iclr2026-noclip_qhmtdao125M-20251120-083432_10'
+[wandb-check] No matches for 'iclr2026-k1mtdao125M-20251126-093209_18' in 'camlsys/torchtitan_validation'
+[wandb-check] Searching 'camlsys/torchtitan_validation' for run 'iclr2026-k1mtdao125M-20251126-093209_19'
 [wandb-check]   - Filter 'config.run_uuid.value': no matches
 [wandb-check]   - Filter 'group': no matches
 [wandb-check]   - Filter 'display_name': no matches
 [wandb-check]   - Filter 'display_name regex': no matches
-[wandb-check] No matches for 'iclr2026-noclip_qhmtdao125M-20251120-083432_10' in 'camlsys/torchtitan_validation'
-[wandb-check] Searching 'camlsys/torchtitan_validation' for run 'iclr2026-noclip_qhmtdao125M-20251120-083432_11'
+[wandb-check] No matches for 'iclr2026-k1mtdao125M-20251126-093209_19' in 'camlsys/torchtitan_validation'
+[EvalLoop] 1/2: 125M | iclr2026-k1mtdao125M-20251126-093209 (11 pending step(s))
+[EvalLoop][SBATCH chain 0] Queue 125M | iclr2026-k1mtdao125M-20251126-093209 (no dependency).
+[wandb-check] Searching 'camlsys/torchtitan_validation' for run 'iclr2026-k1mtdao16m-20251126-090453_0'
+[wandb-check]   - Filter 'config.run_uuid.value': found 'iclr2026-k1mtdao16m-20251126-090453_0-worker0-rep0-rank0' (https://wandb.ai/camlsys/torchtitan_validation/runs/1bhh2u91)
+[EvalLoop] Skipping 16M | iclr2026-k1mtdao16m-20251126-090453_0 (already on W&B).
+[wandb-check] Searching 'camlsys/torchtitan_validation' for run 'iclr2026-k1mtdao16m-20251126-090453_1'
+[wandb-check]   - Filter 'config.run_uuid.value': found 'iclr2026-k1mtdao16m-20251126-090453_1-worker0-rep0-rank0' (https://wandb.ai/camlsys/torchtitan_validation/runs/nyjpigej)
+[EvalLoop] Skipping 16M | iclr2026-k1mtdao16m-20251126-090453_1 (already on W&B).
+[wandb-check] Searching 'camlsys/torchtitan_validation' for run 'iclr2026-k1mtdao16m-20251126-090453_2'
+[wandb-check]   - Filter 'config.run_uuid.value': found 'iclr2026-k1mtdao16m-20251126-090453_2-worker0-rep0-rank0' (https://wandb.ai/camlsys/torchtitan_validation/runs/z8byjkjv)
+[EvalLoop] Skipping 16M | iclr2026-k1mtdao16m-20251126-090453_2 (already on W&B).
+[wandb-check] Searching 'camlsys/torchtitan_validation' for run 'iclr2026-k1mtdao16m-20251126-090453_3'
+[wandb-check]   - Filter 'config.run_uuid.value': found 'iclr2026-k1mtdao16m-20251126-090453_3-worker0-rep0-rank0' (https://wandb.ai/camlsys/torchtitan_validation/runs/zl2mwggf)
+[EvalLoop] Skipping 16M | iclr2026-k1mtdao16m-20251126-090453_3 (already on W&B).
+[wandb-check] Searching 'camlsys/torchtitan_validation' for run 'iclr2026-k1mtdao16m-20251126-090453_4'
+[wandb-check]   - Filter 'config.run_uuid.value': found 'iclr2026-k1mtdao16m-20251126-090453_4-worker0-rep0-rank0' (https://wandb.ai/camlsys/torchtitan_validation/runs/hcpqbbn5)
+[EvalLoop] Skipping 16M | iclr2026-k1mtdao16m-20251126-090453_4 (already on W&B).
+[wandb-check] Searching 'camlsys/torchtitan_validation' for run 'iclr2026-k1mtdao16m-20251126-090453_5'
+[wandb-check]   - Filter 'config.run_uuid.value': found 'iclr2026-k1mtdao16m-20251126-090453_5-worker0-rep0-rank0' (https://wandb.ai/camlsys/torchtitan_validation/runs/fyedogfp)
+[EvalLoop] Skipping 16M | iclr2026-k1mtdao16m-20251126-090453_5 (already on W&B).
+[wandb-check] Searching 'camlsys/torchtitan_validation' for run 'iclr2026-k1mtdao16m-20251126-090453_6'
+[wandb-check]   - Filter 'config.run_uuid.value': found 'iclr2026-k1mtdao16m-20251126-090453_6-worker0-rep0-rank0' (https://wandb.ai/camlsys/torchtitan_validation/runs/rscjo9he)
+[EvalLoop] Skipping 16M | iclr2026-k1mtdao16m-20251126-090453_6 (already on W&B).
+[wandb-check] Searching 'camlsys/torchtitan_validation' for run 'iclr2026-k1mtdao16m-20251126-090453_7'
+[wandb-check]   - Filter 'config.run_uuid.value': found 'iclr2026-k1mtdao16m-20251126-090453_7-worker0-rep0-rank0' (https://wandb.ai/camlsys/torchtitan_validation/runs/ohfcqjgg)
+[EvalLoop] Skipping 16M | iclr2026-k1mtdao16m-20251126-090453_7 (already on W&B).
+[wandb-check] Searching 'camlsys/torchtitan_validation' for run 'iclr2026-k1mtdao16m-20251126-090453_8'
+[wandb-check]   - Filter 'config.run_uuid.value': found 'iclr2026-k1mtdao16m-20251126-090453_8-worker0-rep0-rank0' (https://wandb.ai/camlsys/torchtitan_validation/runs/tq3acp0a)
+[EvalLoop] Skipping 16M | iclr2026-k1mtdao16m-20251126-090453_8 (already on W&B).
+[wandb-check] Searching 'camlsys/torchtitan_validation' for run 'iclr2026-k1mtdao16m-20251126-090453_9'
+[wandb-check]   - Filter 'config.run_uuid.value': found 'iclr2026-k1mtdao16m-20251126-090453_9-worker0-rep0-rank0' (https://wandb.ai/camlsys/torchtitan_validation/runs/6ptmc698)
+[EvalLoop] Skipping 16M | iclr2026-k1mtdao16m-20251126-090453_9 (already on W&B).
+[wandb-check] Searching 'camlsys/torchtitan_validation' for run 'iclr2026-k1mtdao16m-20251126-090453_10'
+[wandb-check]   - Filter 'config.run_uuid.value': found 'iclr2026-k1mtdao16m-20251126-090453_10-worker0-rep0-rank0' (https://wandb.ai/camlsys/torchtitan_validation/runs/01d061gp)
+[EvalLoop] Skipping 16M | iclr2026-k1mtdao16m-20251126-090453_10 (already on W&B).
+[wandb-check] Searching 'camlsys/torchtitan_validation' for run 'iclr2026-k1mtdao16m-20251126-090453_11'
+[wandb-check]   - Filter 'config.run_uuid.value': found 'iclr2026-k1mtdao16m-20251126-090453_11-worker0-rep0-rank0' (https://wandb.ai/camlsys/torchtitan_validation/runs/bkfejshw)
+[EvalLoop] Skipping 16M | iclr2026-k1mtdao16m-20251126-090453_11 (already on W&B).
+[wandb-check] Searching 'camlsys/torchtitan_validation' for run 'iclr2026-k1mtdao16m-20251126-090453_12'
 [wandb-check]   - Filter 'config.run_uuid.value': no matches
 [wandb-check]   - Filter 'group': no matches
 [wandb-check]   - Filter 'display_name': no matches
 [wandb-check]   - Filter 'display_name regex': no matches
-[wandb-check] No matches for 'iclr2026-noclip_qhmtdao125M-20251120-083432_11' in 'camlsys/torchtitan_validation'
-[wandb-check] Searching 'camlsys/torchtitan_validation' for run 'iclr2026-noclip_qhmtdao125M-20251120-083432_12'
+[wandb-check] No matches for 'iclr2026-k1mtdao16m-20251126-090453_12' in 'camlsys/torchtitan_validation'
+[wandb-check] Searching 'camlsys/torchtitan_validation' for run 'iclr2026-k1mtdao16m-20251126-090453_13'
 [wandb-check]   - Filter 'config.run_uuid.value': no matches
 [wandb-check]   - Filter 'group': no matches
 [wandb-check]   - Filter 'display_name': no matches
 [wandb-check]   - Filter 'display_name regex': no matches
-[wandb-check] No matches for 'iclr2026-noclip_qhmtdao125M-20251120-083432_12' in 'camlsys/torchtitan_validation'
-[wandb-check] Searching 'camlsys/torchtitan_validation' for run 'iclr2026-noclip_qhmtdao125M-20251120-083432_13'
+[wandb-check] No matches for 'iclr2026-k1mtdao16m-20251126-090453_13' in 'camlsys/torchtitan_validation'
+[wandb-check] Searching 'camlsys/torchtitan_validation' for run 'iclr2026-k1mtdao16m-20251126-090453_14'
 [wandb-check]   - Filter 'config.run_uuid.value': no matches
 [wandb-check]   - Filter 'group': no matches
 [wandb-check]   - Filter 'display_name': no matches
 [wandb-check]   - Filter 'display_name regex': no matches
-[wandb-check] No matches for 'iclr2026-noclip_qhmtdao125M-20251120-083432_13' in 'camlsys/torchtitan_validation'
-[wandb-check] Searching 'camlsys/torchtitan_validation' for run 'iclr2026-noclip_qhmtdao125M-20251120-083432_14'
+[wandb-check] No matches for 'iclr2026-k1mtdao16m-20251126-090453_14' in 'camlsys/torchtitan_validation'
+[wandb-check] Searching 'camlsys/torchtitan_validation' for run 'iclr2026-k1mtdao16m-20251126-090453_15'
 [wandb-check]   - Filter 'config.run_uuid.value': no matches
 [wandb-check]   - Filter 'group': no matches
 [wandb-check]   - Filter 'display_name': no matches
 [wandb-check]   - Filter 'display_name regex': no matches
-[wandb-check] No matches for 'iclr2026-noclip_qhmtdao125M-20251120-083432_14' in 'camlsys/torchtitan_validation'
-[wandb-check] Searching 'camlsys/torchtitan_validation' for run 'iclr2026-noclip_qhmtdao125M-20251120-083432_15'
+[wandb-check] No matches for 'iclr2026-k1mtdao16m-20251126-090453_15' in 'camlsys/torchtitan_validation'
+[wandb-check] Searching 'camlsys/torchtitan_validation' for run 'iclr2026-k1mtdao16m-20251126-090453_16'
 [wandb-check]   - Filter 'config.run_uuid.value': no matches
 [wandb-check]   - Filter 'group': no matches
 [wandb-check]   - Filter 'display_name': no matches
 [wandb-check]   - Filter 'display_name regex': no matches
-[wandb-check] No matches for 'iclr2026-noclip_qhmtdao125M-20251120-083432_15' in 'camlsys/torchtitan_validation'
-[wandb-check] Searching 'camlsys/torchtitan_validation' for run 'iclr2026-noclip_qhmtdao125M-20251120-083432_16'
+[wandb-check] No matches for 'iclr2026-k1mtdao16m-20251126-090453_16' in 'camlsys/torchtitan_validation'
+[wandb-check] Searching 'camlsys/torchtitan_validation' for run 'iclr2026-k1mtdao16m-20251126-090453_17'
 [wandb-check]   - Filter 'config.run_uuid.value': no matches
 [wandb-check]   - Filter 'group': no matches
 [wandb-check]   - Filter 'display_name': no matches
 [wandb-check]   - Filter 'display_name regex': no matches
-[wandb-check] No matches for 'iclr2026-noclip_qhmtdao125M-20251120-083432_16' in 'camlsys/torchtitan_validation'
-[wandb-check] Searching 'camlsys/torchtitan_validation' for run 'iclr2026-noclip_qhmtdao125M-20251120-083432_17'
+[wandb-check] No matches for 'iclr2026-k1mtdao16m-20251126-090453_17' in 'camlsys/torchtitan_validation'
+[wandb-check] Searching 'camlsys/torchtitan_validation' for run 'iclr2026-k1mtdao16m-20251126-090453_18'
 [wandb-check]   - Filter 'config.run_uuid.value': no matches
 [wandb-check]   - Filter 'group': no matches
 [wandb-check]   - Filter 'display_name': no matches
 [wandb-check]   - Filter 'display_name regex': no matches
-[wandb-check] No matches for 'iclr2026-noclip_qhmtdao125M-20251120-083432_17' in 'camlsys/torchtitan_validation'
-[wandb-check] Searching 'camlsys/torchtitan_validation' for run 'iclr2026-noclip_qhmtdao125M-20251120-083432_18'
+[wandb-check] No matches for 'iclr2026-k1mtdao16m-20251126-090453_18' in 'camlsys/torchtitan_validation'
+[wandb-check] Searching 'camlsys/torchtitan_validation' for run 'iclr2026-k1mtdao16m-20251126-090453_19'
 [wandb-check]   - Filter 'config.run_uuid.value': no matches
 [wandb-check]   - Filter 'group': no matches
 [wandb-check]   - Filter 'display_name': no matches
 [wandb-check]   - Filter 'display_name regex': no matches
-[wandb-check] No matches for 'iclr2026-noclip_qhmtdao125M-20251120-083432_18' in 'camlsys/torchtitan_validation'
-[wandb-check] Searching 'camlsys/torchtitan_validation' for run 'iclr2026-noclip_qhmtdao125M-20251120-083432_19'
-[wandb-check]   - Filter 'config.run_uuid.value': no matches
-[wandb-check]   - Filter 'group': no matches
-[wandb-check]   - Filter 'display_name': no matches
-[wandb-check]   - Filter 'display_name regex': no matches
-[wandb-check] No matches for 'iclr2026-noclip_qhmtdao125M-20251120-083432_19' in 'camlsys/torchtitan_validation'
-[EvalLoop] 1/2: 125M | iclr2026-noclip_qhmtdao125M-20251120-083432 (20 pending step(s))
-[EvalLoop][SBATCH chain 0] Queue 125M | iclr2026-noclip_qhmtdao125M-20251120-083432 (no dependency).
-[wandb-check] Searching 'camlsys/torchtitan_validation' for run 'iclr2026-noclip_qhmtdao360M-20251120-083636_0'
-[wandb-check]   - Filter 'config.run_uuid.value': no matches
-[wandb-check]   - Filter 'group': no matches
-[wandb-check]   - Filter 'display_name': no matches
-[wandb-check]   - Filter 'display_name regex': no matches
-[wandb-check] No matches for 'iclr2026-noclip_qhmtdao360M-20251120-083636_0' in 'camlsys/torchtitan_validation'
-[wandb-check] Searching 'camlsys/torchtitan_validation' for run 'iclr2026-noclip_qhmtdao360M-20251120-083636_1'
-[wandb-check]   - Filter 'config.run_uuid.value': no matches
-[wandb-check]   - Filter 'group': no matches
-[wandb-check]   - Filter 'display_name': no matches
-[wandb-check]   - Filter 'display_name regex': no matches
-[wandb-check] No matches for 'iclr2026-noclip_qhmtdao360M-20251120-083636_1' in 'camlsys/torchtitan_validation'
-[wandb-check] Searching 'camlsys/torchtitan_validation' for run 'iclr2026-noclip_qhmtdao360M-20251120-083636_2'
-[wandb-check]   - Filter 'config.run_uuid.value': no matches
-[wandb-check]   - Filter 'group': no matches
-[wandb-check]   - Filter 'display_name': no matches
-[wandb-check]   - Filter 'display_name regex': no matches
-[wandb-check] No matches for 'iclr2026-noclip_qhmtdao360M-20251120-083636_2' in 'camlsys/torchtitan_validation'
-[wandb-check] Searching 'camlsys/torchtitan_validation' for run 'iclr2026-noclip_qhmtdao360M-20251120-083636_3'
-[wandb-check]   - Filter 'config.run_uuid.value': no matches
-[wandb-check]   - Filter 'group': no matches
-[wandb-check]   - Filter 'display_name': no matches
-[wandb-check]   - Filter 'display_name regex': no matches
-[wandb-check] No matches for 'iclr2026-noclip_qhmtdao360M-20251120-083636_3' in 'camlsys/torchtitan_validation'
-[wandb-check] Searching 'camlsys/torchtitan_validation' for run 'iclr2026-noclip_qhmtdao360M-20251120-083636_4'
-[wandb-check]   - Filter 'config.run_uuid.value': no matches
-[wandb-check]   - Filter 'group': no matches
-[wandb-check]   - Filter 'display_name': no matches
-[wandb-check]   - Filter 'display_name regex': no matches
-[wandb-check] No matches for 'iclr2026-noclip_qhmtdao360M-20251120-083636_4' in 'camlsys/torchtitan_validation'
-[wandb-check] Searching 'camlsys/torchtitan_validation' for run 'iclr2026-noclip_qhmtdao360M-20251120-083636_5'
-[wandb-check]   - Filter 'config.run_uuid.value': no matches
-[wandb-check]   - Filter 'group': no matches
-[wandb-check]   - Filter 'display_name': no matches
-[wandb-check]   - Filter 'display_name regex': no matches
-[wandb-check] No matches for 'iclr2026-noclip_qhmtdao360M-20251120-083636_5' in 'camlsys/torchtitan_validation'
-[wandb-check] Searching 'camlsys/torchtitan_validation' for run 'iclr2026-noclip_qhmtdao360M-20251120-083636_6'
-[wandb-check]   - Filter 'config.run_uuid.value': no matches
-[wandb-check]   - Filter 'group': no matches
-[wandb-check]   - Filter 'display_name': no matches
-[wandb-check]   - Filter 'display_name regex': no matches
-[wandb-check] No matches for 'iclr2026-noclip_qhmtdao360M-20251120-083636_6' in 'camlsys/torchtitan_validation'
-[wandb-check] Searching 'camlsys/torchtitan_validation' for run 'iclr2026-noclip_qhmtdao360M-20251120-083636_7'
-[wandb-check]   - Filter 'config.run_uuid.value': no matches
-[wandb-check]   - Filter 'group': no matches
-[wandb-check]   - Filter 'display_name': no matches
-[wandb-check]   - Filter 'display_name regex': no matches
-[wandb-check] No matches for 'iclr2026-noclip_qhmtdao360M-20251120-083636_7' in 'camlsys/torchtitan_validation'
-[wandb-check] Searching 'camlsys/torchtitan_validation' for run 'iclr2026-noclip_qhmtdao360M-20251120-083636_8'
-[wandb-check]   - Filter 'config.run_uuid.value': no matches
-[wandb-check]   - Filter 'group': no matches
-[wandb-check]   - Filter 'display_name': no matches
-[wandb-check]   - Filter 'display_name regex': no matches
-[wandb-check] No matches for 'iclr2026-noclip_qhmtdao360M-20251120-083636_8' in 'camlsys/torchtitan_validation'
-[wandb-check] Searching 'camlsys/torchtitan_validation' for run 'iclr2026-noclip_qhmtdao360M-20251120-083636_9'
-[wandb-check]   - Filter 'config.run_uuid.value': no matches
-[wandb-check]   - Filter 'group': no matches
-[wandb-check]   - Filter 'display_name': no matches
-[wandb-check]   - Filter 'display_name regex': no matches
-[wandb-check] No matches for 'iclr2026-noclip_qhmtdao360M-20251120-083636_9' in 'camlsys/torchtitan_validation'
-[wandb-check] Searching 'camlsys/torchtitan_validation' for run 'iclr2026-noclip_qhmtdao360M-20251120-083636_10'
-[wandb-check]   - Filter 'config.run_uuid.value': no matches
-[wandb-check]   - Filter 'group': no matches
-[wandb-check]   - Filter 'display_name': no matches
-[wandb-check]   - Filter 'display_name regex': no matches
-[wandb-check] No matches for 'iclr2026-noclip_qhmtdao360M-20251120-083636_10' in 'camlsys/torchtitan_validation'
-[wandb-check] Searching 'camlsys/torchtitan_validation' for run 'iclr2026-noclip_qhmtdao360M-20251120-083636_11'
-[wandb-check]   - Filter 'config.run_uuid.value': no matches
-[wandb-check]   - Filter 'group': no matches
-[wandb-check]   - Filter 'display_name': no matches
-[wandb-check]   - Filter 'display_name regex': no matches
-[wandb-check] No matches for 'iclr2026-noclip_qhmtdao360M-20251120-083636_11' in 'camlsys/torchtitan_validation'
-[wandb-check] Searching 'camlsys/torchtitan_validation' for run 'iclr2026-noclip_qhmtdao360M-20251120-083636_12'
-[wandb-check]   - Filter 'config.run_uuid.value': no matches
-[wandb-check]   - Filter 'group': no matches
-[wandb-check]   - Filter 'display_name': no matches
-[wandb-check]   - Filter 'display_name regex': no matches
-[wandb-check] No matches for 'iclr2026-noclip_qhmtdao360M-20251120-083636_12' in 'camlsys/torchtitan_validation'
-[wandb-check] Searching 'camlsys/torchtitan_validation' for run 'iclr2026-noclip_qhmtdao360M-20251120-083636_13'
-[wandb-check]   - Filter 'config.run_uuid.value': no matches
-[wandb-check]   - Filter 'group': no matches
-[wandb-check]   - Filter 'display_name': no matches
-[wandb-check]   - Filter 'display_name regex': no matches
-[wandb-check] No matches for 'iclr2026-noclip_qhmtdao360M-20251120-083636_13' in 'camlsys/torchtitan_validation'
-[wandb-check] Searching 'camlsys/torchtitan_validation' for run 'iclr2026-noclip_qhmtdao360M-20251120-083636_14'
-[wandb-check]   - Filter 'config.run_uuid.value': no matches
-[wandb-check]   - Filter 'group': no matches
-[wandb-check]   - Filter 'display_name': no matches
-[wandb-check]   - Filter 'display_name regex': no matches
-[wandb-check] No matches for 'iclr2026-noclip_qhmtdao360M-20251120-083636_14' in 'camlsys/torchtitan_validation'
-[wandb-check] Searching 'camlsys/torchtitan_validation' for run 'iclr2026-noclip_qhmtdao360M-20251120-083636_15'
-[wandb-check]   - Filter 'config.run_uuid.value': no matches
-[wandb-check]   - Filter 'group': no matches
-[wandb-check]   - Filter 'display_name': no matches
-[wandb-check]   - Filter 'display_name regex': no matches
-[wandb-check] No matches for 'iclr2026-noclip_qhmtdao360M-20251120-083636_15' in 'camlsys/torchtitan_validation'
-[wandb-check] Searching 'camlsys/torchtitan_validation' for run 'iclr2026-noclip_qhmtdao360M-20251120-083636_16'
-[wandb-check]   - Filter 'config.run_uuid.value': no matches
-[wandb-check]   - Filter 'group': no matches
-[wandb-check]   - Filter 'display_name': no matches
-[wandb-check]   - Filter 'display_name regex': no matches
-[wandb-check] No matches for 'iclr2026-noclip_qhmtdao360M-20251120-083636_16' in 'camlsys/torchtitan_validation'
-[wandb-check] Searching 'camlsys/torchtitan_validation' for run 'iclr2026-noclip_qhmtdao360M-20251120-083636_17'
-[wandb-check]   - Filter 'config.run_uuid.value': no matches
-[wandb-check]   - Filter 'group': no matches
-[wandb-check]   - Filter 'display_name': no matches
-[wandb-check]   - Filter 'display_name regex': no matches
-[wandb-check] No matches for 'iclr2026-noclip_qhmtdao360M-20251120-083636_17' in 'camlsys/torchtitan_validation'
-[wandb-check] Searching 'camlsys/torchtitan_validation' for run 'iclr2026-noclip_qhmtdao360M-20251120-083636_18'
-[wandb-check]   - Filter 'config.run_uuid.value': no matches
-[wandb-check]   - Filter 'group': no matches
-[wandb-check]   - Filter 'display_name': no matches
-[wandb-check]   - Filter 'display_name regex': no matches
-[wandb-check] No matches for 'iclr2026-noclip_qhmtdao360M-20251120-083636_18' in 'camlsys/torchtitan_validation'
-[wandb-check] Searching 'camlsys/torchtitan_validation' for run 'iclr2026-noclip_qhmtdao360M-20251120-083636_19'
-[wandb-check]   - Filter 'config.run_uuid.value': no matches
-[wandb-check]   - Filter 'group': no matches
-[wandb-check]   - Filter 'display_name': no matches
-[wandb-check]   - Filter 'display_name regex': no matches
-[wandb-check] No matches for 'iclr2026-noclip_qhmtdao360M-20251120-083636_19' in 'camlsys/torchtitan_validation'
-[EvalLoop] 2/2: 360M | iclr2026-noclip_qhmtdao360M-20251120-083636 (20 pending step(s))
-[EvalLoop][SBATCH chain 0] Queue 360M | iclr2026-noclip_qhmtdao360M-20251120-083636 after job 28466.
+[wandb-check] No matches for 'iclr2026-k1mtdao16m-20251126-090453_19' in 'camlsys/torchtitan_validation'
+[EvalLoop] 2/2: 16M | iclr2026-k1mtdao16m-20251126-090453 (8 pending step(s))
+[EvalLoop][SBATCH chain 0] Queue 16M | iclr2026-k1mtdao16m-20251126-090453 after job 29415.
 [EvalLoop] Submitted 2 sbatch job(s) across 1 chain(s).
-  - Chain 0: last job 28467
+  - Chain 0: last job 29417

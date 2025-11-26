@@ -21,6 +21,8 @@ fi
 #   "125M iclr2026-adamw125m-20251119-120001"
 # )
 RUN_MODELS=(
+  "125M iclr2026-k1mtdao125M-20251126-093209"
+  "16M iclr2026-k1mtdao16m-20251126-090453"
   # "16M iclr2026-qhmtdao16m-20251119-213808"
   # "125M iclr2026-qhmtdao125M-20251119-115225"
   # "360M iclr2026-agg3mtdao360M-20251118-121555"
@@ -59,8 +61,8 @@ RUN_MODELS=(
   # "360M iclr2026-strdill360M-20251120-064356"
   # "125M iclr2026-strdill125M-20251120-000630"
   # "360M iclr2026-strlocaladam360M-20251120-083226"
-  "125M iclr2026-noclip_qhmtdao125M-20251120-083432"
-  "360M iclr2026-noclip_qhmtdao360M-20251120-083636"
+  # "125M iclr2026-noclip_qhmtdao125M-20251120-083432"
+  # "360M iclr2026-noclip_qhmtdao360M-20251120-083636"
 )
 
 # Route eval logging to torchtitan_validation on camlsys unless caller overrides.

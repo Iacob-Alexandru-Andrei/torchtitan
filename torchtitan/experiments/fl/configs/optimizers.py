@@ -280,6 +280,9 @@ class MosaicOptimizerConfig(BaseOptimizer):
     zeropower_coefficients: tuple[float, float, float] | list[float] | None = None
     """Optional override for Muon-style zeropower coefficients (a, b, c)."""
 
+    adjust_lr_fn: Literal["original", "match_rms_adamw"] | None = None
+    """Optional Muon learning-rate adjustment strategy."""
+
     galore_rank: int | None = None
     """Default low-rank size for GaLore. None disables projection."""
 
