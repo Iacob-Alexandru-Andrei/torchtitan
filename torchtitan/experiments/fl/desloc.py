@@ -1409,6 +1409,7 @@ class DesLocController:
         if not opt_param_entries:
             msg = "DES-LOC requires the optimizer to own at least one parameter."
             raise ValueError(msg)
+        self._opt_param_entries = opt_param_entries
 
         param_fragment_cfg = ParameterFragmentConfig(
             manager=config.manager,
@@ -1515,7 +1516,7 @@ class DesLocController:
             fragment_config = OptimizerFragmentConfig(
                 manager=self._manager,
                 model=self._model,
-                param_entries=opt_param_entries,
+                param_entries=self._opt_param_entries,
                 optimizer=self._optimizer,
                 state_key=key,
                 sync_every=sync_intervals[idx],
