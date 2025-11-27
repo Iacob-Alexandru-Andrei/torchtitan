@@ -432,8 +432,14 @@ configure_gpus() {
   else
     set_gpu_array_from_string "${GPU_IDS}" || exit 1
   fi
-  GPU_PIDS=($(for _ in "${GPU_ARRAY[@]}"; do echo ""; done))
-  GPU_LABELS=($(for _ in "${GPU_ARRAY[@]}"; do echo ""; done))
+  # Initialize tracking arrays with the same length as GPU_ARRAY; command substitution
+  # drops empty elements, so populate then blank them out to keep indices aligned.
+  GPU_PIDS=("${GPU_ARRAY[@]}")
+  GPU_LABELS=("${GPU_ARRAY[@]}")
+  for i in "${!GPU_ARRAY[@]}"; do
+    GPU_PIDS[i]=""
+    GPU_LABELS[i]=""
+  done
 }
 
 wait_for_gpu() {
