@@ -1064,6 +1064,9 @@ class HyperparameterSwitchCallback(Callback):
         self.steps = {int(step) for step in params.steps if step >= 0}
         self.new_vs = tuple(float(v) for v in params.new_vs) if params.new_vs is not None else None
         self.new_betas = tuple(float(b) for b in params.new_betas) if params.new_betas is not None else None
+        self.new_nesterov = (
+            tuple(bool(v) for v in params.new_nesterov) if params.new_nesterov is not None else None
+        )
         self.reset_momenta = tuple(params.reset_momenta)
         self.log_metrics = params.log_metrics
         self._applied_steps: set[int] = set()
@@ -1097,6 +1100,8 @@ class HyperparameterSwitchCallback(Callback):
                 self._update_group_values(optimizer.param_groups, "vs", self.new_vs)
             if self.new_betas is not None:
                 self._update_group_values(optimizer.param_groups, "betas", self.new_betas)
+            if self.new_nesterov is not None:
+                self._update_group_values(optimizer.param_groups, "nesterov", self.new_nesterov)
             if self.reset_momenta:
                 self._reset_momenta(optimizer.state, step)
                 mark_dirty = getattr(optimizer, "mark_state_dirty", None)
@@ -1129,6 +1134,8 @@ class HyperparameterSwitchCallback(Callback):
                     current_value.copy_(target)
                 else:
                     group[key] = target
+            elif isinstance(current_value, bool):
+                group[key] = bool(values[0])
             elif isinstance(current_value, Sequence) and not isinstance(current_value, (str, bytes)):
                 group[key] = tuple(values)
             elif isinstance(current_value, (float, int)):

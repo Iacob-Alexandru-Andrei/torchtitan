@@ -498,6 +498,16 @@ class HyperparameterSwitchConfig:
         },
     )
 
+    new_nesterov: tuple[bool, ...] | None = field(
+        default=None,
+        metadata={
+            "help": (
+                "Replacement values for optimizer 'nesterov' flags. "
+                "Provide one value; if more are given, they will be broadcast where possible."
+            )
+        },
+    )
+
     reset_momenta: tuple[str, ...] = field(
         default_factory=tuple,
         metadata={
