@@ -15,12 +15,23 @@ CONFIG_FILE=${CONFIG_FILE:-"${SCRIPT_DIR}/base.toml"}
 TRAIN_MODULE=${TRAIN_MODULE:-"torchtitan.experiments.fl.train"}
 NGPU=${NGPU:-4}
 LOG_RANK=${LOG_RANK:-0}
-RDZV_ENDPOINT=${RDZV_ENDPOINT:-"localhost:0"}
+RDZV_HOST=${RDZV_HOST:-"localhost"}
+if [[ -z "${RDZV_PORT:-}" ]]; then
+  RDZV_PORT=$(python3 - <<'PY'
+import socket
+s = socket.socket()
+s.bind(("", 0))
+print(s.getsockname()[1])
+s.close()
+PY
+)
+fi
+RDZV_ENDPOINT="${RDZV_HOST}:${RDZV_PORT}"
 
 LR_SWITCH_STEP=${LR_SWITCH_STEP:-2049}
 SWITCH_SCALE=${SWITCH_SCALE:-1.0}
-QHMUON_V=${QHMUON_V:-0.98}
-QHMUON_NEW_BETAS=${QHMUON_NEW_BETAS:-"0.9 0.999"}
+QHMUON_V=${QHMUON_V:-0.95}
+QHMUON_NEW_BETAS=${QHMUON_NEW_BETAS:-"0.999 0.999"}
 QHMUON_RESET_MOMENTA=${QHMUON_RESET_MOMENTA:-"exp_avg"}
 
 read -r -a QHMUON_NEW_BETAS_ARRAY <<< "${QHMUON_NEW_BETAS}"

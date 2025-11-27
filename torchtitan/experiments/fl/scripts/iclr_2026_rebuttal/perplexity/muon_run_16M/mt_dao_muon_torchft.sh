@@ -28,13 +28,22 @@ MIN_REPLICAS=${MIN_REPLICAS:-${NGPU}}
 QUORUM_TICK_MS=${QUORUM_TICK_MS:-100}
 
 LIGHTHOUSE_HOST=${LIGHTHOUSE_HOST:-"localhost"}
-LIGHTHOUSE_PORT=${LIGHTHOUSE_PORT:-29510}
+if [[ -z "${LIGHTHOUSE_PORT:-}" ]]; then
+  LIGHTHOUSE_PORT=$(python3 - <<'PY'
+import socket
+s = socket.socket()
+s.bind(("", 0))
+print(s.getsockname()[1])
+s.close()
+PY
+)
+fi
 LIGHTHOUSE_URL="http://${LIGHTHOUSE_HOST}:${LIGHTHOUSE_PORT}"
 
 LR_SWITCH_STEP=${LR_SWITCH_STEP:-2049}
 SWITCH_SCALE=${SWITCH_SCALE:-1.0}
-QHMUON_V=${QHMUON_V:-0.98}
-QHMUON_NEW_BETAS=${QHMUON_NEW_BETAS:-"0.9 0.999"}
+QHMUON_V=${QHMUON_V:-0.95}
+QHMUON_NEW_BETAS=${QHMUON_NEW_BETAS:-"0.999 0.999"}
 QHMUON_RESET_MOMENTA=${QHMUON_RESET_MOMENTA:-"exp_avg"}
 
 read -r -a QHMUON_NEW_BETAS_ARRAY <<< "${QHMUON_NEW_BETAS}"
@@ -100,6 +109,18 @@ echo "Lighthouse PID: ${LIGHTHOUSE_PID}"
 
 export TORCHFT_LIGHTHOUSE="${LIGHTHOUSE_URL}"
 
+# Base rendezvous port for per-replica torchrun; randomize if not provided.
+if [[ -z "${RDZV_BASE_PORT:-}" ]]; then
+  RDZV_BASE_PORT=$(python3 - <<'PY'
+import socket
+s = socket.socket()
+s.bind(("", 0))
+print(s.getsockname()[1])
+s.close()
+PY
+)
+fi
+
 AVAILABLE_GPUS=()
 if [[ -n "${CUDA_VISIBLE_DEVICES:-}" ]]; then
   IFS=',' read -r -a AVAILABLE_GPUS <<< "${CUDA_VISIBLE_DEVICES}"
@@ -129,7 +150,7 @@ for ((replica_id=0; replica_id<NGPU; replica_id++)); do
     cd "${REPO_ROOT}"
     export CUDA_VISIBLE_DEVICES="${gpu_id}"
     export PYTORCH_ALLOC_CONF="expandable_segments:True"
-    rdzv_port=$((29600 + replica_id))
+    rdzv_port=$((RDZV_BASE_PORT + replica_id))
     uv run --no-sync torchrun \
       --nproc_per_node=1 \
       --rdzv_backend=c10d \

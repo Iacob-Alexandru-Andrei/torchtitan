@@ -33,7 +33,7 @@ hf_assets_path = "./tests/assets/tokenizer"
 
 
 [optimizer]
-name = "DecoupledAdamW"
+name = "AggMoAdamW"
 builder = "mosaic"
 lr = 0.001
 eps = 1e-8
@@ -42,16 +42,18 @@ implementation = "for-loop"
 beta1 = 0.9
 beta2 = 0.999
 decouple = false
+vs = [0.95]
+muon_nesterov = true
 
 [[optimizer.composite]]
-name = "Muon"
+name = "AggMoMuon"
 labels = ["decay_lr"]
-config_overrides = { lr = 0.002, weight_decay = 0.1, muon_nesterov = true, beta1 = 0.9, adjust_lr_fn = "match_rms_adamw" }
+config_overrides = { lr = 0.002, weight_decay = 0.1, eps = 1e-7, muon_nesterov = true, beta1 = 0.9, adjust_lr_fn = "match_rms_adamw", vs = [0.95] }
 
 [[optimizer.composite]]
-name = "DecoupledAdamW"
+name = "AggMoAdamW"
 default = true
-config_overrides = { lr = 0.001, weight_decay = 0.1, betas = [0.9, 0.999], decouple = false }
+config_overrides = { lr = 0.001, weight_decay = 0.1, betas = [0.9, 0.999], decouple = false, vs = [0.95] }
 
 
 [optimizer.desloc]
@@ -93,8 +95,8 @@ switch_scale = 1.0
 [fl_metrics.hyperparameter_switch]
 enabled = true
 steps = [2049]
-new_vs = [0.98]
-new_betas = [0.9,0.999]
+new_vs = [0.95]
+new_betas = [0.999,0.999]
 reset_momenta = ["exp_avg"]
 
 [training]
@@ -1120,7 +1122,6 @@ streams = ["stream_40", "stream_41", "stream_42", "stream_43", "stream_44", "str
 
 [mosaic_dataloader.dataset.val.sampling_groups.group_3]
 streams = ["stream_60", "stream_61", "stream_62", "stream_63", "stream_64", "stream_65", "stream_66", "stream_67", "stream_68", "stream_69", "stream_70", "stream_71", "stream_72", "stream_73", "stream_74", "stream_75", "stream_76", "stream_77", "stream_78", "stream_79"]
-
 
 
 
