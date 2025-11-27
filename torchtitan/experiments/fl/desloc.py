@@ -58,6 +58,7 @@ class ParameterFragmentConfig:
 
     manager: Any
     model: nn.Module
+    param_entries: list[tuple[str, nn.Parameter]] | None
     sync_every: int
     backup_device: torch.device | None
     pin_memory: bool
@@ -74,6 +75,7 @@ class OptimizerFragmentConfig:
 
     manager: Any
     model: nn.Module
+    param_entries: list[tuple[str, nn.Parameter]] | None
     optimizer: Optimizer
     state_key: str
     sync_every: int
@@ -171,6 +173,7 @@ def _partition_named_parameters(
     model: nn.Module,
     fragments: int,
     *,
+    allowed_params: set[nn.Parameter] | None = None,
     strategy: str = "strided",
     custom_fragments: Sequence[Sequence[str]] | None = None,
 ) -> list[list[tuple[str, nn.Parameter]]]:
@@ -179,7 +182,11 @@ def _partition_named_parameters(
         msg = "desloc.streaming.fragments must be a positive integer."
         raise ValueError(msg)
 
-    named_params = list(model.named_parameters())
+    named_params = [
+        (name, param)
+        for name, param in model.named_parameters()
+        if allowed_params is None or param in allowed_params
+    ]
     if not named_params:
         return []
 
@@ -459,11 +466,17 @@ class _ParameterFragment(_BaseFragment):
         super().__init__(config.sync_every)
         self._manager = config.manager
         self._model = config.model
+        self._param_entries = config.param_entries
         self._backup_device = config.backup_device
         self._pin_memory = config.pin_memory
         self._name_prefix = config.name_prefix
 
-        self._param_map = dict(self._model.named_parameters())
+        entries = (
+            self._param_entries
+            if self._param_entries is not None
+            else list(self._model.named_parameters())
+        )
+        self._param_map = dict(entries)
         self._original_parameters: dict[str, torch.Tensor] = {}
         self._averaged_parameters: list[tuple[str, torch.Tensor]] = []
 
@@ -487,7 +500,7 @@ class _ParameterFragment(_BaseFragment):
             msg = "outer_optimizer must be an Optimizer, DesLocOuterOptimizerConfig, or None."
             raise TypeError(msg)
 
-        self._init_backup_storage()
+        self._init_backup_storage(entries)
         self.save_state()
         if self._outer_optimizer is not None:
             self._reference_synced = True
@@ -495,8 +508,13 @@ class _ParameterFragment(_BaseFragment):
     def set_metrics_logger(self, logger_fn: Callable[[dict[str, float]], None] | None) -> None:
         self._metrics_logger = logger_fn
 
-    def _init_backup_storage(self) -> None:
-        for name, param in self._model.named_parameters():
+    def _iter_named_parameters(self) -> list[tuple[str, nn.Parameter]]:
+        if self._param_entries is not None:
+            return self._param_entries
+        return list(self._model.named_parameters())
+
+    def _init_backup_storage(self, entries: list[tuple[str, nn.Parameter]]) -> None:
+        for name, param in entries:
             local_tensor = _extract_local_tensor(param.data)
             device = self._backup_device if self._backup_device is not None else local_tensor.device
             backup = torch.empty_like(local_tensor, device=device)
@@ -506,12 +524,12 @@ class _ParameterFragment(_BaseFragment):
 
     def save_state(self) -> None:
         with torch.no_grad():
-            for name, param in self._model.named_parameters():
+            for name, param in self._iter_named_parameters():
                 self._original_parameters[name].copy_(_extract_local_tensor(param.data), non_blocking=True)
 
     def restore_state(self) -> None:
         with torch.no_grad():
-            for name, param in self._model.named_parameters():
+            for name, param in self._iter_named_parameters():
                 _copy_into_tensor(param.data, self._original_parameters[name])
 
     def prepare_sync(self) -> list[Any]:
@@ -655,20 +673,31 @@ class _OptimizerStateFragment(_BaseFragment):
         super().__init__(config.sync_every)
         self._manager = config.manager
         self._model = config.model
+        self._param_entries = config.param_entries
         self._optimizer = config.optimizer
         self.state_key = config.state_key
         self._backup_device = config.backup_device
         self._name_prefix = config.name_prefix
 
-        self._param_map = dict(self._model.named_parameters())
+        entries = (
+            self._param_entries
+            if self._param_entries is not None
+            else list(self._model.named_parameters())
+        )
+        self._param_map = dict(entries)
         self._original_state_tensors: dict[str, torch.Tensor] = {}
         self._averaged_state_tensors: list[torch.Tensor] = []
 
-        self._init_backup_storage()
+        self._init_backup_storage(entries)
         self.save_state()
 
-    def _init_backup_storage(self) -> None:
-        for name, param in self._model.named_parameters():
+    def _iter_named_parameters(self) -> list[tuple[str, nn.Parameter]]:
+        if self._param_entries is not None:
+            return self._param_entries
+        return list(self._model.named_parameters())
+
+    def _init_backup_storage(self, entries: list[tuple[str, nn.Parameter]]) -> None:
+        for name, param in entries:
             state = self._optimizer.state.get(param, {})
             tensor = state.get(self.state_key)
             if isinstance(tensor, torch.Tensor):
@@ -1365,9 +1394,26 @@ class DesLocController:
         self._quorum_timeout = timedelta(seconds=max(1, config.quorum_timeout_seconds))
         self._optimizer_state_sync_enabled = not config.disable_optimizer_state_sync
 
+        opt_params = {
+            param
+            for group in self._optimizer.param_groups
+            for param in group["params"]
+            if isinstance(param, nn.Parameter)
+        }
+        if not opt_params:
+            msg = "DES-LOC streaming requires the optimizer to own at least one parameter."
+            raise ValueError(msg)
+        opt_param_entries = [
+            (name, param) for name, param in self._model.named_parameters() if param in opt_params
+        ]
+        if not opt_param_entries:
+            msg = "DES-LOC requires the optimizer to own at least one parameter."
+            raise ValueError(msg)
+
         param_fragment_cfg = ParameterFragmentConfig(
             manager=config.manager,
             model=config.model,
+            param_entries=opt_param_entries,
             sync_every=config.param_sync_every,
             backup_device=config.backup_device,
             pin_memory=config.pin_memory,
@@ -1469,6 +1515,7 @@ class DesLocController:
             fragment_config = OptimizerFragmentConfig(
                 manager=self._manager,
                 model=self._model,
+                param_entries=opt_param_entries,
                 optimizer=self._optimizer,
                 state_key=key,
                 sync_every=sync_intervals[idx],
@@ -1564,6 +1611,13 @@ class StreamingDesLocController:
         self._streaming_cfg = streaming
         self._optimizer_state_sync_enabled = not config.disable_optimizer_state_sync
 
+        opt_params = {
+            param
+            for group in self._optimizer.param_groups
+            for param in group["params"]
+            if isinstance(param, nn.Parameter)
+        }
+
         fragment_strategy = getattr(streaming, "fragment_strategy", "strided")
         custom_fragments = getattr(streaming, "custom_fragments", None)
         if fragment_strategy == "custom" and not custom_fragments:
@@ -1573,6 +1627,7 @@ class StreamingDesLocController:
         partitions = _partition_named_parameters(
             self._model,
             streaming.fragments,
+            allowed_params=opt_params,
             strategy=fragment_strategy,
             custom_fragments=custom_fragments,
         )
