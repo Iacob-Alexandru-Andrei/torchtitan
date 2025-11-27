@@ -62,6 +62,10 @@ SVD_PROJECTION = "svd"
 COLUMN_PROJECTION = "columns"
 RANDOM_PROJECTION = "random"
 
+PROJECT_REINIT_MODE = "project"
+ZERO_REINIT_MODE = "zero"
+VALID_REINIT_MODES = {PROJECT_REINIT_MODE, ZERO_REINIT_MODE}
+
 
 @dataclass(frozen=True)
 class GaLoreMomentumProjectionParams:
@@ -78,6 +82,7 @@ class GaLoreMomentumProjectionParams:
     random_seed: int | None
     random_std: float
     log_metrics: bool
+    reinit_mode: str = PROJECT_REINIT_MODE
 
 
 @dataclass(frozen=True)
@@ -1242,6 +1247,73 @@ def _apply_projection(tensor: Tensor, basis: ProjectionBasis, proj_type: str) ->
     return projected.to(device=tensor.device, dtype=original_dtype)
 
 
+_SECOND_MOMENT_HINTS = ("second_moment",)
+
+
+def _is_second_moment_key(key: str) -> bool:
+    """Heuristically detect optimizer second-moment buffers (e.g., ``exp_avg_sq``)."""
+    if key.endswith("_sq"):
+        return True
+    return any(hint in key for hint in _SECOND_MOMENT_HINTS)
+
+
+def _apply_squared_projection(tensor: Tensor, basis: ProjectionBasis, proj_type: str) -> Tensor:
+    """Apply a projection where the basis weights are squared element-wise."""
+    working = tensor.float()
+
+    if isinstance(basis, list):
+        left_basis, right_basis = basis
+        temp = _apply_squared_projection(working, left_basis, LEFT_PROJ)
+        return _apply_squared_projection(temp, right_basis, RIGHT_PROJ)
+
+    weights = basis.to(device=working.device, dtype=working.dtype).pow(2)
+
+    if proj_type == RIGHT_PROJ:
+        return torch.einsum("...i,ji->...j", working, weights)
+    if proj_type == LEFT_PROJ:
+        return torch.einsum("ij,i...->j...", weights, working)
+    msg = "Positive projection only supports left/right GaLore projections."
+    raise ValueError(msg)
+
+
+def _apply_positive_projection(
+    tensor: Tensor,
+    basis: ProjectionBasis,
+    proj_type: str,
+    *,
+    reference_moment: Tensor | None = None,
+    beta2: float | None = None,
+) -> Tensor:
+    r"""Project ``tensor`` while preserving non-negativity.
+
+    When ``reference_moment`` and ``beta2`` are provided, apply the variance
+    preserving rule:
+
+    .. math::
+
+        v_{t-1/2} = (1-\beta_2) (U^\top U_{t-1})^2 (\hat v_{t-1} - \hat m_{t-1}^2)
+        + (U^\top U_{t-1} \hat m_{t-1})^2,
+
+    followed by clipping to keep the estimate non-negative. Otherwise, fall
+    back to the legacy squared-basis projection.
+    """
+    working = tensor.float()
+    original_dtype = tensor.dtype
+
+    if reference_moment is None or beta2 is None:
+        projected = _apply_squared_projection(working, basis, proj_type)
+        return projected.to(device=tensor.device, dtype=original_dtype)
+
+    mean_reference = reference_moment.to(device=working.device, dtype=working.dtype)
+    projected_mean = _apply_projection(mean_reference, basis, proj_type).to(dtype=working.dtype)
+    centered_variance = torch.clamp(working - mean_reference.pow(2), min=0.0)
+    projected_centered = _apply_squared_projection(centered_variance, basis, proj_type)
+
+    beta_scale = 1.0 - float(beta2)
+    combined = torch.abs(projected_centered.mul(beta_scale) + projected_mean.pow(2))
+    return combined.to(device=tensor.device, dtype=original_dtype)
+
+
 class GaLoreMomentumProjectionCallback(Callback):
     """Project GaLore optimizer momenta to a new rank at configured steps."""
 
@@ -1258,6 +1330,10 @@ class GaLoreMomentumProjectionCallback(Callback):
         self.random_seed = params.random_seed
         self.random_std = params.random_std
         self.log_metrics = params.log_metrics
+        self.reinit_mode = params.reinit_mode.lower()
+        if self.reinit_mode not in VALID_REINIT_MODES:
+            msg = f"Unknown GaLore momentum reinit mode {self.reinit_mode!r}."
+            raise ValueError(msg)
         self._applied_steps: set[int] = set()
 
     def on_step_end(self, context: CallbackStepContext) -> None:
@@ -1343,13 +1419,21 @@ class GaLoreMomentumProjectionCallback(Callback):
             rank = _clamp_galore_rank(params, target_rank)
             group["rank"] = rank
             for param in params:
-                self._project_param_state(
-                    optimizer=optimizer,
-                    param=param,
-                    group=group,
-                    rank=rank,
-                    generator=generator,
-                )
+                if self.reinit_mode == ZERO_REINIT_MODE:
+                    self._reset_param_state(
+                        optimizer=optimizer,
+                        param=param,
+                        group=group,
+                        rank=rank,
+                    )
+                else:
+                    self._project_param_state(
+                        optimizer=optimizer,
+                        param=param,
+                        group=group,
+                        rank=rank,
+                        generator=generator,
+                    )
 
     def _project_param_state(
         self,
@@ -1369,6 +1453,19 @@ class GaLoreMomentumProjectionCallback(Callback):
 
         resolved_proj_type = _resolve_galore_proj_type(param, group.get("proj_type", STD_PROJ))
         state_basis: ProjectionBasis | None = None
+        betas = group.get("betas")
+        beta2: float | None = None
+        if isinstance(betas, Sequence) and len(betas) >= 2:
+            beta2 = float(betas[1])
+
+        first_moment_key = self.shared_source
+        if first_moment_key is None:
+            first_moment_key = next((key for key in self.state_keys if not _is_second_moment_key(key)), None)
+        original_first_moment: Tensor | None = None
+        if first_moment_key is not None:
+            source_tensor = state.get(first_moment_key)
+            if isinstance(source_tensor, Tensor):
+                original_first_moment = source_tensor.detach().clone()
 
         if self.shared_source is not None:
             source_tensor = state.get(self.shared_source)
@@ -1386,29 +1483,121 @@ class GaLoreMomentumProjectionCallback(Callback):
 
         for key in self.state_keys:
             tensor = state.get(key)
-            if not isinstance(tensor, Tensor):
-                continue
-            if self.shared_source is not None and key == self.shared_source and state_basis is not None:
-                continue
-            basis = state_basis
-            if basis is None:
-                basis = _build_projection_basis(
-                    tensor,
-                    rank,
-                    resolved_proj_type,
-                    self.transform,
-                    column_count=self.column_count,
-                    random_std=self.random_std,
-                    generator=generator,
-                )
-            state[key] = _apply_projection(tensor, basis, resolved_proj_type)
+            self._project_state_entry(
+                state=state,
+                key=key,
+                tensor=tensor,
+                resolved_proj_type=resolved_proj_type,
+                shared_basis=state_basis,
+                rank=rank,
+                generator=generator,
+                reference_moment=original_first_moment,
+                beta2=beta2,
+            )
 
+        self._update_projector_meta(state, group, rank)
+
+    def _project_state_entry(
+        self,
+        *,
+        state: dict[str, Any],
+        key: str,
+        tensor: Tensor | None,
+        resolved_proj_type: str,
+        shared_basis: ProjectionBasis | None,
+        rank: int,
+        generator: torch.Generator | None,
+        reference_moment: Tensor | None,
+        beta2: float | None,
+    ) -> None:
+        if not isinstance(tensor, Tensor):
+            return
+        if self.shared_source is not None and key == self.shared_source and shared_basis is not None:
+            return
+
+        basis = shared_basis
+        if basis is None:
+            basis = _build_projection_basis(
+                tensor,
+                rank,
+                resolved_proj_type,
+                self.transform,
+                column_count=self.column_count,
+                random_std=self.random_std,
+                generator=generator,
+            )
+
+        use_positive_projection = self.transform == SVD_PROJECTION and _is_second_moment_key(key)
+        if use_positive_projection:
+            state[key] = _apply_positive_projection(
+                tensor,
+                basis,
+                resolved_proj_type,
+                reference_moment=reference_moment,
+                beta2=beta2,
+            )
+            return
+
+        state[key] = _apply_projection(tensor, basis, resolved_proj_type)
+
+    def _reset_param_state(
+        self,
+        optimizer: GaLore,
+        param: Tensor,
+        group: Mapping[str, Any],
+        rank: int,
+    ) -> None:
+        state = optimizer.state[param]
+        resolved_proj_type = _resolve_galore_proj_type(param, group.get("proj_type", STD_PROJ))
+
+        for key in self.state_keys:
+            tensor = state.get(key)
+            if isinstance(tensor, Tensor):
+                state[key] = self._zero_like_with_rank(tensor, rank, resolved_proj_type)
+
+        if self.shared_source and self.shared_source not in self.state_keys:
+            tensor = state.get(self.shared_source)
+            if isinstance(tensor, Tensor):
+                state[self.shared_source] = self._zero_like_with_rank(tensor, rank, resolved_proj_type)
+
+        self._reset_bias_correction(state, param.device)
+        self._update_projector_meta(state, group, rank)
+
+    def _reset_bias_correction(self, state: dict[str, Any], device: torch.device) -> None:
+        step_value = state.get("step")
+        if isinstance(step_value, torch.Tensor):
+            step_value.zero_()
+        else:
+            state["step"] = torch.zeros((), dtype=torch.float32, device=device)
+
+    def _zero_like_with_rank(self, tensor: Tensor, rank: int, proj_type: str) -> Tensor:
+        shape = list(tensor.shape)
+        if not shape:
+            shape = [rank]
+        elif proj_type == RIGHT_PROJ:
+            shape[-1] = rank
+        elif proj_type == LEFT_PROJ:
+            shape[0] = rank
+        elif proj_type == FULL_PROJ:
+            shape = [rank, rank]
+        else:
+            msg = f"Unsupported projection type {proj_type!r} for zero reinit."
+            raise ValueError(msg)
+        return tensor.new_zeros(tuple(shape))
+
+    def _update_projector_meta(
+        self,
+        state: dict[str, Any],
+        group: Mapping[str, Any],
+        rank: int,
+    ) -> None:
         state["projector_meta"] = {
             "rank": rank,
             "update_proj_gap": group.get("update_proj_gap", 200),
             "scale": group.get("scale", 1.0),
             "proj_type": group.get("proj_type", STD_PROJ),
         }
+        state.pop("projector_basis", None)
 
 
 class HyperparameterSwitchCallback(Callback):
@@ -1492,6 +1681,7 @@ class HyperparameterSwitchCallback(Callback):
                 group[key] = tuple(values)
 
     def _reset_momenta(self, optimizer_state: dict[Any, dict[str, Any]], step: int) -> None:
+        del step
         for state in optimizer_state.values():
             for name in self.reset_momenta:
                 if name not in state:
@@ -1667,6 +1857,7 @@ class FLMetricsProcessor(MetricsProcessor):
             random_seed=projection_config.random_seed,
             random_std=float(projection_config.random_std),
             log_metrics=projection_config.log_metrics,
+            reinit_mode=str(projection_config.reinit_mode).lower(),
         )
         projection_callback = GaLoreMomentumProjectionCallback(params)
         if not projection_callback.enabled:

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Sweep GaLore momentum projection strategies, ranks, and learning rates.
+# Sweep GaLore ranks and learning rates via sbatch without reusing a warmed checkpoint.
 set -euo pipefail
 
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
@@ -8,17 +8,14 @@ TRAIN_MODULE=${TRAIN_MODULE:-"torchtitan.experiments.fl.train"}
 RUN_PREFIX=${RUN_PREFIX:-"icml2026-galore"}
 LOG_RANK=${LOG_RANK:-0}
 
-PROJECTION_STEP=${PROJECTION_STEP:-2048}
-PROJECTION_RANDOM_SEED_BASE=${PROJECTION_RANDOM_SEED_BASE:-1337}
-PROJECTION_RANDOM_STD=${PROJECTION_RANDOM_STD:-1.0}
-PROJECTION_MODES=${PROJECTION_MODES:-"columns_shared random_shared"} # svd_shared to be fixed
 PROJECTION_RANKS=${PROJECTION_RANKS:-"8 16 32 64 128 256"}
-LR_VALUES=${LR_VALUES:-"0.0005 0.001 0.002 0.004"}
+# LR_VALUES=${LR_VALUES:-"0.0005 0.001 0.002 0.004 0.008"}
+LR_VALUES=${LR_VALUES:-"0.016"}
+ROTATE_MOMENTS_OPTIONS=${ROTATE_MOMENTS_OPTIONS:-"false true"}
 
 RUN_INDEX=${RUN_INDEX:-}
 RUN_INDEX_OFFSET=${RUN_INDEX_OFFSET:-0}
-RUN_INDEX_RANGE=${RUN_INDEX_RANGE:-0-0}
-USE_SBATCH=${USE_SBATCH:-false}
+RUN_INDEX_RANGE=${RUN_INDEX_RANGE:-}
 DRY_RUN=${DRY_RUN:-false}
 SBATCH_CPUS_PER_TASK=${SBATCH_CPUS_PER_TASK:-8}
 SBATCH_GPUS_PER_TASK=${SBATCH_GPUS_PER_TASK:-1}
@@ -42,19 +39,16 @@ Options:
   --range START-END        Run only the 0-indexed inclusive range of sweep jobs.
   --run-index INDEX        Run only the 1-indexed job at INDEX.
   --run-index-offset N     Skip the first N jobs before applying other filters.
-  --sbatch                 Submit runs via sbatch instead of launching locally.
-  --no-sbatch              Force local execution (default).
   --dry-run                Print matching runs without launching anything.
   -h, --help               Show this message.
   --                       Treat the remaining arguments as training args.
 
 Environment variables (override defaults):
-  RUN_INDEX, RUN_INDEX_OFFSET, RUN_INDEX_RANGE, USE_SBATCH, DRY_RUN
+  RUN_INDEX, RUN_INDEX_OFFSET, RUN_INDEX_RANGE, DRY_RUN
   SBATCH_CPUS_PER_TASK, SBATCH_GPUS_PER_TASK, SBATCH_MAX_CHAINS, SBATCH_MEM, SBATCH_TIME
   SBATCH_PARTITION, SBATCH_ACCOUNT, SBATCH_QOS, SBATCH_CONSTRAINT
   SBATCH_COMMENT, SBATCH_LOG_DIR, SBATCH_ADDITIONAL_ARGS, SBATCH_NODE
-  PROJECTION_MODES, PROJECTION_RANKS, LR_VALUES, PROJECTION_STEP
-  PROJECTION_RANDOM_SEED_BASE, PROJECTION_RANDOM_STD
+  PROJECTION_RANKS, LR_VALUES, ROTATE_MOMENTS_OPTIONS
 EOF
 }
 
@@ -84,14 +78,6 @@ while [[ $# -gt 0 ]]; do
       fi
       RUN_INDEX_OFFSET=$2
       shift 2
-      ;;
-    --sbatch)
-      USE_SBATCH=true
-      shift
-      ;;
-    --no-sbatch)
-      USE_SBATCH=false
-      shift
       ;;
     --dry-run)
       DRY_RUN=true
@@ -124,7 +110,6 @@ normalize_bool() {
   esac
 }
 
-USE_SBATCH=$(normalize_bool "${USE_SBATCH}")
 DRY_RUN=$(normalize_bool "${DRY_RUN}")
 
 if ! [[ "${SBATCH_MAX_CHAINS}" =~ ^[0-9]+$ ]] || (( SBATCH_MAX_CHAINS < 1 )); then
@@ -146,14 +131,19 @@ if [[ -z "${SBATCH_ADDITIONAL_ARGS}" ]]; then
   SBATCH_EXTRA_ARRAY=()
 fi
 
-read -r -a PROJECTION_MODE_ARRAY <<< "${PROJECTION_MODES}"
 read -r -a PROJECTION_RANK_ARRAY <<< "${PROJECTION_RANKS}"
 read -r -a LR_ARRAY <<< "${LR_VALUES}"
+read -r -a ROTATE_MOMENTS_ARRAY_RAW <<< "${ROTATE_MOMENTS_OPTIONS}"
+ROTATE_MOMENTS_ARRAY=()
+for rotate_option in "${ROTATE_MOMENTS_ARRAY_RAW[@]}"; do
+  normalized=$(normalize_bool "${rotate_option}")
+  if [[ "${normalized}" != "true" && "${normalized}" != "false" ]]; then
+    echo "ROTATE_MOMENTS_OPTIONS entries must be boolean strings (got ${rotate_option})." >&2
+    exit 1
+  fi
+  ROTATE_MOMENTS_ARRAY+=("${normalized}")
+done
 
-if (( ${#PROJECTION_MODE_ARRAY[@]} == 0 )); then
-  echo "PROJECTION_MODES must contain at least one entry." >&2
-  exit 1
-fi
 if (( ${#PROJECTION_RANK_ARRAY[@]} == 0 )); then
   echo "PROJECTION_RANKS must contain at least one entry." >&2
   exit 1
@@ -162,8 +152,12 @@ if (( ${#LR_ARRAY[@]} == 0 )); then
   echo "LR_VALUES must contain at least one entry." >&2
   exit 1
 fi
+if (( ${#ROTATE_MOMENTS_ARRAY[@]} == 0 )); then
+  echo "ROTATE_MOMENTS_OPTIONS must contain at least one entry." >&2
+  exit 1
+fi
 
-TOTAL_RUNS=$(( ${#PROJECTION_MODE_ARRAY[@]} * ${#PROJECTION_RANK_ARRAY[@]} * ${#LR_ARRAY[@]} ))
+TOTAL_RUNS=$(( ${#PROJECTION_RANK_ARRAY[@]} * ${#LR_ARRAY[@]} * ${#ROTATE_MOMENTS_ARRAY[@]} ))
 
 RANGE_ENABLED=false
 RANGE_START=
@@ -246,9 +240,9 @@ should_run_combination() {
 count_selected_runs() {
   local idx=0
   local selected=0
-  for mode in "${PROJECTION_MODE_ARRAY[@]}"; do
-    for rank in "${PROJECTION_RANK_ARRAY[@]}"; do
-      for lr in "${LR_ARRAY[@]}"; do
+  for rank in "${PROJECTION_RANK_ARRAY[@]}"; do
+    for lr in "${LR_ARRAY[@]}"; do
+      for rotate_flag in "${ROTATE_MOMENTS_ARRAY[@]}"; do
         ((++idx))
         if should_run_combination "${idx}"; then
           ((++selected))
@@ -266,29 +260,29 @@ if (( SELECTED_RUNS == 0 )); then
 fi
 
 declare -a RUN_PLAN_INDICES=()
-declare -a RUN_PLAN_MODES=()
 declare -a RUN_PLAN_RANKS=()
 declare -a RUN_PLAN_LRS=()
+declare -a RUN_PLAN_ROTATES=()
 
 combination_index=0
-for mode in "${PROJECTION_MODE_ARRAY[@]}"; do
-  for rank in "${PROJECTION_RANK_ARRAY[@]}"; do
-    for lr in "${LR_ARRAY[@]}"; do
+for rank in "${PROJECTION_RANK_ARRAY[@]}"; do
+  for lr in "${LR_ARRAY[@]}"; do
+    for rotate_flag in "${ROTATE_MOMENTS_ARRAY[@]}"; do
       ((++combination_index))
       if ! should_run_combination "${combination_index}"; then
         continue
       fi
       RUN_PLAN_INDICES+=("${combination_index}")
-      RUN_PLAN_MODES+=("${mode}")
       RUN_PLAN_RANKS+=("${rank}")
       RUN_PLAN_LRS+=("${lr}")
+      RUN_PLAN_ROTATES+=("${rotate_flag}")
     done
   done
 done
 
 SELECTED_RUNS=${#RUN_PLAN_INDICES[@]}
 
-SWEEP_CONFIG_STRING="proj_modes=${PROJECTION_MODES}|proj_ranks=${PROJECTION_RANKS}|lrs=${LR_VALUES}|proj_step=${PROJECTION_STEP}|train_module=${TRAIN_MODULE}|config=${CONFIG_FILE}"
+SWEEP_CONFIG_STRING="proj_ranks=${PROJECTION_RANKS}|lrs=${LR_VALUES}|rotate=${ROTATE_MOMENTS_OPTIONS}|train_module=${TRAIN_MODULE}|config=${CONFIG_FILE}"
 if command -v sha1sum >/dev/null 2>&1; then
   SWEEP_HASH=$(printf "%s" "${SWEEP_CONFIG_STRING}" | sha1sum | awk '{print $1}')
 elif command -v shasum >/dev/null 2>&1; then
@@ -307,26 +301,26 @@ PY
 fi
 SWEEP_HASH=${SWEEP_HASH:0:8}
 
-GPU_IDS=${GPU_IDS:-"0"}
 RDZV_HOST=${RDZV_HOST:-"127.0.0.1"}
 RDZV_BASE_PORT=${RDZV_BASE_PORT:-46000}
 LIGHTHOUSE_HOST=${LIGHTHOUSE_HOST:-"127.0.0.1"}
 LIGHTHOUSE_BASE_PORT=${LIGHTHOUSE_BASE_PORT:-46100}
 PORT_STRIDE=${PORT_STRIDE:-4}
 LIGHTHOUSE_PROTOCOL=${LIGHTHOUSE_PROTOCOL:-"http"}
-POLL_INTERVAL_SEC=${POLL_INTERVAL_SEC:-5}
 GALORE_REGEX_PATTERN=${GALORE_REGEX_PATTERN:-"attention\\.w[qkv]|attention\\.wo|feed_forward\\.w[12]"}
 GENERATED_CONFIG_DIR=${GENERATED_CONFIG_DIR:-"${SCRIPT_DIR}/generated_configs"}
 
 generate_run_config() {
   local run_uuid=$1
   local target_rank=$2
+  local rotate_flag=$3
   local output_path="${GENERATED_CONFIG_DIR}/${run_uuid}.toml"
 
   BASE_CONFIG_PATH="${CONFIG_FILE}" \
   OUTPUT_CONFIG_PATH="${output_path}" \
   SWEEP_REGEX_PATTERN="${GALORE_REGEX_PATTERN}" \
   TARGET_RANK="${target_rank}" \
+  ROTATE_MOMENTS_FLAG="${rotate_flag}" \
   uv run --no-sync python3  <<'PY'
 import os
 import sys
@@ -344,10 +338,21 @@ base = Path(os.environ["BASE_CONFIG_PATH"])
 output = Path(os.environ["OUTPUT_CONFIG_PATH"])
 pattern = os.environ["SWEEP_REGEX_PATTERN"]
 rank = int(os.environ["TARGET_RANK"])
+rotate_flag = os.environ["ROTATE_MOMENTS_FLAG"].strip().lower()
+
+true_values = {"true", "1", "yes", "on"}
+false_values = {"false", "0", "no", "off", ""}
+if rotate_flag in true_values:
+  rotate_moments = True
+elif rotate_flag in false_values:
+  rotate_moments = False
+else:
+  raise ValueError(f"Unsupported boolean for rotate_moments_on_refresh: {rotate_flag}")
 
 data = tomllib.loads(base.read_text(encoding="utf-8"))
 optimizer = data.setdefault("optimizer", {})
 regex_entries = optimizer.get("galore_param_regexes")
+optimizer["galore_rotate_moments_on_refresh"] = rotate_moments
 
 normalized: list[dict] = []
 if isinstance(regex_entries, (list, tuple)):
@@ -389,27 +394,13 @@ if [[ ! -f "${CONFIG_FILE}" ]]; then
   exit 1
 fi
 
-declare -a GPU_ARRAY=()
-if [[ "${USE_SBATCH}" == "true" ]]; then
-  :
-else
-    read -r -a GPU_ARRAY <<< "${GPU_IDS}"
-    if [[ "${DRY_RUN}" != "true" && ${#GPU_ARRAY[@]} -eq 0 ]]; then
-      echo "No GPU ids provided via GPU_IDS." >&2
-      exit 1
-    fi
-fi
-
-declare -a GPU_PIDS=()
-declare -a GPU_LABELS=()
-declare -a ALL_PIDS=()
 declare -a SBATCH_JOB_IDS=()
 declare -a SBATCH_CHAIN_LAST_IDS=()
 RUN_COUNTER=0
 
-if [[ "${USE_SBATCH}" == "true" && "${DRY_RUN}" != "true" ]]; then
+if [[ "${DRY_RUN}" != "true" ]]; then
   if ! command -v sbatch >/dev/null 2>&1; then
-    echo "USE_SBATCH=true but sbatch not found in PATH." >&2
+    echo "sbatch not found in PATH; this script requires sbatch submission." >&2
     exit 1
   fi
   if [[ -n "${SBATCH_LOG_DIR}" ]]; then
@@ -417,45 +408,9 @@ if [[ "${USE_SBATCH}" == "true" && "${DRY_RUN}" != "true" ]]; then
   fi
 fi
 
-if [[ "${USE_SBATCH}" == "true" ]]; then
-  for ((chain_idx = 0; chain_idx < SBATCH_MAX_CHAINS; ++chain_idx)); do
-    SBATCH_CHAIN_LAST_IDS[chain_idx]=''
-  done
-fi
-
-for idx in "${!GPU_ARRAY[@]}"; do
-  GPU_PIDS[idx]=''
-  GPU_LABELS[idx]=''
+for ((chain_idx = 0; chain_idx < SBATCH_MAX_CHAINS; ++chain_idx)); do
+  SBATCH_CHAIN_LAST_IDS[chain_idx]=''
 done
-
-cleanup() {
-  for pid in "${ALL_PIDS[@]}"; do
-    if [[ -n "${pid}" ]] && kill -0 "${pid}" 2>/dev/null; then
-      kill "${pid}" 2>/dev/null || true
-    fi
-  done
-}
-trap cleanup INT TERM
-
-wait_for_gpu() {
-  while true; do
-    for idx in "${!GPU_ARRAY[@]}"; do
-      pid=${GPU_PIDS[idx]:-}
-      if [[ -z "${pid}" ]]; then
-        echo "${idx}"
-        return
-      fi
-      if ! kill -0 "${pid}" 2>/dev/null; then
-        wait "${pid}" 2>/dev/null || true
-        GPU_PIDS[idx]=''
-        GPU_LABELS[idx]=''
-        echo "${idx}"
-        return
-      fi
-    done
-    sleep "${POLL_INTERVAL_SEC}"
-  done
-}
 
 sanitize_value() {
   local value=$1
@@ -473,43 +428,17 @@ print_run_plan_table() {
   fi
   echo "" >&2
   echo "Selected run configurations (${total} total):" >&2
-  printf "%-10s %-10s %-18s %-10s %-10s\n" "Idx(1-based)" "Idx(0-based)" "proj_mode" "rank" "lr" >&2
-  printf "%-10s %-10s %-18s %-10s %-10s\n" "----------" "----------" "-----------------" "----" "----" >&2
+  printf "%-10s %-10s %-10s %-10s %-10s\n" "Idx(1-based)" "Idx(0-based)" "rank" "lr" "rotate" >&2
+  printf "%-10s %-10s %-10s %-10s %-10s\n" "----------" "----------" "----" "----" "------" >&2
   for idx in "${!RUN_PLAN_INDICES[@]}"; do
     local combo_index_1=${RUN_PLAN_INDICES[idx]}
     local combo_index_0=$((combo_index_1 - 1))
-    local mode=${RUN_PLAN_MODES[idx]}
     local rank=${RUN_PLAN_RANKS[idx]}
     local lr=${RUN_PLAN_LRS[idx]}
-    printf "%-10s %-10s %-18s %-10s %-10s\n" "${combo_index_1}" "${combo_index_0}" "${mode}" "${rank}" "${lr}" >&2
+    local rotate_flag=${RUN_PLAN_ROTATES[idx]}
+    printf "%-10s %-10s %-10s %-10s %-10s\n" "${combo_index_1}" "${combo_index_0}" "${rank}" "${lr}" "${rotate_flag}" >&2
   done
   echo "" >&2
-}
-
-resolve_projection_mode() {
-  local mode=$1
-  local combo_idx=$2
-  PROJ_TRANSFORM=""
-  PROJ_SHARED_SOURCE="exp_avg"
-  PROJ_COLUMN_COUNT=""
-  PROJ_RANDOM_SEED=""
-
-  case "${mode}" in
-    svd_shared)
-      PROJ_TRANSFORM="svd"
-      ;;
-    random_shared)
-      PROJ_TRANSFORM="random"
-      PROJ_RANDOM_SEED=$((PROJECTION_RANDOM_SEED_BASE + combo_idx))
-      ;;
-    columns_shared)
-      PROJ_TRANSFORM="columns"
-      ;;
-    *)
-      echo "Unknown projection mode ${mode}" >&2
-      exit 1
-      ;;
-  esac
 }
 
 submit_sbatch_job() {
@@ -518,13 +447,12 @@ submit_sbatch_job() {
   local rdzv_endpoint=$3
   local lighthouse_url=$4
   local combo_index_label=$5
-  local mode_label=$6
-  local proj_rank=$7
-  local lr_value=$8
-  local projection_args=$9
-  local dependency_job=${10}
-  local chain_index=${11}
-  local run_config_path=${12}
+  local proj_rank=$6
+  local lr_value=$7
+  local rotate_flag=$8
+  local dependency_job=$9
+  local chain_index=${10}
+  local run_config_path=${11}
 
   local job_name="${RUN_PREFIX}-${SWEEP_HASH}-idx${combo_index_label}"
   local sbatch_opts=(--parsable "-c" "${SBATCH_CPUS_PER_TASK}" "--gres=gpu:${SBATCH_GPUS_PER_TASK}" "--job-name=${job_name}")
@@ -548,7 +476,7 @@ submit_sbatch_job() {
 set -euo pipefail
 echo "==================================================================="
 echo "STARTING SBATCH JOB: ${job_name} (ID: \$SLURM_JOB_ID)"
-echo "Run UUID: ${run_uuid} | Progress: ${run_progress} | mode=${mode_label} | rank=${proj_rank} | lr=${lr_value}"
+echo "Run UUID: ${run_uuid} | Progress: ${run_progress} | rank=${proj_rank} | lr=${lr_value} | rotate=${rotate_flag}"
 echo "Chain Index: ${chain_index} | Dependency: ${dependency_job:-none}"
 echo "Node: \$(hostname) at \$(date)"
 echo "==================================================================="
@@ -576,13 +504,7 @@ uv run --no-sync torchrun \
   --training.global_batch_size 64 \
   --training.local_batch_size 16 \
   --training.steps 6144 \
-  --lr_scheduler.switch_step 2049 \
   --parallelism.data_parallel_replicate_degree 1 \
-  --fl_metrics.galore_projection.enabled \
-  --fl_metrics.galore_projection.steps "${PROJECTION_STEP}" \
-  --fl_metrics.galore_projection.target_ranks "${proj_rank}" \
-  --fl_metrics.galore_projection.random_std "${PROJECTION_RANDOM_STD}" \
-  ${projection_args} \
   ${TRAINING_ARGS_ESCAPED}
 echo "JOB FINISHED: \$(date)"
 EOF
@@ -594,11 +516,7 @@ EOF
   echo "${job_id}"
 }
 
-if [[ "${USE_SBATCH}" == "true" ]]; then
-  EXECUTION_DESC="sbatch submission"
-else
-  EXECUTION_DESC="${#GPU_ARRAY[@]} GPU slot(s)"
-fi
+EXECUTION_DESC="sbatch submission"
 
 if [[ -n "${RUN_INDEX}" ]]; then
   FILTER_DESC="single run ${RUN_INDEX}/${TOTAL_RUNS}"
@@ -611,7 +529,7 @@ else
   FILTER_DESC="all runs"
 fi
 
-echo "Starting GaLore projection sweep hash=${SWEEP_HASH} using ${EXECUTION_DESC}: ${SELECTED_RUNS}/${TOTAL_RUNS} run(s) selected (${FILTER_DESC})." >&2
+echo "Starting GaLore sweep hash=${SWEEP_HASH} using ${EXECUTION_DESC}: ${SELECTED_RUNS}/${TOTAL_RUNS} run(s) selected (${FILTER_DESC})." >&2
 print_run_plan_table "${SELECTED_RUNS}"
 
 timestamp_global=$(date +"%Y%m%d-%H%M%S")
@@ -620,43 +538,25 @@ dispatched_runs=0
 for idx in "${!RUN_PLAN_INDICES[@]}"; do
     combination_index=${RUN_PLAN_INDICES[idx]}
     combination_index_zero=$((combination_index - 1))
-    proj_mode=${RUN_PLAN_MODES[idx]}
     proj_rank=${RUN_PLAN_RANKS[idx]}
     lr_value=${RUN_PLAN_LRS[idx]}
+    rotate_flag=${RUN_PLAN_ROTATES[idx]}
 
-    resolve_projection_mode "${proj_mode}" "${combination_index}"
-
-    PROJECTION_ARGS=(
-      --fl_metrics.galore_projection.transform "${PROJ_TRANSFORM}"
-      --fl_metrics.galore_projection.shared_source "${PROJ_SHARED_SOURCE}"
-    )
-    if [[ -n "${PROJ_COLUMN_COUNT}" ]]; then
-      PROJECTION_ARGS+=(--fl_metrics.galore_projection.column_count "${PROJ_COLUMN_COUNT}")
-    fi
-    if [[ -n "${PROJ_RANDOM_SEED}" ]]; then
-      PROJECTION_ARGS+=(--fl_metrics.galore_projection.random_seed "${PROJ_RANDOM_SEED}")
-    fi
-    PROJECTION_ARGS_ESCAPED=$(serialize_args_array "${PROJECTION_ARGS[@]}")
-
-    proj_label=$(sanitize_value "${proj_mode}")
     rank_label=$(sanitize_value "${proj_rank}")
     lr_label=$(sanitize_value "${lr_value}")
-    run_uuid="${RUN_PREFIX}-${SWEEP_HASH}-${proj_label}-r${rank_label}-lr${lr_label}-${timestamp_global}-idx${combination_index_zero}"
+    rotate_label=$(sanitize_value "${rotate_flag}")
+    run_uuid="${RUN_PREFIX}-${SWEEP_HASH}-r${rank_label}-lr${lr_label}-rot${rotate_label}-${timestamp_global}-idx${combination_index_zero}"
     run_progress="run ${combination_index}/${TOTAL_RUNS}"
 
     if [[ "${DRY_RUN}" != "true" ]]; then
       mkdir -p "${GENERATED_CONFIG_DIR}"
-      run_config_path=$(generate_run_config "${run_uuid}" "${proj_rank}")
+      run_config_path=$(generate_run_config "${run_uuid}" "${proj_rank}" "${rotate_flag}")
     else
       run_config_path="${CONFIG_FILE}"
     fi
 
     if [[ "${DRY_RUN}" == "true" ]]; then
-      if [[ "${USE_SBATCH}" == "true" ]]; then
-        echo "[DRY-RUN][SBATCH] ${run_uuid} (mode=${proj_mode}, rank=${proj_rank}, lr=${lr_value}) [${run_progress}]" >&2
-      else
-        echo "[DRY-RUN][LOCAL] ${run_uuid} (mode=${proj_mode}, rank=${proj_rank}, lr=${lr_value}) [${run_progress}]" >&2
-      fi
+      echo "[DRY-RUN][SBATCH] ${run_uuid} (rank=${proj_rank}, lr=${lr_value}, rotate=${rotate_flag}) [${run_progress}]" >&2
       continue
     fi
 
@@ -667,90 +567,30 @@ for idx in "${!RUN_PLAN_INDICES[@]}"; do
     lighthouse_url="${LIGHTHOUSE_PROTOCOL}://${LIGHTHOUSE_HOST}:${lighthouse_port}"
     RUN_COUNTER=${launch_index}
 
-    if [[ "${USE_SBATCH}" == "true" ]]; then
-      chain_index=$((dispatched_runs % SBATCH_MAX_CHAINS))
-      dependency_job=${SBATCH_CHAIN_LAST_IDS[chain_index]:-}
-      if [[ -n "${dependency_job}" ]]; then
-        echo "[SBATCH] Chain ${chain_index}: submitting ${run_uuid} after job ${dependency_job}." >&2
-      else
-        echo "[SBATCH] Chain ${chain_index}: submitting ${run_uuid} with no dependency." >&2
-      fi
-      job_id=$(submit_sbatch_job "${run_uuid}" "${run_progress}" "${rdzv_endpoint}" "${lighthouse_url}" "${combination_index_zero}" "${proj_mode}" "${proj_rank}" "${lr_value}" "${PROJECTION_ARGS_ESCAPED}" "${dependency_job}" "${chain_index}" "${run_config_path}")
-      if [[ -z "${job_id}" ]]; then
-        echo "Aborting sweep after failed sbatch submission." >&2
-        exit 1
-      fi
-      SBATCH_CHAIN_LAST_IDS[chain_index]="${job_id}"
-      SBATCH_JOB_IDS+=("${job_id}")
-      echo "[SBATCH] Submitted ${run_uuid} (${run_progress}) as job ${job_id} | mode=${proj_mode}, rank=${proj_rank}, lr=${lr_value}" >&2
-      sleep 30
+    chain_index=$((dispatched_runs % SBATCH_MAX_CHAINS))
+    dependency_job=${SBATCH_CHAIN_LAST_IDS[chain_index]:-}
+    if [[ -n "${dependency_job}" ]]; then
+      echo "[SBATCH] Chain ${chain_index}: submitting ${run_uuid} after job ${dependency_job}." >&2
     else
-      gpu_slot=$(wait_for_gpu)
-      gpu_id=${GPU_ARRAY[gpu_slot]}
-      echo "[GPU ${gpu_id}] Launching run ${run_uuid} (mode=${proj_mode}, rank=${proj_rank}, lr=${lr_value}) [${run_progress}]" >&2
-      echo "           torchrun rendezvous: ${rdzv_endpoint}, lighthouse: ${lighthouse_url}" >&2
-
-      (
-        export CUDA_VISIBLE_DEVICES="${gpu_id}"
-        export TORCHFT_LIGHTHOUSE="${lighthouse_url}"
-        export RUN_UUID="${run_uuid}"
-        export WANDB_PROJECT=${WANDB_PROJECT:-"galore-tune-lr"}
-        export WANDB_TEAM=${WANDB_TEAM:-"camlsys"}
-        export WANDB_RUN_NAME="${run_uuid}"
-        export TORCHTITAN_FORCE_WANDB_WORKER_SUFFIX=${TORCHTITAN_FORCE_WANDB_WORKER_SUFFIX:-1}
-        export S3_ENDPOINT_URL='http://taranaki.cl.cam.ac.uk:9000'
-
-uv run --no-sync torchrun \
-  --nproc_per_node=1 \
-  --rdzv_backend=c10d \
-  --rdzv_endpoint="${rdzv_endpoint}" \
-  --rdzv_id "${run_uuid}" \
-  --local-ranks-filter="${LOG_RANK}" \
-  --role rank \
-  --tee 3 \
-  -m "${TRAIN_MODULE}" \
-  --job.config_file "${run_config_path}" \
-  --optimizer.builder mosaic \
-  --optimizer.name GaLore \
-  --optimizer.lr "${lr_value}" \
-  --training.global_batch_size 64 \
-          --training.local_batch_size 64 \
-          --training.steps 12288 \
-          --lr_scheduler.switch_step 2049 \
-          --parallelism.data_parallel_replicate_degree 1 \
-          --fl_metrics.galore_projection.enabled true \
-          --fl_metrics.galore_projection.steps "${PROJECTION_STEP}" \
-          --fl_metrics.galore_projection.target_ranks "${proj_rank}" \
-          --fl_metrics.galore_projection.random_std "${PROJECTION_RANDOM_STD}" \
-          "${PROJECTION_ARGS[@]}" \
-          "${USER_TRAINING_ARGS[@]}"
-      ) &
-
-      pid=$!
-      GPU_PIDS[gpu_slot]=$pid
-      GPU_LABELS[gpu_slot]="${run_uuid}"
-      ALL_PIDS+=($pid)
+      echo "[SBATCH] Chain ${chain_index}: submitting ${run_uuid} with no dependency." >&2
     fi
+    job_id=$(submit_sbatch_job "${run_uuid}" "${run_progress}" "${rdzv_endpoint}" "${lighthouse_url}" "${combination_index_zero}" "${proj_rank}" "${lr_value}" "${rotate_flag}" "${dependency_job}" "${chain_index}" "${run_config_path}")
+    if [[ -z "${job_id}" ]]; then
+      echo "Aborting sweep after failed sbatch submission." >&2
+      exit 1
+    fi
+    SBATCH_CHAIN_LAST_IDS[chain_index]="${job_id}"
+    SBATCH_JOB_IDS+=("${job_id}")
+    echo "[SBATCH] Submitted ${run_uuid} (${run_progress}) as job ${job_id} | rank=${proj_rank}, lr=${lr_value}, rotate=${rotate_flag}" >&2
+    sleep 30
 
     ((++dispatched_runs))
 done
 
 if [[ "${DRY_RUN}" == "true" ]]; then
   echo "Dry run complete: ${SELECTED_RUNS} run(s) matched the filters (no jobs launched)." >&2
-elif [[ "${USE_SBATCH}" == "true" ]]; then
-  echo "Submitted ${dispatched_runs} job(s) via sbatch (hash ${SWEEP_HASH})." >&2
 else
-  echo "All ${dispatched_runs} job(s) queued; waiting for completion." >&2
-  for pid in "${GPU_PIDS[@]}"; do
-    if [[ -n "${pid}" ]]; then
-      wait "${pid}" 2>/dev/null || true
-    fi
-  done
-
-  # Ensure no background job remains
-  if [[ ${#ALL_PIDS[@]} -gt 0 ]]; then
-    wait "${ALL_PIDS[@]}" 2>/dev/null || true
-  fi
+  echo "Submitted ${dispatched_runs} job(s) via sbatch (hash ${SWEEP_HASH})." >&2
 fi
 
 echo "Sweep complete." >&2

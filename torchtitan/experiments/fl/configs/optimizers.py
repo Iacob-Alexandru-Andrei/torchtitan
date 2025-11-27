@@ -275,6 +275,9 @@ class MosaicOptimizerConfig(BaseOptimizer):
     galore_v1: float = 0.0
     """Quasi-hyperbolic coefficient for GaLore first momentum."""
 
+    galore_rotate_moments_on_refresh: bool = False
+    """Whether to rotate GaLore moment tensors into the refreshed projector basis."""
+
     param_groups: list[dict[str, Any]] | tuple[dict[str, Any], ...] | None = None
     """Optional explicit optimizer param groups (e.g., regex-based GaLore overrides)."""
 

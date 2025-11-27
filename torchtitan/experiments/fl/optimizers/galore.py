@@ -12,7 +12,7 @@ import logging
 import math
 import re
 from collections.abc import Callable, Iterable
-from typing import Any
+from typing import Any, NamedTuple
 
 import torch
 from torch import Tensor
@@ -41,6 +41,78 @@ PROJ_TO_CODE: dict[str, int] = {
     FULL_PROJ: 4,
 }
 CODE_TO_PROJ: dict[int, str] = {code: name for name, code in PROJ_TO_CODE.items()}
+
+
+class _RotationContext(NamedTuple):
+    beta1: float
+    beta2: float
+
+
+def _apply_axis_transform(tensor: Tensor, matrix: Tensor, axis: int) -> Tensor:
+    if axis == -1:
+        original_shape = tensor.shape
+        reshaped = tensor.reshape(-1, original_shape[-1])
+        rotated = reshaped @ matrix
+        return rotated.reshape(original_shape)
+    if axis == 0:
+        original_shape = tensor.shape
+        reshaped = tensor.reshape(original_shape[0], -1)
+        rotated = matrix @ reshaped
+        return rotated.reshape(original_shape)
+    raise ValueError(f"Unsupported axis {axis} for GaLore moment rotation.")
+
+
+def _rotate_moments_to_new_basis(
+    state: dict[str, Any],
+    *,
+    old_basis: Tensor,
+    new_basis: Tensor,
+    proj_type: str,
+    rotation_context: _RotationContext,
+) -> None:
+    if proj_type not in {LEFT_PROJ, RIGHT_PROJ}:
+        return
+
+    exp_avg: Tensor | None = state.get("exp_avg")
+    exp_avg_sq: Tensor | None = state.get("exp_avg_sq")
+    step_tensor: Tensor | None = state.get("step")
+    if exp_avg is None or exp_avg_sq is None or step_tensor is None:
+        return
+
+    step_value = int(step_tensor.item())
+    if step_value <= 0:
+        return
+
+    beta1_corr = 1.0 - rotation_context.beta1**step_value
+    beta2_corr = 1.0 - rotation_context.beta2**step_value
+    if beta1_corr <= 0.0 or beta2_corr <= 0.0:
+        return
+
+    device = exp_avg.device
+    dtype = exp_avg.dtype
+    old_basis_tensor = old_basis.to(device=device, dtype=dtype)
+    new_basis_tensor = new_basis.to(device=device, dtype=dtype)
+
+    old_columns = old_basis_tensor.T if proj_type == RIGHT_PROJ else old_basis_tensor
+    new_columns = new_basis_tensor.T if proj_type == RIGHT_PROJ else new_basis_tensor
+    transform = new_columns.transpose(-1, -2) @ old_columns
+    coeff_matrix = transform.T if proj_type == RIGHT_PROJ else transform
+    coeff_matrix = coeff_matrix.to(device=device, dtype=dtype)
+    var_matrix = coeff_matrix.pow(2)
+    axis = -1 if proj_type == RIGHT_PROJ else 0
+
+    m_hat_old = exp_avg / beta1_corr
+    v_hat_old = exp_avg_sq / beta2_corr
+    var_hat_old = torch.clamp(v_hat_old - m_hat_old.pow(2), min=0.0)
+
+    rotated_exp_avg = _apply_axis_transform(exp_avg, coeff_matrix, axis)
+    m_hat_rot = _apply_axis_transform(m_hat_old, coeff_matrix, axis)
+    var_hat_rot = _apply_axis_transform(var_hat_old, var_matrix, axis)
+    v_hat_rot = torch.abs(var_hat_rot + m_hat_rot.pow(2))
+
+    state["exp_avg"] = rotated_exp_avg
+    state["exp_avg_sq"] = v_hat_rot * beta2_corr
+    print("Finished rortating GaLore moment tensors to new basis.")
 
 
 def _in_optimizer_state_initialization() -> bool:
@@ -109,7 +181,12 @@ def _proj_name_from_value(value: Any, default: str = STD_PROJ) -> str:
     return default
 
 
-def _maybe_refresh_projector(state: dict[str, Any], weights: Tensor, iteration: Tensor) -> None:
+def _maybe_refresh_projector(
+    state: dict[str, Any],
+    weights: Tensor,
+    iteration: Tensor,
+    rotation_context: _RotationContext | None = None,
+) -> None:
     meta = state.setdefault(
         "projector_meta",
         {
@@ -130,14 +207,33 @@ def _maybe_refresh_projector(state: dict[str, Any], weights: Tensor, iteration: 
         return
 
     orthogonal = state.get("projector_basis")
-    if orthogonal is None or (iteration % update_proj_gap).item() == 0:
-        state["projector_basis"] = _orthogonal_matrix(weights, rank, resolved_proj_type)
+    should_refresh = orthogonal is None or (iteration % update_proj_gap).item() == 0
+    if not should_refresh:
+        return
+
+    new_basis = _orthogonal_matrix(weights, rank, resolved_proj_type)
+    if (
+        rotation_context is not None
+        and orthogonal is not None
+        and isinstance(orthogonal, Tensor)
+        and isinstance(new_basis, Tensor)
+    ):
+        print("Rotating GaLore moment tensors to new basis.")
+        _rotate_moments_to_new_basis(
+            state,
+            old_basis=orthogonal,
+            new_basis=new_basis,
+            proj_type=resolved_proj_type,
+            rotation_context=rotation_context,
+        )
+    state["projector_basis"] = new_basis
 
 
 def _project(
     state: dict[str, Any],
     full_rank_grad: Tensor,
     iteration: Tensor,
+    rotation_context: _RotationContext | None = None,
 ) -> Tensor:
     if full_rank_grad.ndim > GALORE_MAX_SUPPORT_DIM:
         raise NotImplementedError("GaLore currently supports tensors up to rank 2.")
@@ -148,7 +244,7 @@ def _project(
     meta["proj_type"] = PROJ_TO_CODE[proj_type_name]
     meta["resolved_proj_type"] = PROJ_TO_CODE[proj_type]
     state["projector_meta"] = meta
-    _maybe_refresh_projector(state, full_rank_grad, iteration)
+    _maybe_refresh_projector(state, full_rank_grad, iteration, rotation_context)
     orthogonal = state.get("projector_basis")
     if orthogonal is None:
         raise RuntimeError("Projection matrix not initialised.")
@@ -233,6 +329,7 @@ class GaLore(AdamW):
         proj_type: str = STD_PROJ,
         dim: int = 2,
         rank_overrides: dict[Tensor | int, int] | None = None,
+        rotate_moments_on_refresh: bool = False,
     ) -> None:
         if lr < 0.0:
             raise ValueError(f"Invalid learning rate: {lr}")
@@ -250,7 +347,7 @@ class GaLore(AdamW):
             )
         if not 0.0 <= v1 <= 1.0:
             raise ValueError(f"Invalid quasi-hyperbolic parameter v1={v1}")
-
+        print(f"The learning rate is {lr}")
         super().__init__(params=params, lr=lr, betas=betas, eps=eps, weight_decay=weight_decay)
         self.v1 = v1
         self._defaults = {
@@ -259,6 +356,7 @@ class GaLore(AdamW):
             "scale": scale,
             "proj_type": proj_type,
             "dim": dim,
+            "rotate_moments_on_refresh": rotate_moments_on_refresh,
         }
         overrides: dict[int, int] = {}
         if rank_overrides:
@@ -272,6 +370,7 @@ class GaLore(AdamW):
             group.setdefault("scale", scale)
             group.setdefault("proj_type", proj_type)
             group.setdefault("dim", dim)
+            group.setdefault("rotate_moments_on_refresh", rotate_moments_on_refresh)
             group["initial_lr"] = group["lr"]
 
         self.register_load_state_dict_post_hook(
@@ -296,6 +395,9 @@ class GaLore(AdamW):
             weight_decay = group["weight_decay"]
             base_rank = group.get("rank")
             dim = group.get("dim", GALORE_MAX_SUPPORT_DIM)
+            rotation_context = None
+            if group.get("rotate_moments_on_refresh", False):
+                rotation_context = _RotationContext(beta1=beta1, beta2=beta2)
 
             for param in group["params"]:
                 grad = param.grad
@@ -328,7 +430,7 @@ class GaLore(AdamW):
                     meta["update_proj_gap"] = group["update_proj_gap"]
                     meta["scale"] = group["scale"]
                     meta["proj_type"] = group["proj_type"]
-                    grad = _project(state, grad, state["step"])
+                    grad = _project(state, grad, state["step"], rotation_context)
 
                 if "exp_avg" not in state:
                     state["exp_avg"] = torch.zeros_like(

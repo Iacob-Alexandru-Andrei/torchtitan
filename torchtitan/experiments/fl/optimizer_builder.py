@@ -193,6 +193,7 @@ def _build_optimizer_kwargs(config: MosaicOptimizerConfig, extra_kwargs: dict[st
             "scale": config.galore_scale,
             "proj_type": config.galore_proj_type,
             "dim": config.galore_dim,
+            "rotate_moments_on_refresh": config.galore_rotate_moments_on_refresh,
         }
         kwargs.update(extra_kwargs)
         return kwargs
@@ -258,6 +259,7 @@ def _base_galore_group_from_config(
         "proj_type": config.galore_proj_type,
         "dim": config.galore_dim,
         "v1": config.galore_v1,
+        "rotate_moments_on_refresh": config.galore_rotate_moments_on_refresh,
     }
 
 
@@ -308,6 +310,10 @@ def _build_galore_param_groups(
                 "proj_type": spec.get("proj_type", config.galore_proj_type),
                 "dim": spec.get("dim", config.galore_dim),
                 "v1": spec.get("v1", config.galore_v1),
+                "rotate_moments_on_refresh": spec.get(
+                    "rotate_moments_on_refresh",
+                    config.galore_rotate_moments_on_refresh,
+                ),
             }
         )
 

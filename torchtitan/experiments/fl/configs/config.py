@@ -556,6 +556,16 @@ class GaLoreMomentumProjectionConfig:
         metadata={"help": "If True, log the target rank when a projection is applied."},
     )
 
+    reinit_mode: str = field(
+        default="project",
+        metadata={
+            "help": (
+                "How to reinitialise GaLore momenta when ranks change. "
+                "Use 'project' (default) to down-project existing buffers or 'zero' to reset them."
+            )
+        },
+    )
+
 
 @dataclass
 class HyperparameterSwitchConfig:

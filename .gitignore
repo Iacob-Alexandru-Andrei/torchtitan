@@ -9,7 +9,7 @@ dist/*
 .vs
 
 # sweep artifacts
-**/generated_scripts/
+**/generated_configs/
 
 # data
 data
