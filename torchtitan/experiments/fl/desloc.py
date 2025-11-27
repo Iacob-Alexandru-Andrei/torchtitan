@@ -17,6 +17,7 @@ from dataclasses import dataclass
 from datetime import timedelta
 from types import ModuleType
 from typing import Any, TYPE_CHECKING, Sequence
+from collections.abc import Iterable
 from fnmatch import fnmatch
 
 import torch
@@ -1467,7 +1468,8 @@ class DesLocController:
 
         inner_opts = getattr(self._optimizer, "optimizers", None)
         if isinstance(inner_opts, list):
-            for opt in inner_opts:
+            for idx, opt in enumerate(inner_opts):
+                print(f"[DESLOC DEBUG] inspecting inner optimizer[{idx}] {type(opt).__name__} for state discovery")
                 yield from opt.state.values()
 
     def _resolve_optimizer_sync_intervals(self, state_keys: Iterable[str]) -> list[int]:
@@ -1528,6 +1530,7 @@ class DesLocController:
                     state_sets.add(str(key))
 
         state_keys = sorted(state_sets)
+        print(f"[DESLOC DEBUG] controller={self._name_prefix} discovered optimizer state keys: {state_keys}")
         sync_intervals = self._resolve_optimizer_sync_intervals(state_keys)
 
         if not state_keys and self._raw_optimizer_sync_config is not None:
@@ -1549,6 +1552,11 @@ class DesLocController:
             fragment = _OptimizerStateFragment(fragment_config)
             fragment.register_state_dict_fn()
             self._fragments.append(fragment)
+            param_names = [name for name, _ in self._opt_param_entries]
+            print(
+                f"[DESLOC DEBUG] controller={self._name_prefix} created optimizer-state fragment "
+                f"state_key={key} sync_every={sync_intervals[idx]} params={param_names}"
+            )
 
         self._is_opt_init = True
 
@@ -2095,7 +2103,8 @@ class StreamingDesLocController:
 
         inner_opts = getattr(self._optimizer, "optimizers", None)
         if isinstance(inner_opts, list):
-            for opt in inner_opts:
+            for idx, opt in enumerate(inner_opts):
+                print(f"[DESLOC DEBUG] streaming: inspecting inner optimizer[{idx}] {type(opt).__name__} for state discovery")
                 yield from opt.state.values()
 
     def _lazy_init_optimizer_fragments(self) -> None:
@@ -2110,6 +2119,7 @@ class StreamingDesLocController:
                     state_sets.add(str(key))
 
         state_keys = sorted(state_sets)
+        print(f"[DESLOC DEBUG] streaming controller={self._name_prefix} discovered optimizer state keys: {state_keys}")
         sync_intervals = self._resolve_optimizer_sync_intervals(state_keys)
 
         if not state_keys and self._raw_optimizer_sync_config is not None:
@@ -2148,6 +2158,10 @@ class StreamingDesLocController:
                     fragment_idx,
                     len(param_names),
                     _format_fragment_membership(param_names),
+                )
+                print(
+                    f"[DESLOC DEBUG] streaming controller={self._name_prefix} state_key={key} "
+                    f"fragment={fragment_idx} sync_every={sync_every} params={param_names}"
                 )
                 fragment.register_state_dict_fn()
                 self._state_fragments_per_fragment[fragment_idx].append(fragment)
