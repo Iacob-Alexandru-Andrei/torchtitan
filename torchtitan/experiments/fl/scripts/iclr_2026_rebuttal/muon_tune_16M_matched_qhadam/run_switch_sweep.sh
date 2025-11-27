@@ -37,11 +37,10 @@ SBATCH_ADDITIONAL_ARGS=${SBATCH_ADDITIONAL_ARGS:-}
 SBATCH_NODE=${SBATCH_NODE:-}
 POLL_INTERVAL_SEC=${POLL_INTERVAL_SEC:-5}
 RDZV_HOST=${RDZV_HOST:-"127.0.0.1"}
-RDZV_BASE_PORT=${RDZV_BASE_PORT:-47000}
 LIGHTHOUSE_HOST=${LIGHTHOUSE_HOST:-"127.0.0.1"}
-LIGHTHOUSE_BASE_PORT=${LIGHTHOUSE_BASE_PORT:-47100}
 LIGHTHOUSE_PROTOCOL=${LIGHTHOUSE_PROTOCOL:-"http"}
 PORT_STRIDE=${PORT_STRIDE:-4}
+RDZV_ENDPOINT=${RDZV_ENDPOINT:-""}
 
 usage() {
   cat <<'EOF'
@@ -363,6 +362,15 @@ declare -a GPU_LABELS=()
 declare -a ALL_PIDS=()
 RUN_COUNTER=0
 
+find_free_port() {
+  python3 - <<'PY'
+import socket
+with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+    s.bind(("", 0))
+    print(s.getsockname()[1])
+PY
+}
+
 detect_available_gpu_ids() {
   if [[ -n "${CUDA_VISIBLE_DEVICES:-}" ]]; then
     local normalized=${CUDA_VISIBLE_DEVICES//,/ }
@@ -597,11 +605,17 @@ for idx in "${!RUN_PLAN_INDICES[@]}"; do
   fi
 
   launch_index=$((RUN_COUNTER + 1))
-  rdzv_port=$((RDZV_BASE_PORT + launch_index * PORT_STRIDE))
-  lighthouse_port=$((LIGHTHOUSE_BASE_PORT + launch_index * PORT_STRIDE))
-  rdzv_endpoint="${RDZV_HOST}:${rdzv_port}"
-  lighthouse_url="${LIGHTHOUSE_PROTOCOL}://${LIGHTHOUSE_HOST}:${lighthouse_port}"
   RUN_COUNTER=${launch_index}
+
+  if [[ -n "${RDZV_ENDPOINT}" ]]; then
+    rdzv_endpoint="${RDZV_ENDPOINT}"
+  else
+    rdzv_port=$(find_free_port)
+    rdzv_endpoint="${RDZV_HOST}:${rdzv_port}"
+  fi
+
+  lighthouse_port=$(find_free_port)
+  lighthouse_url="${LIGHTHOUSE_PROTOCOL}://${LIGHTHOUSE_HOST}:${lighthouse_port}"
 
   if [[ "${USE_SBATCH}" == "true" ]]; then
     chain_index=$((dispatched_runs % SBATCH_MAX_CHAINS))

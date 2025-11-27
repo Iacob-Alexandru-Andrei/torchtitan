@@ -59,6 +59,7 @@ class HyperparameterSwitchParams:
     steps: Sequence[int]
     new_vs: Sequence[float] | None
     new_betas: Sequence[float] | None
+    new_nesterov: Sequence[bool] | None
     reset_momenta: Sequence[str]
     log_metrics: bool
 
@@ -1294,6 +1295,11 @@ class FLMetricsProcessor(MetricsProcessor):
             steps=tuple(int(step) for step in hyper_switch_config.steps),
             new_vs=(tuple(hyper_switch_config.new_vs) if hyper_switch_config.new_vs is not None else None),
             new_betas=(tuple(hyper_switch_config.new_betas) if hyper_switch_config.new_betas is not None else None),
+            new_nesterov=(
+                tuple(bool(v) for v in hyper_switch_config.new_nesterov)
+                if hyper_switch_config.new_nesterov is not None
+                else None
+            ),
             reset_momenta=tuple(hyper_switch_config.reset_momenta),
             log_metrics=hyper_switch_config.log_metrics,
         )
