@@ -538,7 +538,7 @@ class _ParameterFragment(_BaseFragment):
             self.save_state()
         self._averaged_parameters.clear()
         work_items: list[Any] = []
-        for name, param in self._model.named_parameters():
+        for name, param in self._iter_named_parameters():
             avg_param = _extract_local_tensor(param.data)
             work_items.append(self._manager.allreduce(avg_param))
             self._averaged_parameters.append((name, avg_param))
