@@ -58,7 +58,7 @@ LIGHTHOUSE_LOG_FILE="${LOG_DIR}/lighthouse.log"
 TIMESTAMP=$(date +"%Y%m%d-%H%M%S")
 RUN_PREFIX=${RUN_PREFIX:-"iclr2026-qhmuonft16m"}
 export RUN_UUID=${RUN_UUID:-"${RUN_PREFIX}-${TIMESTAMP}"}
-export WANDB_PROJECT=${WANDB_PROJECT:-"torchtitan_tune_N"}
+export WANDB_PROJECT=${WANDB_PROJECT:-"torchtitan_muon"}
 export WANDB_TEAM=${WANDB_TEAM:-"camlsys"}
 export WANDB_RUN_NAME="${RUN_UUID}"
 export TORCHTITAN_WANDB_BASE_RUN_NAME="${RUN_UUID}"
@@ -155,6 +155,7 @@ for ((replica_id=0; replica_id<NGPU; replica_id++)); do
       --nproc_per_node=1 \
       --rdzv_backend=c10d \
       --rdzv_endpoint="localhost:${rdzv_port}" \
+      --rdzv_id "${RUN_UUID}" \
       --role rank \
       --tee 3 \
       -m "${TRAIN_MODULE}" \

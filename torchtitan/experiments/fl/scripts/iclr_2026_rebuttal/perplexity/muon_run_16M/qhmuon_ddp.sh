@@ -27,6 +27,7 @@ PY
 )
 fi
 RDZV_ENDPOINT="${RDZV_HOST}:${RDZV_PORT}"
+RDZV_ID=${RDZV_ID:-${RUN_UUID:-"qhmuon-$(date +%s)"}}
 
 LR_SWITCH_STEP=${LR_SWITCH_STEP:-2049}
 SWITCH_SCALE=${SWITCH_SCALE:-1.0}
@@ -40,7 +41,7 @@ read -r -a QHMUON_RESET_MOMENTA_ARRAY <<< "${QHMUON_RESET_MOMENTA}"
 TIMESTAMP=$(date +"%Y%m%d-%H%M%S")
 RUN_PREFIX=${RUN_PREFIX:-"iclr2026-qhmuon16m"}
 export RUN_UUID=${RUN_UUID:-"${RUN_PREFIX}-${TIMESTAMP}"}
-export WANDB_PROJECT=${WANDB_PROJECT:-"torchtitan_tune_N"}
+export WANDB_PROJECT=${WANDB_PROJECT:-"torchtitan_muon"}
 export WANDB_TEAM=${WANDB_TEAM:-"camlsys"}
 export WANDB_RUN_NAME="${RUN_UUID}"
 export TORCHTITAN_WANDB_BASE_RUN_NAME="${RUN_UUID}"
@@ -53,6 +54,7 @@ uv run --no-sync torchrun \
   --nproc_per_node="${NGPU}" \
   --rdzv_backend=c10d \
   --rdzv_endpoint="${RDZV_ENDPOINT}" \
+  --rdzv_id "${RDZV_ID}" \
   --local-ranks-filter "${LOG_RANK}" \
   --role rank \
   --tee 3 \
