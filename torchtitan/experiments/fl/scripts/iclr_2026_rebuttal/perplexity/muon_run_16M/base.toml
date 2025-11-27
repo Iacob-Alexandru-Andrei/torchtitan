@@ -125,7 +125,6 @@ folder = "checkpoints"
 interval = 2048
 last_save_model_only = false
 export_dtype = "float32"
-resume_from_run_step = "iclr2026-qhmuon16m-20251127-170157/step-2048"
 async_mode = "async_with_pinned_mem"  # ["disabled", "async", "async_with_pinned_mem"]
 
 [s3_checkpoint]
@@ -133,6 +132,7 @@ enable = true
 bucket = "checkpoints"
 prefix = ""  # Root of bucket
 download_on_start = true
+resume_from_run_step = "iclr2026-qhmuon16m-20251127-170157/step-2048"
 # run_uuid and remote_checkpoint_folder will be set via RUN_UUID environment variable
 
 [activation_checkpoint]
