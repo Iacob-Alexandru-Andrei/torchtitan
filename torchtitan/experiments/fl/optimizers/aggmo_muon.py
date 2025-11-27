@@ -11,6 +11,7 @@ from typing import Any, Callable, ClassVar, Iterable, Sequence
 
 import torch
 from torch import Tensor
+from torch.optim import Optimizer
 from torch.optim import Muon as TorchMuon
 from torch.optim._muon import _adjust_lr, _zeropower_via_newtonschulz
 
@@ -120,6 +121,7 @@ class AggMoMuon(TorchMuon):
         return direction
 
     @torch.no_grad()
+    @Optimizer.profile_hook_step
     def step(self, closure: Callable[[], torch.Tensor] | None = None):  # type: ignore[override]  # noqa: D102
         loss = None
         if closure is not None:
@@ -165,7 +167,6 @@ class AggMoMuon(TorchMuon):
 
                 state = self.state[param]
                 state["step"] = state.get("step", torch.tensor(0.0, device=param.device)) + 1
-
         return loss
 
     def _build_step_tensor(

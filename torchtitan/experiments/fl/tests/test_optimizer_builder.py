@@ -23,7 +23,7 @@ from torchtitan.experiments.fl.optimizer_builder import (
     build_mosaic_optimizers,
     CompositeOptimizersContainer,
 )
-from torchtitan.experiments.fl.optimizers import Muon
+from torchtitan.experiments.fl.optimizers import AggMoMuon, Muon
 
 
 class _TinyModule(nn.Module):
@@ -221,3 +221,50 @@ def test_composite_respects_spec_eps_overrides_with_mup_scaling() -> None:
     # MuP scales eps by a factor of 2.0 via _compute_lr_scaling; overrides should still apply.
     assert muon_opt.param_groups[0]["eps"] == pytest.approx(2e-7)
     assert adamw_opt.param_groups[0]["eps"] == pytest.approx(2e-8)
+
+
+def test_muon_dispatches_step_hooks() -> None:
+    """Muon should trigger registered step hooks (required by DES-LOC/TorchFT)."""
+    param = nn.Parameter(torch.ones(2, 2, requires_grad=True))
+    optimizer = Muon(
+        [param],
+        lr=0.01,
+        weight_decay=0.0,
+        momentum=0.9,
+        nesterov=True,
+    )
+
+    hook_calls: list[bool] = []
+
+    def _hook(_optimizer, _args, _kwargs) -> None:
+        hook_calls.append(True)
+
+    optimizer.register_step_post_hook(_hook)
+    param.grad = torch.ones_like(param)
+    optimizer.step()
+
+    assert hook_calls
+
+
+def test_aggmo_muon_dispatches_step_hooks() -> None:
+    """AggMoMuon should trigger registered step hooks (required by DES-LOC/TorchFT)."""
+    param = nn.Parameter(torch.ones(2, 2, requires_grad=True))
+    optimizer = AggMoMuon(
+        [param],
+        lr=0.01,
+        betas=(0.9,),
+        vs=(0.7,),
+        weight_decay=0.0,
+        nesterov=True,
+    )
+
+    hook_calls: list[bool] = []
+
+    def _hook(_optimizer, _args, _kwargs) -> None:
+        hook_calls.append(True)
+
+    optimizer.register_step_post_hook(_hook)
+    param.grad = torch.ones_like(param)
+    optimizer.step()
+
+    assert hook_calls

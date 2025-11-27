@@ -11,7 +11,7 @@ from typing import Any, Callable, ClassVar, Iterable, Optional
 
 import torch
 from torch import Tensor
-from torch.optim import Muon as TorchMuon
+from torch.optim import Optimizer, Muon as TorchMuon
 from torch.optim._muon import _adjust_lr, _zeropower_via_newtonschulz
 
 from ._metric_utils import prepare_metrics_for_reduction, reduce_metrics_across_ranks
@@ -91,6 +91,7 @@ class Muon(TorchMuon):
         )
 
     @torch.no_grad()
+    @Optimizer.profile_hook_step
     def step(self, closure=None):  # type: ignore[override]
         """Run a Muon optimization step and track per-parameter step counts."""
         loss = super().step(closure)
