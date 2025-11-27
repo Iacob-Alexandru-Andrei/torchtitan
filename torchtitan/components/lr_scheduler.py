@@ -84,13 +84,59 @@ class LRSchedulersContainer(Stateful):
         return self.schedulers[0].state_dict()
 
     def load_state_dict(self, state_dict: dict[str, Any]) -> None:
-        # Load the same state_dict for all schedulers. The key value we're concerned
-        # within ``LRScheduler.state_dict()`` is ``last_epoch``, which is an integer
-        # that is immutable. As long as ``training.steps`` and ``lr_scheduler.warmup_steps``
-        # in ``job_config`` remain unchanged when resuming from a checkpoint, this
-        # approach is safe. We call ``copy()`` here to ensure extra safety.
+        """Load scheduler state, tolerating param-group count changes.
+
+        Torch's ``LRScheduler`` stores ``base_lrs`` / ``_last_lr`` with one entry per
+        optimizer param group. If the optimizer layout changes slightly between save and
+        resume (e.g., composite optimizers re-order groups), the saved lists can be a
+        different length than the current optimizer expects, causing ``zip`` errors.
+        We align lengths by truncating or padding with the last known value before
+        delegating to ``load_state_dict``. After loading, we also fast-forward the
+        scheduler to the inferred optimizer step if it's behind, so the LR matches the
+        resumed training step instead of restarting.
+        """
         for scheduler in self.schedulers:
-            scheduler.load_state_dict(copy.deepcopy(state_dict))
+            aligned_state = copy.deepcopy(state_dict)
+            num_groups = len(scheduler.base_lrs)
+
+            def _align_list(key: str) -> None:
+                values = aligned_state.get(key)
+                if not isinstance(values, list):
+                    return
+                if len(values) == num_groups:
+                    return
+                if len(values) > num_groups:
+                    aligned_state[key] = values[:num_groups]
+                else:
+                    pad_value = values[-1] if values else 0.0
+                    aligned_state[key] = values + [pad_value] * (num_groups - len(values))
+
+            _align_list("base_lrs")
+            _align_list("_last_lr")
+
+            scheduler.load_state_dict(aligned_state)
+
+            expected_step = self._infer_optimizer_step(scheduler.optimizer)
+            if expected_step is not None and scheduler.last_epoch < expected_step:
+                # Advance to the expected step; LambdaLR handles epoch offsets.
+                scheduler.step(expected_step)
+
+    @staticmethod
+    def _infer_optimizer_step(optimizer: Any) -> int | None:
+        """Best-effort inference of the current training step from optimizer state."""
+        max_step = None
+        for state in optimizer.state.values():
+            step_val = state.get("step")
+            if step_val is None:
+                continue
+            if isinstance(step_val, (int, float)):
+                step_int = int(step_val)
+            elif hasattr(step_val, "item"):
+                step_int = int(step_val.item())
+            else:
+                continue
+            max_step = step_int if max_step is None else max(max_step, step_int)
+        return max_step
 
 
 def build_lr_schedulers(
