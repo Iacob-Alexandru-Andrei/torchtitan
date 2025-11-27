@@ -1461,6 +1461,15 @@ class DesLocController:
     def set_metrics_logger(self, logger_fn: Callable[[dict[str, float]], None] | None) -> None:
         self._param_fragment.set_metrics_logger(logger_fn)
 
+    def _iter_optimizer_states(self) -> Iterable[dict[str, Any]]:
+        """Yield state dicts for the wrapped optimizer, including composites."""
+        yield from self._optimizer.state.values()
+
+        inner_opts = getattr(self._optimizer, "optimizers", None)
+        if isinstance(inner_opts, list):
+            for opt in inner_opts:
+                yield from opt.state.values()
+
     def _resolve_optimizer_sync_intervals(self, state_keys: Iterable[str]) -> list[int]:
         keys = list(state_keys)
         if not keys:
@@ -1513,7 +1522,7 @@ class DesLocController:
             self._is_opt_init = True
             return
         state_sets = set()
-        for state in self._optimizer.state.values():
+        for state in self._iter_optimizer_states():
             for key, value in state.items():
                 if isinstance(value, torch.Tensor) and value.numel() > 1:
                     state_sets.add(str(key))
@@ -2080,13 +2089,22 @@ class StreamingDesLocController:
             msg = "optimizer_sync_every values must be positive"
             raise ValueError(msg)
 
+    def _iter_optimizer_states(self) -> Iterable[dict[str, Any]]:
+        """Yield state dicts for the wrapped optimizer, including composites."""
+        yield from self._optimizer.state.values()
+
+        inner_opts = getattr(self._optimizer, "optimizers", None)
+        if isinstance(inner_opts, list):
+            for opt in inner_opts:
+                yield from opt.state.values()
+
     def _lazy_init_optimizer_fragments(self) -> None:
         if not self._optimizer_state_sync_enabled:
             self._state_fragments_per_fragment = [[] for _ in self._fragments]
             self._is_opt_init = True
             return
         state_sets: set[str] = set()
-        for state in self._optimizer.state.values():
+        for state in self._iter_optimizer_states():
             for key, value in state.items():
                 if isinstance(value, torch.Tensor) and value.numel() > 1:
                     state_sets.add(str(key))
