@@ -97,6 +97,7 @@ enabled = true
 steps = [2049]
 new_vs = [0.95]
 new_betas = [0.999,0.999]
+new_nesterov = [false]
 reset_momenta = ["exp_avg"]
 
 [training]
