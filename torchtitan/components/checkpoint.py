@@ -144,8 +144,8 @@ class CheckpointManager:
         state_dicts to not collide, which is guaranteed for the model by correct pipeline
         splitting and for the optimizer by the flattening support described in (1).
 
-    3. LR schedulers also index model states like optimizers. Here we flatten the lr_schedulers
-    with the assumption that all lr_schedulers have the same state_dict.
+    3. LR schedulers also index model states like optimizers. Scheduler state is flattened and
+    saved per-instance when multiple schedulers are active.
 
     Note: TorchFT checkpointing flow
 

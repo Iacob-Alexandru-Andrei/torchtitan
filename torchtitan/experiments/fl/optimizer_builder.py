@@ -10,7 +10,7 @@ from __future__ import annotations
 from fnmatch import fnmatch
 from collections.abc import MutableMapping
 from dataclasses import dataclass, replace
-from typing import Any, TYPE_CHECKING
+from typing import Any, TYPE_CHECKING, cast
 
 import torch
 import torch.nn as nn
@@ -368,15 +368,14 @@ class CompositeOptimizersContainer(Optimizer, Stateful):
 
     def state_dict(self) -> dict[str, Any]:
         options = StateDictOptions(flatten_optimizer_state_dict=True)
-        return {
-            k: v
-            for optimizer in self.optimizers
-            for k, v in get_optimizer_state_dict(
+        return cast(
+            dict[str, Any],
+            get_optimizer_state_dict(
                 self.model_parts[0],
-                optimizer,
+                self.optimizers,
                 options=options,
-            ).items()
-        }
+            ),
+        )
 
     def load_state_dict(self, state_dict: dict[str, Any]) -> None:
         options = StateDictOptions(flatten_optimizer_state_dict=True)

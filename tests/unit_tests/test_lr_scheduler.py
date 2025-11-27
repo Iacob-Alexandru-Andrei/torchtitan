@@ -10,7 +10,7 @@ from unittest.mock import MagicMock
 import torch
 from torch.optim import Adam
 
-from torchtitan.components.lr_scheduler import build_lr_schedulers
+from torchtitan.components.lr_scheduler import LRSchedulersContainer, build_lr_schedulers
 from torchtitan.components.optimizer import OptimizersContainer
 from torchtitan.config import ConfigManager
 
@@ -294,6 +294,37 @@ class TestLRScheduler(unittest.TestCase):
                 msg=f"Step {i}: Expected LR {expected_lr}, got {self.optimizer.param_groups[0]['lr']}",
             )
             lr_scheduler.step()
+
+
+class TestMultipleSchedulerStateDict(unittest.TestCase):
+    def _build_optimizers(self) -> OptimizersContainer:
+        model_parts = [torch.nn.Linear(2, 2) for _ in range(2)]
+        return OptimizersContainer(model_parts, torch.optim.AdamW, {"lr": 0.1})
+
+    def test_state_dict_handles_multiple_schedulers(self):
+        optimizers = self._build_optimizers()
+        # Avoid scheduler warnings about calling step before optimizer.step
+        for optimizer in optimizers:
+            optimizer._step_count = 1  # type: ignore[attr-defined]
+
+        schedulers = LRSchedulersContainer(optimizers, lambda _step: 1.0)
+        schedulers.step()
+        schedulers.schedulers[1].step()
+
+        state = schedulers.state_dict()
+        self.assertIn("schedulers", state)
+        self.assertEqual(len(state["schedulers"]), 2)
+        self.assertEqual(state["schedulers"][0]["last_epoch"], 0)
+        self.assertEqual(state["schedulers"][1]["last_epoch"], 1)
+
+        new_optimizers = self._build_optimizers()
+        for optimizer in new_optimizers:
+            optimizer._step_count = 1  # type: ignore[attr-defined]
+        restored = LRSchedulersContainer(new_optimizers, lambda _step: 1.0)
+        restored.load_state_dict(state)
+
+        self.assertEqual(restored.schedulers[0].last_epoch, 0)
+        self.assertEqual(restored.schedulers[1].last_epoch, 1)
 
 
 if __name__ == "__main__":

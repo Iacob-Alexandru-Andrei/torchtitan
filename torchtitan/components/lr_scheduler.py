@@ -79,12 +79,12 @@ class LRSchedulersContainer(Stateful):
             scheduler.step()
 
     def state_dict(self) -> dict[str, Any]:
-        # While there may be multiple schedulers, we only save the first one because
-        # the state_dict is the same for all. See the limitations section in the
-        # docstring.
-        return self.schedulers[0].state_dict()
+        scheduler_states = [scheduler.state_dict() for scheduler in self.schedulers]
+        if len(scheduler_states) == 1:
+            return scheduler_states[0]
+        return {"schedulers": scheduler_states}
 
-    def load_state_dict(self, state_dict: dict[str, Any]) -> None:
+    def load_state_dict(self, state_dict: dict[str, Any] | list[dict[str, Any]]) -> None:
         """Load scheduler state, tolerating param-group count changes.
 
         Torch's ``LRScheduler`` stores ``base_lrs`` / ``_last_lr`` with one entry per
@@ -96,24 +96,9 @@ class LRSchedulersContainer(Stateful):
         scheduler to the inferred optimizer step if it's behind, so the LR matches the
         resumed training step instead of restarting.
         """
-        for scheduler in self.schedulers:
-            aligned_state = copy.deepcopy(state_dict)
-            num_groups = len(scheduler.base_lrs)
-
-            # Always trust the current optimizer layout for base_lrs.
-            aligned_state["base_lrs"] = list(scheduler.base_lrs)
-            # Drop _last_lr; will be recomputed.
-            aligned_state.pop("_last_lr", None)
-
-            # Ensure any other list fields match length (defensive).
-            for key, value in list(aligned_state.items()):
-                if isinstance(value, list) and len(value) != num_groups:
-                    if len(value) > num_groups:
-                        aligned_state[key] = value[:num_groups]
-                    else:
-                        pad_value = value[-1] if value else scheduler.base_lrs[-1]
-                        aligned_state[key] = value + [pad_value] * (num_groups - len(value))
-
+        scheduler_states = self._normalize_scheduler_states(state_dict)
+        for scheduler, sched_state in zip(self.schedulers, scheduler_states, strict=False):
+            aligned_state = self._align_scheduler_state(scheduler, sched_state)
             scheduler.load_state_dict(aligned_state)
 
             # Recompute _last_lr based on current base_lrs and last_epoch.
@@ -123,6 +108,79 @@ class LRSchedulersContainer(Stateful):
             if expected_step is not None and scheduler.last_epoch < expected_step:
                 # Advance to the expected step; LambdaLR handles epoch offsets.
                 scheduler.step(expected_step)
+
+    def _normalize_scheduler_states(
+        self, state_dict: dict[str, Any] | list[dict[str, Any]] | Any
+    ) -> list[dict[str, Any]]:
+        """Return one scheduler state per wrapped scheduler, filling/truncating as needed."""
+        if isinstance(state_dict, dict) and "schedulers" in state_dict:
+            raw_states = state_dict["schedulers"]
+        elif isinstance(state_dict, list):
+            raw_states = state_dict
+        else:
+            raw_states = [state_dict]
+
+        normalized: list[dict[str, Any]] = []
+        for raw_state in raw_states:
+            normalized.append(copy.deepcopy(raw_state) if isinstance(raw_state, dict) else {})
+
+        if not normalized:
+            normalized.append({})
+
+        if len(normalized) < len(self.schedulers):
+            normalized.extend(
+                copy.deepcopy(normalized[-1]) for _ in range(len(self.schedulers) - len(normalized))
+            )
+        elif len(normalized) > len(self.schedulers):
+            logger.warning(
+                "Loaded %s scheduler states for %s schedulers; dropping extras.",
+                len(normalized),
+                len(self.schedulers),
+            )
+            normalized = normalized[: len(self.schedulers)]
+
+        return normalized
+
+    @staticmethod
+    def _align_list(values: list[Any], target_length: int, pad_value: Any) -> list[Any]:
+        """Align a list to a target length by truncating or padding."""
+        if len(values) > target_length:
+            return values[:target_length]
+        if len(values) < target_length:
+            return values + [pad_value for _ in range(target_length - len(values))]
+        return values
+
+    def _align_scheduler_state(
+        self, scheduler: LRScheduler, state_dict: dict[str, Any]
+    ) -> dict[str, Any]:
+        """Align saved scheduler state to the current optimizer layout."""
+        aligned_state = copy.deepcopy(state_dict)
+        num_groups = len(scheduler.base_lrs)
+
+        current_base_lrs = list(scheduler.base_lrs)
+        saved_base_lrs = list(aligned_state.pop("base_lrs", current_base_lrs))
+        aligned_base_lrs: list[Any] = []
+        for idx in range(num_groups):
+            if idx < len(saved_base_lrs):
+                aligned_base_lrs.append(saved_base_lrs[idx])
+            elif idx < len(current_base_lrs):
+                aligned_base_lrs.append(current_base_lrs[idx])
+            else:
+                aligned_base_lrs.append(saved_base_lrs[-1] if saved_base_lrs else current_base_lrs[-1])
+        aligned_state["base_lrs"] = aligned_base_lrs
+
+        # Drop _last_lr; will be recomputed.
+        aligned_state.pop("_last_lr", None)
+
+        # Ensure any other list fields match length (defensive).
+        for key, value in list(aligned_state.items()):
+            if key == "base_lrs":
+                continue
+            if isinstance(value, list):
+                pad_value = value[-1] if value else aligned_state["base_lrs"][-1]
+                aligned_state[key] = self._align_list(list(value), num_groups, pad_value)
+
+        return aligned_state
 
     @staticmethod
     def _infer_optimizer_step(optimizer: Any) -> int | None:
