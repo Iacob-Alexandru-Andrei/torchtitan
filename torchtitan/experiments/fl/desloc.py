@@ -733,6 +733,11 @@ class _OptimizerStateFragment(_BaseFragment):
     def prepare_sync(self) -> list[Any]:
         self._averaged_state_tensors.clear()
         work_items: list[Any] = []
+        print(
+            f"[DESLOC DEBUG] preparing sync for state_key={self.state_key} "
+            f"params={list(self._original_state_tensors.keys())} "
+            f"optimizer={type(self._optimizer).__name__}"
+        )
         for name in self._original_state_tensors:
             param = self._param_map[name]
             state_tensor = self._optimizer.state[param][self.state_key]
@@ -743,6 +748,11 @@ class _OptimizerStateFragment(_BaseFragment):
 
     def perform_sync(self) -> None:
         with torch.no_grad():
+            print(
+                f"[DESLOC DEBUG] applying averaged state_key={self.state_key} "
+                f"params={list(self._original_state_tensors.keys())} "
+                f"optimizer={type(self._optimizer).__name__}"
+            )
             for name, averaged in zip(
                 self._original_state_tensors.keys(),
                 self._averaged_state_tensors,
@@ -859,11 +869,20 @@ class _StreamingOptimizerStateFragment(_BaseFragment):
             self._current_sync_step if self._current_sync_step is not None else "unknown",
             self._manager.current_step(),
         )
+        print(
+            f"[DESLOC DEBUG] streaming prepare state_key={self.state_key} fragment={self._fragment_id} "
+            f"params={list(self._original_state_tensors.keys())} "
+            f"optimizer={type(self._optimizer).__name__}"
+        )
 
         context = torch.cuda.stream(self._stream) if self._stream is not None else nullcontext()
         with context:
             self._capture_states()
             self._allreduce_states()
+        print(
+            f"[DESLOC DEBUG] streaming allreduce queued for state_key={self.state_key} "
+            f"fragment={self._fragment_id} work_items={len(self._allreduce_work)}"
+        )
 
     def _capture_states(self) -> None:
         self._averaged_state_tensors.clear()
@@ -963,6 +982,10 @@ class _StreamingOptimizerStateFragment(_BaseFragment):
             should_commit,
             self._current_sync_step if self._current_sync_step is not None else "unknown",
             self._manager.current_step(),
+        )
+        print(
+            f"[DESLOC DEBUG] streaming perform_sync state_key={self.state_key} fragment={self._fragment_id} "
+            f"commit={should_commit}"
         )
         self._current_sync_step = None
 
