@@ -108,6 +108,7 @@ class DesLocControllerConfig:
     manager: Any
     model: nn.Module
     optimizer: Optimizer
+    param_entries: list[tuple[str, nn.Parameter]] | None = None
     param_sync_every: int
     optimizer_sync_every: int | list[int] | dict[str, int] | None
     backup_device: torch.device | None
@@ -1404,21 +1405,24 @@ class DesLocController:
         self._quorum_timeout = timedelta(seconds=max(1, config.quorum_timeout_seconds))
         self._optimizer_state_sync_enabled = not config.disable_optimizer_state_sync
 
-        opt_params = {
-            param
-            for group in self._optimizer.param_groups
-            for param in group["params"]
-            if isinstance(param, nn.Parameter)
-        }
-        if not opt_params:
-            msg = "DES-LOC streaming requires the optimizer to own at least one parameter."
-            raise ValueError(msg)
-        opt_param_entries = [
-            (name, param) for name, param in self._model.named_parameters() if param in opt_params
-        ]
-        if not opt_param_entries:
-            msg = "DES-LOC requires the optimizer to own at least one parameter."
-            raise ValueError(msg)
+        if config.param_entries is not None:
+            opt_param_entries = list(config.param_entries)
+        else:
+            opt_params = {
+                param
+                for group in self._optimizer.param_groups
+                for param in group["params"]
+                if isinstance(param, nn.Parameter)
+            }
+            if not opt_params:
+                msg = "DES-LOC streaming requires the optimizer to own at least one parameter."
+                raise ValueError(msg)
+            opt_param_entries = [
+                (name, param) for name, param in self._model.named_parameters() if param in opt_params
+            ]
+            if not opt_param_entries:
+                msg = "DES-LOC requires the optimizer to own at least one parameter."
+                raise ValueError(msg)
         self._opt_param_entries = opt_param_entries
 
         param_fragment_cfg = ParameterFragmentConfig(
@@ -1622,12 +1626,18 @@ class StreamingDesLocController:
         self._streaming_cfg = streaming
         self._optimizer_state_sync_enabled = not config.disable_optimizer_state_sync
 
-        opt_params = {
-            param
-            for group in self._optimizer.param_groups
-            for param in group["params"]
-            if isinstance(param, nn.Parameter)
-        }
+        if config.param_entries is not None:
+            opt_params = {param for _, param in config.param_entries}
+        else:
+            opt_params = {
+                param
+                for group in self._optimizer.param_groups
+                for param in group["params"]
+                if isinstance(param, nn.Parameter)
+            }
+            if not opt_params:
+                msg = "DES-LOC streaming requires the optimizer to own at least one parameter."
+                raise ValueError(msg)
 
         fragment_strategy = getattr(streaming, "fragment_strategy", "strided")
         custom_fragments = getattr(streaming, "custom_fragments", None)
