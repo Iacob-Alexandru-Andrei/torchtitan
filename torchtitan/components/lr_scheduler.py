@@ -148,6 +148,12 @@ class LRSchedulersContainer(Stateful):
             if expected_step is not None and scheduler.last_epoch < expected_step:
                 scheduler.step(expected_step)
 
+    def set_step(self, step: int) -> None:
+        """Force schedulers to a specific step (last_epoch), recomputing last lr."""
+        for scheduler in self.schedulers:
+            scheduler.last_epoch = step
+            scheduler._last_lr = scheduler.get_lr()  # type: ignore[attr-defined]
+
 
 def build_lr_schedulers(
     optimizers: OptimizersContainer,

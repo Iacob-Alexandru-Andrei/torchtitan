@@ -665,6 +665,9 @@ class Trainer(torch.distributed.checkpoint.stateful.Stateful):
         logger.info(
             f"[RESUME DEBUG] After checkpoint load: loaded={loaded}, self.step = {self.step}"
         )
+        # Ensure LR schedulers are aligned with the resumed step even if scheduler state wasn't loaded.
+        if self.lr_schedulers is not None:
+            self.lr_schedulers.set_step(self.step)
         self._apply_pending_hyperparameter_switches_on_resume()
         logger.info(f"Training starts at step {self.step + 1}")
 
