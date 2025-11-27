@@ -66,6 +66,7 @@ class LRSchedulersContainer(Stateful):
         self.schedulers = [
             LambdaLR(optimizer, opt_lambda) for optimizer, opt_lambda in zip(optimizers, lambdas, strict=True)
         ]
+        self._fast_forward_to_optimizer_step()
 
     def __iter__(self) -> Iterator[LRScheduler]:
         return iter(self.schedulers)
@@ -99,22 +100,24 @@ class LRSchedulersContainer(Stateful):
             aligned_state = copy.deepcopy(state_dict)
             num_groups = len(scheduler.base_lrs)
 
-            def _align_list(key: str) -> None:
-                values = aligned_state.get(key)
-                if not isinstance(values, list):
-                    return
-                if len(values) == num_groups:
-                    return
-                if len(values) > num_groups:
-                    aligned_state[key] = values[:num_groups]
-                else:
-                    pad_value = values[-1] if values else 0.0
-                    aligned_state[key] = values + [pad_value] * (num_groups - len(values))
+            # Always trust the current optimizer layout for base_lrs.
+            aligned_state["base_lrs"] = list(scheduler.base_lrs)
+            # Drop _last_lr; will be recomputed.
+            aligned_state.pop("_last_lr", None)
 
-            _align_list("base_lrs")
-            _align_list("_last_lr")
+            # Ensure any other list fields match length (defensive).
+            for key, value in list(aligned_state.items()):
+                if isinstance(value, list) and len(value) != num_groups:
+                    if len(value) > num_groups:
+                        aligned_state[key] = value[:num_groups]
+                    else:
+                        pad_value = value[-1] if value else scheduler.base_lrs[-1]
+                        aligned_state[key] = value + [pad_value] * (num_groups - len(value))
 
             scheduler.load_state_dict(aligned_state)
+
+            # Recompute _last_lr based on current base_lrs and last_epoch.
+            scheduler._last_lr = scheduler.get_lr()  # type: ignore[attr-defined]
 
             expected_step = self._infer_optimizer_step(scheduler.optimizer)
             if expected_step is not None and scheduler.last_epoch < expected_step:
@@ -137,6 +140,13 @@ class LRSchedulersContainer(Stateful):
                 continue
             max_step = step_int if max_step is None else max(max_step, step_int)
         return max_step
+
+    def _fast_forward_to_optimizer_step(self) -> None:
+        """Align scheduler last_epoch to the optimizer's current step when starting fresh."""
+        for scheduler in self.schedulers:
+            expected_step = self._infer_optimizer_step(scheduler.optimizer)
+            if expected_step is not None and scheduler.last_epoch < expected_step:
+                scheduler.step(expected_step)
 
 
 def build_lr_schedulers(

@@ -6,7 +6,7 @@ SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
 RUN_SCRIPT="${SCRIPT_DIR}/qhmuon_ddp.sh"
 
 PAIRS=(
-  "0.95 1.0"`
+  "0.95 1.0"
   "0.96 2.0"
   "0.97 1.4142135623730951"
   "0.98 1.4142135623730951"
