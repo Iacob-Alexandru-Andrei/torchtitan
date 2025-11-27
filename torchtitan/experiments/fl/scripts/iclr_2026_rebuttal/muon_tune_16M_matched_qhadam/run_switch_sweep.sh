@@ -342,7 +342,6 @@ hyper["steps"] = (switch_step,)
 hyper["new_vs"] = (new_v,)
 hyper["new_nesterov"] = (False,)
 hyper["reset_momenta"] = ("exp_avg",)
-hyper.pop("new_betas", None)
 fl_metrics["hyperparameter_switch"] = hyper
 data["fl_metrics"] = fl_metrics
 

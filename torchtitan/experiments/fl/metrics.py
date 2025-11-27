@@ -1138,7 +1138,23 @@ class HyperparameterSwitchCallback(Callback):
             elif isinstance(current_value, bool):
                 group[key] = bool(values[0])
             elif isinstance(current_value, Sequence) and not isinstance(current_value, (str, bytes)):
-                group[key] = tuple(values)
+                if key == "betas":
+                    target_len = len(current_value)
+                    if len(values) == target_len:
+                        group[key] = tuple(values)
+                    elif len(values) == 1:
+                        # Broadcast a single beta across positions.
+                        group[key] = tuple([values[0]] * target_len)
+                    elif len(values) > target_len:
+                        # Truncate extra entries (e.g., AggMoAdamW wants 2, AggMoMuon wants 1).
+                        group[key] = tuple(values[:target_len])
+                    else:
+                        # Pad missing entries with the last provided value.
+                        pad_value = values[-1]
+                        padded = list(values) + [pad_value] * (target_len - len(values))
+                        group[key] = tuple(padded)
+                else:
+                    group[key] = tuple(values)
             elif isinstance(current_value, (float, int)):
                 group[key] = float(values[0])
             else:
