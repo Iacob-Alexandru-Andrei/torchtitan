@@ -513,6 +513,9 @@ class _ParameterFragment(_BaseFragment):
             return self._param_entries
         return list(self._model.named_parameters())
 
+    def _refresh_param_map(self) -> None:
+        self._param_map = dict(self._iter_named_parameters())
+
     def _init_backup_storage(self, entries: list[tuple[str, nn.Parameter]]) -> None:
         for name, param in entries:
             local_tensor = _extract_local_tensor(param.data)
@@ -524,11 +527,13 @@ class _ParameterFragment(_BaseFragment):
 
     def save_state(self) -> None:
         with torch.no_grad():
+            self._refresh_param_map()
             for name, param in self._iter_named_parameters():
                 self._original_parameters[name].copy_(_extract_local_tensor(param.data), non_blocking=True)
 
     def restore_state(self) -> None:
         with torch.no_grad():
+            self._refresh_param_map()
             for name, param in self._iter_named_parameters():
                 _copy_into_tensor(param.data, self._original_parameters[name])
 
@@ -538,6 +543,7 @@ class _ParameterFragment(_BaseFragment):
             self.save_state()
         self._averaged_parameters.clear()
         work_items: list[Any] = []
+        self._refresh_param_map()
         for name, param in self._iter_named_parameters():
             avg_param = _extract_local_tensor(param.data)
             work_items.append(self._manager.allreduce(avg_param))
@@ -696,6 +702,9 @@ class _OptimizerStateFragment(_BaseFragment):
             return self._param_entries
         return list(self._model.named_parameters())
 
+    def _refresh_param_map(self) -> None:
+        self._param_map = dict(self._iter_named_parameters())
+
     def _init_backup_storage(self, entries: list[tuple[str, nn.Parameter]]) -> None:
         for name, param in entries:
             state = self._optimizer.state.get(param, {})
@@ -706,6 +715,7 @@ class _OptimizerStateFragment(_BaseFragment):
 
     def save_state(self) -> None:
         with torch.no_grad():
+            self._refresh_param_map()
             for name, backup in self._original_state_tensors.items():
                 param = self._param_map[name]
                 tensor = self._optimizer.state[param][self.state_key]
