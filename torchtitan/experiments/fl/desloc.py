@@ -108,13 +108,13 @@ class DesLocControllerConfig:
     manager: Any
     model: nn.Module
     optimizer: Optimizer
-    param_entries: list[tuple[str, nn.Parameter]] | None = None
     param_sync_every: int
     optimizer_sync_every: int | list[int] | dict[str, int] | None
     backup_device: torch.device | None
     pin_memory: bool
     name_prefix: str
     quorum_timeout_seconds: int
+    param_entries: list[tuple[str, nn.Parameter]] | None = None
     outer_optimizer: DesLocOuterOptimizerConfig | Optimizer | None = None
     log_outer_metrics: bool = False
     metrics_logger: Callable[[dict[str, float]], None] | None = None
