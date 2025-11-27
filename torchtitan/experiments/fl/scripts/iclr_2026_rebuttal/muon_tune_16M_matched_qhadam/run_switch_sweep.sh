@@ -512,7 +512,7 @@ echo "Node: \$(hostname) at \$(date)"
 echo "==================================================================="
       export TORCHFT_LIGHTHOUSE="${lighthouse_url}"
       export RUN_UUID="${run_uuid}"
-export WANDB_PROJECT=\${WANDB_PROJECT:-"torchtitan_tune_Lr"}
+export WANDB_PROJECT=\${WANDB_PROJECT:-"torchtitan_tune_muon"}
 export WANDB_TEAM=\${WANDB_TEAM:-"camlsys"}
 export WANDB_RUN_NAME="${run_uuid}"
 export TORCHTITAN_FORCE_WANDB_WORKER_SUFFIX=\${TORCHTITAN_FORCE_WANDB_WORKER_SUFFIX:-1}
@@ -639,7 +639,7 @@ for idx in "${!RUN_PLAN_INDICES[@]}"; do
       export CUDA_VISIBLE_DEVICES="${gpu_id}"
       export TORCHFT_LIGHTHOUSE="${lighthouse_url}"
       export RUN_UUID="${run_uuid}"
-      export WANDB_PROJECT=${WANDB_PROJECT:-"torchtitan_tune_Lr"}
+      export WANDB_PROJECT=${WANDB_PROJECT:-"torchtitan_tune_muon"}
       export WANDB_TEAM=${WANDB_TEAM:-"camlsys"}
       export WANDB_RUN_NAME="${run_uuid}"
       export TORCHTITAN_FORCE_WANDB_WORKER_SUFFIX=${TORCHTITAN_FORCE_WANDB_WORKER_SUFFIX:-1}
