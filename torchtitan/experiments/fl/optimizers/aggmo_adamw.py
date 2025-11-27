@@ -54,7 +54,7 @@ class AggMoAdamW(QHAdamW):
         weight_decay: float = 1e-5,
         *,
         amsgrad: bool = False,
-        decouple: bool = True,
+        decouple: bool = False,
         foreach: bool | None = None,
         maximize: bool = False,
         capturable: bool = False,
@@ -396,9 +396,6 @@ def _single_tensor_aggmo_qhadamw(  # noqa: C901, PLR0913, PLR0912
         step_t += 1
         step = step_t if capturable or differentiable else _get_value(step_t)
 
-        if weight_decay != 0 and not decouple:
-            grad = grad.add(param, alpha=weight_decay)
-
         if torch.is_complex(param):
             grad = torch.view_as_real(grad)
             exp_avg_sq = torch.view_as_real(exp_avg_sq)
@@ -409,9 +406,12 @@ def _single_tensor_aggmo_qhadamw(  # noqa: C901, PLR0913, PLR0912
         else:
             param_data = param
 
-        if weight_decay != 0 and decouple:
-            decay_factor = _compute_decay_factor(lr, initial_lr)
-            param_data.mul_(1.0 - decay_factor * weight_decay)
+        if weight_decay != 0:
+            if decouple:
+                decay_factor = _compute_decay_factor(lr, initial_lr)
+                param_data.mul_(1.0 - decay_factor * weight_decay)
+            else:
+                param_data.mul_(1.0 - _get_value(lr) * weight_decay)
 
         # Update each momentum buffer with its own beta1_i
         for buf, beta1_i in zip(buffers, beta1s, strict=True):

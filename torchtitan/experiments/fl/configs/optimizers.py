@@ -210,7 +210,7 @@ class MosaicOptimizerConfig(BaseOptimizer):
     vs: tuple[float, ...] = (0.7,)
     """vs hyperparameters for quasi-hyperbolic optimizers (each optimizer extracts as many as needed)"""
 
-    decouple: bool = True
+    decouple: bool = False
     """Whether to decouple the learning rate from the weight decay"""
 
     betas: tuple[float, ...] | None = None

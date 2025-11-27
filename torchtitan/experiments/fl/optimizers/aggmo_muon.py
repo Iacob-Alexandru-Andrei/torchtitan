@@ -55,7 +55,7 @@ class AggMoMuon(TorchMuon):
         ns_coefficients: tuple[float, float, float] = (3.4445, -4.7750, 2.0315),
         eps: float = 1e-7,
         ns_steps: int = 5,
-        adjust_lr_fn: str | None = None,
+        adjust_lr_fn: str | None = "match_rms_adamw",
     ) -> None:
         if len(betas) != len(vs):
             msg = f"Length of betas must equal length of vs. Got {len(betas)} betas for {len(vs)} vs."

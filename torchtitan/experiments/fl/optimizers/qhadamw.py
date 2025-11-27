@@ -117,7 +117,7 @@ class QHAdamW(Optimizer):
         weight_decay: float = 1e-5,
         *,
         amsgrad: bool = False,
-        decouple: bool = True,
+        decouple: bool = False,
         foreach: bool | None = None,
         maximize: bool = False,
         capturable: bool = False,
