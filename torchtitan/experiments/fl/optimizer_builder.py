@@ -477,38 +477,28 @@ class CompositeDesLocFTOptimizersContainer(CompositeFTOptimizersContainer):
         outer_optimizer_spec = outer_optimizer or desloc_config.normalized_outer_optimizer()
 
         self._desloc_controllers: list[DesLocController | StreamingDesLocController] = []
-        model = self.model_parts[0]
-        for idx, optimizer in enumerate(self.optimizers):
-            opt_params = {
-                param
-                for group in optimizer.param_groups
-                for param in group["params"]
-                if isinstance(param, nn.Parameter)
-            }
-            param_entries = [(name, param) for name, param in model.named_parameters() if param in opt_params]
-
-            controller_config = DesLocControllerConfig(
-                manager=ft_manager,
-                model=model,
-                optimizer=optimizer,
-                param_entries=param_entries,
-                param_sync_every=desloc_config.param_sync_every,
-                optimizer_sync_every=optimizer_sync,
-                backup_device=backup_device,
-                pin_memory=desloc_config.pin_memory,
-                name_prefix=f"desloc_{idx}",
-                quorum_timeout_seconds=desloc_config.quorum_timeout_seconds,
-                outer_optimizer=outer_optimizer_spec,
-                log_outer_metrics=desloc_config.log_outer_metrics,
-                metrics_logger=None,
-                checkpoint_outer_optimizer=desloc_config.checkpoint_outer_optimizer,
-                disable_optimizer_state_sync=desloc_config.disable_optimizer_state_sync,
-            )
-            if streaming_cfg is not None:
-                controller = StreamingDesLocController(controller_config, streaming_cfg)
-            else:
-                controller = DesLocController(controller_config)
-            self._desloc_controllers.append(controller)
+        controller_config = DesLocControllerConfig(
+            manager=ft_manager,
+            model=self.model_parts[0],
+            optimizer=self,
+            param_entries=None,
+            param_sync_every=desloc_config.param_sync_every,
+            optimizer_sync_every=optimizer_sync,
+            backup_device=backup_device,
+            pin_memory=desloc_config.pin_memory,
+            name_prefix="desloc_composite",
+            quorum_timeout_seconds=desloc_config.quorum_timeout_seconds,
+            outer_optimizer=outer_optimizer_spec,
+            log_outer_metrics=desloc_config.log_outer_metrics,
+            metrics_logger=None,
+            checkpoint_outer_optimizer=desloc_config.checkpoint_outer_optimizer,
+            disable_optimizer_state_sync=desloc_config.disable_optimizer_state_sync,
+        )
+        if streaming_cfg is not None:
+            controller = StreamingDesLocController(controller_config, streaming_cfg)
+        else:
+            controller = DesLocController(controller_config)
+        self._desloc_controllers.append(controller)
 
     def close_desloc(self) -> None:
         """Detach DES-LOC hooks from wrapped optimizers."""

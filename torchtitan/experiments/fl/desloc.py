@@ -1410,7 +1410,7 @@ class DesLocController:
         else:
             opt_params = {
                 param
-                for group in self._optimizer.param_groups
+                for group in getattr(self._optimizer, "param_groups", [])
                 for param in group["params"]
                 if isinstance(param, nn.Parameter)
             }
@@ -1631,7 +1631,7 @@ class StreamingDesLocController:
         else:
             opt_params = {
                 param
-                for group in self._optimizer.param_groups
+                for group in getattr(self._optimizer, "param_groups", [])
                 for param in group["params"]
                 if isinstance(param, nn.Parameter)
             }
