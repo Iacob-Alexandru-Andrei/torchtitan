@@ -218,7 +218,7 @@ class AggMoMuon(TorchMuon):
         buffers = [state.get(name, torch.zeros_like(param)) for _, name in moment_specs]
         step_tensor = self._build_step_tensor(param, param.grad, group, buffers, group["betas"], moment_specs, grad_coeff)
 
-        step_key = f"{optimizer_label}/max/optimizer_step"
+        step_key = f"max/{optimizer_label}/optimizer_step"
         if step_key not in optimizer_metrics:
             step_state = state.get("step", 0)
             if isinstance(step_state, torch.Tensor):
@@ -230,7 +230,7 @@ class AggMoMuon(TorchMuon):
             optimizer_metrics[step_key] = step_value
 
         for metric_name, metric_fn in self.metric_functions.items():
-            key = f"{optimizer_label}/{metric_name}/{name}"
+            key = f"{metric_name}/{optimizer_label}/{name}"
             optimizer_metrics[key] = metric_fn(param, state, step_tensor)
         return optimizer_metrics
 
