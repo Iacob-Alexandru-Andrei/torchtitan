@@ -220,8 +220,8 @@ class AggMoMuon(TorchMuon):
         step_tensor = self._build_step_tensor(param, param.grad, group, buffers, group["betas"], moment_specs, grad_coeff)
 
         step_key = f"max/{optimizer_label}/optimizer_step"
+        step_state = state.get("step", 0)
         if step_key not in optimizer_metrics:
-            step_state = state.get("step", 0)
             if isinstance(step_state, torch.Tensor):
                 step_value = step_state.detach().clone()
                 if step_value.device != param.device:
@@ -236,10 +236,13 @@ class AggMoMuon(TorchMuon):
             ptr = exp_avg.data_ptr() if isinstance(exp_avg, torch.Tensor) else None
             optimizer_metrics[key] = metric_fn(param, state, step_tensor)
             now = time.time()
+            step_scalar = (
+                float(step_state.detach().item()) if isinstance(step_state, torch.Tensor) else float(step_state)
+            )
             print(
                 f"[DESLOC DEBUG] metrics read param={name} owner={optimizer_label} metric={metric_name} "
                 f"norm={optimizer_metrics[key] if torch.is_tensor(optimizer_metrics[key]) else optimizer_metrics[key]} "
-                f"exp_avg_ptr={ptr} step_tensor={step_tensor.item() if isinstance(step_tensor, torch.Tensor) else step_tensor} time={now}"
+                f"exp_avg_ptr={ptr} step={step_scalar} time={now}"
             )
         return optimizer_metrics
 

@@ -322,6 +322,7 @@ class AggMoAdamW(QHAdamW):
                 optimizer_metrics[step_key] = step_tensor
 
             step = float(param_optim_state["step"].item())
+            step_state_scalar = step
 
             bias_correction2 = 1 - beta2**step
             denom = (param_optim_state["exp_avg_sq"].sqrt() / math.sqrt(bias_correction2)).add_(eps)
@@ -352,10 +353,11 @@ class AggMoAdamW(QHAdamW):
                 now = time.time()
                 exp_avg = param_optim_state.get("exp_avg")
                 ptr = exp_avg.data_ptr() if isinstance(exp_avg, torch.Tensor) else None
+                step_scalar = step_state_scalar
                 print(
                     f"[DESLOC DEBUG] metrics read param={name} owner={optimizer_label} metric={metric} "
                     f"norm={optimizer_metrics[key] if torch.is_tensor(optimizer_metrics[key]) else optimizer_metrics[key]} "
-                    f"exp_avg_ptr={ptr} step_tensor={step_tensor.item() if isinstance(step_tensor, torch.Tensor) else step_tensor} time={now}"
+                    f"exp_avg_ptr={ptr} step={step_scalar} time={now}"
                 )
 
         return optimizer_metrics
