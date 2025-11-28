@@ -15,12 +15,16 @@ CONFIG_FILE=${CONFIG_FILE:-"${SCRIPT_DIR}/base.toml"}
 TRAIN_MODULE=${TRAIN_MODULE:-"torchtitan.experiments.fl.train"}
 NGPU=${NGPU:-4}
 LOG_RANK=${LOG_RANK:-0}
-RDZV_ENDPOINT=${RDZV_ENDPOINT:-"localhost:0"}
+RDZV_HOST=${RDZV_HOST:-"localhost"}
+# Fixed port to avoid clashes with TorchFT launcher.
+RDZV_PORT=${RDZV_PORT:-29550}
+RDZV_ENDPOINT="${RDZV_HOST}:${RDZV_PORT}"
+RDZV_ID=${RDZV_ID:-${RUN_UUID:-"qhmuon-$(date +%s)"}}
 
 LR_SWITCH_STEP=${LR_SWITCH_STEP:-2049}
 SWITCH_SCALE=${SWITCH_SCALE:-1.0}
-QHMUON_V=${QHMUON_V:-0.98}
-QHMUON_NEW_BETAS=${QHMUON_NEW_BETAS:-"0.9 0.999"}
+QHMUON_V=${QHMUON_V:-0.95}
+QHMUON_NEW_BETAS=${QHMUON_NEW_BETAS:-"0.999 0.999"}
 QHMUON_RESET_MOMENTA=${QHMUON_RESET_MOMENTA:-"exp_avg"}
 
 read -r -a QHMUON_NEW_BETAS_ARRAY <<< "${QHMUON_NEW_BETAS}"
@@ -29,7 +33,7 @@ read -r -a QHMUON_RESET_MOMENTA_ARRAY <<< "${QHMUON_RESET_MOMENTA}"
 TIMESTAMP=$(date +"%Y%m%d-%H%M%S")
 RUN_PREFIX=${RUN_PREFIX:-"iclr2026-qhmuon125M"}
 export RUN_UUID=${RUN_UUID:-"${RUN_PREFIX}-${TIMESTAMP}"}
-export WANDB_PROJECT=${WANDB_PROJECT:-"torchtitan_tune_N"}
+export WANDB_PROJECT=${WANDB_PROJECT:-"torchtitan_muon"}
 export WANDB_TEAM=${WANDB_TEAM:-"camlsys"}
 export WANDB_RUN_NAME="${RUN_UUID}"
 export TORCHTITAN_WANDB_BASE_RUN_NAME="${RUN_UUID}"
@@ -42,6 +46,7 @@ uv run --no-sync torchrun \
   --nproc_per_node="${NGPU}" \
   --rdzv_backend=c10d \
   --rdzv_endpoint="${RDZV_ENDPOINT}" \
+  --rdzv_id "${RDZV_ID}" \
   --local-ranks-filter "${LOG_RANK}" \
   --role rank \
   --tee 3 \

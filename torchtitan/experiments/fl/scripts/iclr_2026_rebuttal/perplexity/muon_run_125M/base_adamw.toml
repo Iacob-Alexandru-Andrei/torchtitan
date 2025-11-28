@@ -98,7 +98,7 @@ new_betas = [0.9,0.999]
 reset_momenta = ["exp_avg"]
 
 [training]
-local_batch_size = 32
+local_batch_size = 64
 global_batch_size = 256
 seq_len = 2048
 max_norm = 0.5  # grad norm clipping
@@ -156,7 +156,7 @@ semi_sync_method = "desloc"  # Options: "diloco", "local_sgd", or comment out fo
 [validation]
 enable = false
 dataset = "c4_validation"
-local_batch_size = 32
+local_batch_size = 64
 freq = 2048
 steps = 32
 
