@@ -712,6 +712,13 @@ class _OptimizerStateFragment(_BaseFragment):
         for name, param in entries:
             state = self._optimizer.state.get(param, {})
             tensor = state.get(self.state_key)
+            if tensor is None:
+                tensor = torch.zeros_like(param, memory_format=torch.preserve_format)
+                state[self.state_key] = tensor
+                print(
+                    f"[DESLOC DEBUG] materialized missing state_key={self.state_key} param={name} "
+                    f"owner={type(param_owner.get(param)).__name__ if param_owner else type(self._optimizer).__name__}"
+                )
             if isinstance(tensor, torch.Tensor):
                 device = self._backup_device if self._backup_device is not None else tensor.device
                 self._original_state_tensors[name] = torch.empty_like(tensor, device=device)
@@ -847,6 +854,13 @@ class _StreamingOptimizerStateFragment(_BaseFragment):
         for name, param in self._param_entries:
             state = self._optimizer.state.get(param, {})
             tensor = state.get(self.state_key)
+            if tensor is None:
+                tensor = torch.zeros_like(param, memory_format=torch.preserve_format)
+                state[self.state_key] = tensor
+                print(
+                    f"[DESLOC DEBUG] streaming materialized missing state_key={self.state_key} param={name} "
+                    f"owner={type(param_owner.get(param)).__name__ if param_owner else type(self._optimizer).__name__}"
+                )
             if isinstance(tensor, torch.Tensor):
                 device = self._backup_device if self._backup_device is not None else tensor.device
                 backup = torch.empty_like(tensor, device=device)
