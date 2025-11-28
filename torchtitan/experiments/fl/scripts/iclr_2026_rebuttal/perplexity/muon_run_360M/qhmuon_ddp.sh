@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Launch the quasi-hyperbolic Muon 16M run with Mosaic's trainer (DDP).
+# Launch the quasi-hyperbolic Muon 360M run with Mosaic's trainer (DDP).
 set -euo pipefail
 
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
@@ -31,7 +31,7 @@ read -r -a QHMUON_NEW_BETAS_ARRAY <<< "${QHMUON_NEW_BETAS}"
 read -r -a QHMUON_RESET_MOMENTA_ARRAY <<< "${QHMUON_RESET_MOMENTA}"
 
 TIMESTAMP=$(date +"%Y%m%d-%H%M%S")
-RUN_PREFIX=${RUN_PREFIX:-"iclr2026-qhmuon16m"}
+RUN_PREFIX=${RUN_PREFIX:-"iclr2026-qhmuon360M"}
 export RUN_UUID=${RUN_UUID:-"${RUN_PREFIX}-${TIMESTAMP}"}
 export WANDB_PROJECT=${WANDB_PROJECT:-"torchtitan_muon"}
 export WANDB_TEAM=${WANDB_TEAM:-"camlsys"}

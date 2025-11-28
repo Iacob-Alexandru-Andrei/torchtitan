@@ -26,7 +26,7 @@ save_for_all_ranks = true
 
 [model]
 name = "mosaic_llama3_mup"
-flavor = "16M_VAL"
+flavor = "360M_VAL"
 # test folder with tokenizer.json, for debug purpose only
 hf_assets_path = "./tests/assets/tokenizer"
 # converters = ["float8"]
@@ -98,10 +98,10 @@ new_betas = [0.9,0.999]
 reset_momenta = ["exp_avg"]
 
 [training]
-local_batch_size = 16
+local_batch_size = 64
 global_batch_size = 64
 seq_len = 2048
-max_norm = 1.0  # grad norm clipping
+max_norm = 0.25  # grad norm clipping
 steps = 40960
 dataset = "c4_test"  # supported datasets: c4_test (2K), c4 (177M)
 
@@ -156,7 +156,7 @@ semi_sync_method = "desloc"  # Options: "diloco", "local_sgd", or comment out fo
 [validation]
 enable = false
 dataset = "c4_validation"
-local_batch_size = 16
+local_batch_size = 64
 freq = 2048
 steps = 32
 

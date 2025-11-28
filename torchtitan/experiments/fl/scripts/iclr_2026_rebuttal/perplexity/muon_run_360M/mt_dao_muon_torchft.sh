@@ -48,7 +48,7 @@ mkdir -p "${LOG_DIR}"
 LIGHTHOUSE_LOG_FILE="${LOG_DIR}/lighthouse.log"
 
 TIMESTAMP=$(date +"%Y%m%d-%H%M%S")
-RUN_PREFIX=${RUN_PREFIX:-"iclr2026-qhmuonft16m"}
+RUN_PREFIX=${RUN_PREFIX:-"iclr2026-qhmuonft360M"}
 export RUN_UUID=${RUN_UUID:-"${RUN_PREFIX}-${TIMESTAMP}"}
 export WANDB_PROJECT=${WANDB_PROJECT:-"torchtitan_muon"}
 export WANDB_TEAM=${WANDB_TEAM:-"camlsys"}

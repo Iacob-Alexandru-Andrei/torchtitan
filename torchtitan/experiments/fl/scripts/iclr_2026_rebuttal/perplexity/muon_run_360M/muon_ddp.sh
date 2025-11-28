@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Launch the 16M Muon + AdamW composite run with Mosaic's trainer (DDP).
+# Launch the 360M Muon + AdamW composite run with Mosaic's trainer (DDP).
 set -euo pipefail
 
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
@@ -23,7 +23,7 @@ LR_SWITCH_STEP=${LR_SWITCH_STEP:-2049}
 LR_SWITCH_SCALE=${LR_SWITCH_SCALE:-1.0}
 
 TIMESTAMP=$(date +"%Y%m%d-%H%M%S")
-RUN_PREFIX=${RUN_PREFIX:-"iclr2026-muon16m"}
+RUN_PREFIX=${RUN_PREFIX:-"iclr2026-muon360M"}
 export RUN_UUID=${RUN_UUID:-"${RUN_PREFIX}-${TIMESTAMP}"}
 export WANDB_PROJECT=${WANDB_PROJECT:-"torchtitan_muon"}
 export WANDB_TEAM=${WANDB_TEAM:-"camlsys"}
