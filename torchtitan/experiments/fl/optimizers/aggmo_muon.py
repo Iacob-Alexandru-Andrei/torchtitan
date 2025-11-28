@@ -231,7 +231,14 @@ class AggMoMuon(TorchMuon):
 
         for metric_name, metric_fn in self.metric_functions.items():
             key = f"{metric_name}/{optimizer_label}/{name}"
+            exp_avg = state.get("exp_avg")
+            ptr = exp_avg.data_ptr() if isinstance(exp_avg, torch.Tensor) else None
             optimizer_metrics[key] = metric_fn(param, state, step_tensor)
+            print(
+                f"[DESLOC DEBUG] metrics read param={name} owner={optimizer_label} metric={metric_name} "
+                f"norm={optimizer_metrics[key] if torch.is_tensor(optimizer_metrics[key]) else optimizer_metrics[key]} "
+                f"exp_avg_ptr={ptr}"
+            )
         return optimizer_metrics
 
     @staticmethod

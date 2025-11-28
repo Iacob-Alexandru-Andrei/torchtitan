@@ -809,6 +809,8 @@ class _OptimizerStateFragment(_BaseFragment):
                 if target is None:
                     state[self.state_key] = averaged.clone()
                     target = state[self.state_key]
+                pre_ptr = target.data_ptr() if target is not None and target.is_contiguous() else None
+                avg_ptr = averaged.data_ptr() if averaged.is_contiguous() else None
                 target.copy_(averaged)
                 owner_name = type(owner).__name__
                 try:
@@ -818,6 +820,7 @@ class _OptimizerStateFragment(_BaseFragment):
                 print(
                     f"[DESLOC DEBUG] apply averaged state_key={self.state_key} param={name} "
                     f"owner={owner_name} norm={norm_val} "
+                    f"ptr_before={pre_ptr} averaged_ptr={avg_ptr} "
                     f"step={self._manager.current_step() if hasattr(self, '_manager') else 'unknown'}"
                 )
 
@@ -1091,6 +1094,8 @@ class _StreamingOptimizerStateFragment(_BaseFragment):
                 if target is None:
                     state[self.state_key] = averaged.clone()
                     target = state[self.state_key]
+                pre_ptr = target.data_ptr() if target is not None and target.is_contiguous() else None
+                avg_ptr = averaged.data_ptr() if averaged.is_contiguous() else None
                 target.copy_(averaged)
                 owner_name = type(owner).__name__
                 try:
@@ -1100,6 +1105,7 @@ class _StreamingOptimizerStateFragment(_BaseFragment):
                 print(
                     f"[DESLOC DEBUG] streaming applied state_key={self.state_key} param={name} "
                     f"owner={owner_name} norm={norm_val} "
+                    f"ptr_before={pre_ptr} averaged_ptr={avg_ptr} "
                     f"step={self._current_sync_step if self._current_sync_step is not None else 'unknown'}"
                 )
 
