@@ -771,7 +771,12 @@ class _OptimizerStateFragment(_BaseFragment):
                 strict=True,
             ):
                 param = self._param_map[name]
+                owner = getattr(self._optimizer.state, "_param_owner", {}).get(param)
+                owner_name = type(owner).__name__ if owner is not None else type(self._optimizer).__name__
                 self._optimizer.state[param][self.state_key].copy_(averaged)
+                print(
+                    f"[DESLOC DEBUG] apply averaged state_key={self.state_key} param={name} owner={owner_name}"
+                )
 
     def register_state_dict_fn(self) -> None:
         def load_fn(state_dict: dict[str, torch.Tensor]) -> None:
