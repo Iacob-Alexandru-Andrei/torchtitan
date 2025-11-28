@@ -799,7 +799,8 @@ class _OptimizerStateFragment(_BaseFragment):
             print(
                 f"[DESLOC DEBUG] applying averaged state_key={self.state_key} "
                 f"params={list(self._original_state_tensors.keys())} "
-                f"optimizer={type(self._optimizer).__name__}"
+                f"optimizer={type(self._optimizer).__name__} "
+                f"step={self._manager.current_step() if hasattr(self, '_manager') else 'unknown'}"
             )
             for name, owner, averaged in self._averaged_state_tensors:
                 param = self._param_map[name]
@@ -816,7 +817,8 @@ class _OptimizerStateFragment(_BaseFragment):
                     norm_val = float("nan")
                 print(
                     f"[DESLOC DEBUG] apply averaged state_key={self.state_key} param={name} "
-                    f"owner={owner_name} norm={norm_val}"
+                    f"owner={owner_name} norm={norm_val} "
+                    f"step={self._manager.current_step() if hasattr(self, '_manager') else 'unknown'}"
                 )
 
     def register_state_dict_fn(self) -> None:
@@ -1097,7 +1099,8 @@ class _StreamingOptimizerStateFragment(_BaseFragment):
                     norm_val = float("nan")
                 print(
                     f"[DESLOC DEBUG] streaming applied state_key={self.state_key} param={name} "
-                    f"owner={owner_name} norm={norm_val}"
+                    f"owner={owner_name} norm={norm_val} "
+                    f"step={self._current_sync_step if self._current_sync_step is not None else 'unknown'}"
                 )
 
     def register_state_dict_fn(self) -> None:
