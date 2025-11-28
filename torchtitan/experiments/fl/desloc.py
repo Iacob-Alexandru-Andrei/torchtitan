@@ -171,6 +171,26 @@ def _zero_optimizer_grads(optimizer: Optimizer | None) -> None:
         optimizer.zero_grad()
 
 
+def _resolve_param_owner(optimizer: Optimizer, param: nn.Parameter) -> Optimizer:
+    """Return the concrete optimizer responsible for ``param``."""
+    param_owner: dict[nn.Parameter, Optimizer] | None = getattr(getattr(optimizer, "state", None), "_param_owner", None)
+    if isinstance(param_owner, dict):
+        owner = param_owner.get(param)
+        if isinstance(owner, Optimizer):
+            return owner
+
+    inner_opts = getattr(optimizer, "optimizers", None)
+    if isinstance(inner_opts, list):
+        for opt in inner_opts:
+            if param in getattr(opt, "state", {}):
+                return opt
+            for group in getattr(opt, "param_groups", []):
+                if param in group.get("params", []):
+                    return opt
+
+    return optimizer
+
+
 def _partition_named_parameters(
     model: nn.Module,
     fragments: int,
@@ -693,6 +713,7 @@ class _OptimizerStateFragment(_BaseFragment):
             else list(self._model.named_parameters())
         )
         self._param_map = dict(entries)
+        self._state_owner: dict[str, Optimizer] = {}
         self._original_state_tensors: dict[str, torch.Tensor] = {}
         self._averaged_state_tensors: list[torch.Tensor] = []
 
@@ -708,23 +729,22 @@ class _OptimizerStateFragment(_BaseFragment):
         self._param_map = dict(self._iter_named_parameters())
 
     def _init_backup_storage(self, entries: list[tuple[str, nn.Parameter]]) -> None:
-        param_owner: dict[nn.Parameter, Optimizer] | None = getattr(self._optimizer.state, "_param_owner", None)
         for name, param in entries:
-            state = self._optimizer.state.get(param, {})
+            owner = _resolve_param_owner(self._optimizer, param)
+            state = owner.state.get(param, {})
             tensor = state.get(self.state_key)
             if tensor is None:
-                owner_name = type(param_owner.get(param)).__name__ if param_owner else type(self._optimizer).__name__
                 print(
                     f"[DESLOC DEBUG] skipping state_key={self.state_key} param={name} "
-                    f"owner={owner_name} reason=missing_state"
+                    f"owner={type(owner).__name__} reason=missing_state"
                 )
                 continue
             device = self._backup_device if self._backup_device is not None else tensor.device
             self._original_state_tensors[name] = torch.empty_like(tensor, device=device)
-            owner_name = type(param_owner.get(param)).__name__ if param_owner else type(self._optimizer).__name__
+            self._state_owner[name] = owner
             print(
                 f"[DESLOC DEBUG] tracking state_key={self.state_key} param={name} "
-                f"owner={owner_name} shape={tuple(tensor.shape)}"
+                f"owner={type(owner).__name__} shape={tuple(tensor.shape)}"
             )
 
     def save_state(self) -> None:
@@ -732,15 +752,21 @@ class _OptimizerStateFragment(_BaseFragment):
             self._refresh_param_map()
             for name, backup in self._original_state_tensors.items():
                 param = self._param_map[name]
-                tensor = self._optimizer.state[param][self.state_key]
+                owner = self._state_owner.get(name) or _resolve_param_owner(self._optimizer, param)
+                self._state_owner[name] = owner
+                tensor = owner.state[param][self.state_key]
                 backup.copy_(tensor, non_blocking=True)
 
     def restore_state(self) -> None:
         with torch.no_grad():
             for name, backup in self._original_state_tensors.items():
                 param = self._param_map[name]
-                if param in self._optimizer.state and self.state_key in self._optimizer.state[param]:
-                    self._optimizer.state[param][self.state_key].copy_(backup)
+                owner = self._state_owner.get(name) or _resolve_param_owner(self._optimizer, param)
+                self._state_owner[name] = owner
+                state = owner.state.get(param, {})
+                tensor = state.get(self.state_key)
+                if tensor is not None:
+                    tensor.copy_(backup)
 
     def prepare_sync(self) -> list[Any]:
         self._averaged_state_tensors.clear()
@@ -752,7 +778,9 @@ class _OptimizerStateFragment(_BaseFragment):
         )
         for name in self._original_state_tensors:
             param = self._param_map[name]
-            state_tensor = self._optimizer.state[param][self.state_key]
+            owner = self._state_owner.get(name) or _resolve_param_owner(self._optimizer, param)
+            self._state_owner[name] = owner
+            state_tensor = owner.state[param][self.state_key]
             avg_state = state_tensor.detach().clone()
             try:
                 norm_val = avg_state.norm().item()
@@ -779,11 +807,17 @@ class _OptimizerStateFragment(_BaseFragment):
                 strict=True,
             ):
                 param = self._param_map[name]
-                owner = getattr(self._optimizer.state, "_param_owner", {}).get(param)
-                owner_name = type(owner).__name__ if owner is not None else type(self._optimizer).__name__
-                self._optimizer.state[param][self.state_key].copy_(averaged)
+                owner = self._state_owner.get(name) or _resolve_param_owner(self._optimizer, param)
+                self._state_owner[name] = owner
+                state = owner.state.setdefault(param, {})
+                target = state.get(self.state_key)
+                if target is None:
+                    state[self.state_key] = averaged.clone()
+                    target = state[self.state_key]
+                target.copy_(averaged)
+                owner_name = type(owner).__name__
                 try:
-                    norm_val = self._optimizer.state[param][self.state_key].norm().item()
+                    norm_val = target.norm().item()
                 except Exception:
                     norm_val = float("nan")
                 print(
@@ -827,6 +861,7 @@ class _StreamingOptimizerStateFragment(_BaseFragment):
         self._should_quantize = config.should_quantize
         self._current_sync_step: int | None = None
 
+        self._state_owner: dict[str, Optimizer] = {}
         self._original_state_tensors: dict[str, torch.Tensor] = {}
         self._averaged_state_tensors: list[tuple[str, torch.Tensor]] = []
         self._allreduce_work: list[Work] = []
@@ -856,15 +891,14 @@ class _StreamingOptimizerStateFragment(_BaseFragment):
         return [name for name, _ in self._param_entries]
 
     def _init_backup_storage(self) -> None:
-        param_owner: dict[nn.Parameter, Optimizer] | None = getattr(self._optimizer.state, "_param_owner", None)
         for name, param in self._param_entries:
-            state = self._optimizer.state.get(param, {})
+            owner = _resolve_param_owner(self._optimizer, param)
+            state = owner.state.get(param, {})
             tensor = state.get(self.state_key)
             if tensor is None:
-                owner_name = type(param_owner.get(param)).__name__ if param_owner else type(self._optimizer).__name__
                 print(
                     f"[DESLOC DEBUG] streaming skipping state_key={self.state_key} param={name} "
-                    f"owner={owner_name} reason=missing_state"
+                    f"owner={type(owner).__name__} reason=missing_state"
                 )
                 continue
             device = self._backup_device if self._backup_device is not None else tensor.device
@@ -877,25 +911,31 @@ class _StreamingOptimizerStateFragment(_BaseFragment):
             ):
                 backup = backup.pin_memory()
             self._original_state_tensors[name] = backup
-            owner_name = type(param_owner.get(param)).__name__ if param_owner else type(self._optimizer).__name__
+            self._state_owner[name] = owner
             print(
                 f"[DESLOC DEBUG] streaming tracking state_key={self.state_key} param={name} "
-                f"owner={owner_name} shape={tuple(tensor.shape)}"
+                f"owner={type(owner).__name__} shape={tuple(tensor.shape)}"
             )
 
     def save_state(self) -> None:
         with torch.no_grad():
             for name, backup in self._original_state_tensors.items():
                 param = self._param_map[name]
-                tensor = self._optimizer.state[param][self.state_key]
+                owner = self._state_owner.get(name) or _resolve_param_owner(self._optimizer, param)
+                self._state_owner[name] = owner
+                tensor = owner.state[param][self.state_key]
                 backup.copy_(tensor, non_blocking=True)
 
     def restore_state(self) -> None:
         with torch.no_grad():
             for name, backup in self._original_state_tensors.items():
                 param = self._param_map[name]
-                if param in self._optimizer.state and self.state_key in self._optimizer.state[param]:
-                    self._optimizer.state[param][self.state_key].copy_(backup)
+                owner = self._state_owner.get(name) or _resolve_param_owner(self._optimizer, param)
+                self._state_owner[name] = owner
+                state = owner.state.get(param, {})
+                tensor = state.get(self.state_key)
+                if tensor is not None:
+                    tensor.copy_(backup)
 
     def prepare_sync(self) -> None:
         if not self._original_state_tensors:
@@ -931,7 +971,9 @@ class _StreamingOptimizerStateFragment(_BaseFragment):
         with torch.no_grad():
             for name in self._original_state_tensors:
                 param = self._param_map[name]
-                tensor = self._optimizer.state[param][self.state_key]
+                owner = self._state_owner.get(name) or _resolve_param_owner(self._optimizer, param)
+                self._state_owner[name] = owner
+                tensor = owner.state[param][self.state_key]
                 clone = tensor.detach().clone()
                 try:
                     norm_val = clone.norm().item()
@@ -1048,11 +1090,17 @@ class _StreamingOptimizerStateFragment(_BaseFragment):
         with torch.no_grad():
             for name, averaged in self._averaged_state_tensors:
                 param = self._param_map[name]
-                self._optimizer.state[param][self.state_key].copy_(averaged)
-                owner = getattr(self._optimizer.state, "_param_owner", {}).get(param)
-                owner_name = type(owner).__name__ if owner is not None else type(self._optimizer).__name__
+                owner = self._state_owner.get(name) or _resolve_param_owner(self._optimizer, param)
+                self._state_owner[name] = owner
+                state = owner.state.setdefault(param, {})
+                target = state.get(self.state_key)
+                if target is None:
+                    state[self.state_key] = averaged.clone()
+                    target = state[self.state_key]
+                target.copy_(averaged)
+                owner_name = type(owner).__name__
                 try:
-                    norm_val = self._optimizer.state[param][self.state_key].norm().item()
+                    norm_val = target.norm().item()
                 except Exception:
                     norm_val = float("nan")
                 print(
@@ -1074,6 +1122,7 @@ class _StreamingOptimizerStateFragment(_BaseFragment):
             load_fn,
             save_fn,
         )
+
 
 class _StreamingParameterFragment:
     """Streaming-enabled parameter fragment with asynchronous allreduce."""
