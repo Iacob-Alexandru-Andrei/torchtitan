@@ -11,6 +11,7 @@ import logging
 import math
 import os
 import sys
+import time
 from collections import defaultdict
 from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass
@@ -818,11 +819,13 @@ class _OptimizerStateFragment(_BaseFragment):
                     norm_val = target.norm().item()
                 except Exception:
                     norm_val = float("nan")
+                now = time.time()
                 print(
                     f"[DESLOC DEBUG] apply averaged state_key={self.state_key} param={name} "
                     f"owner={owner_name} norm={norm_val} "
                     f"ptr_before={pre_ptr} ptr_after={post_ptr} averaged_ptr={avg_ptr} "
-                    f"step={self._manager.current_step() if hasattr(self, '_manager') else 'unknown'}"
+                    f"step={self._manager.current_step() if hasattr(self, '_manager') else 'unknown'} "
+                    f"time={now}"
                 )
 
     def register_state_dict_fn(self) -> None:
@@ -1104,11 +1107,13 @@ class _StreamingOptimizerStateFragment(_BaseFragment):
                     norm_val = target.norm().item()
                 except Exception:
                     norm_val = float("nan")
+                now = time.time()
                 print(
                     f"[DESLOC DEBUG] streaming applied state_key={self.state_key} param={name} "
                     f"owner={owner_name} norm={norm_val} "
                     f"ptr_before={pre_ptr} ptr_after={post_ptr} averaged_ptr={avg_ptr} "
-                    f"step={self._current_sync_step if self._current_sync_step is not None else 'unknown'}"
+                    f"step={self._current_sync_step if self._current_sync_step is not None else 'unknown'} "
+                    f"time={now}"
                 )
 
     def register_state_dict_fn(self) -> None:

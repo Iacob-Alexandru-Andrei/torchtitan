@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import math
 from typing import Any, cast, TYPE_CHECKING
+import time
 
 import torch
 from torch import Tensor
@@ -347,6 +348,14 @@ class AggMoAdamW(QHAdamW):
                     param,
                     param_optim_state,
                     step_tensor,
+                )
+                now = time.time()
+                exp_avg = param_optim_state.get("exp_avg")
+                ptr = exp_avg.data_ptr() if isinstance(exp_avg, torch.Tensor) else None
+                print(
+                    f"[DESLOC DEBUG] metrics read param={name} owner={optimizer_label} metric={metric} "
+                    f"norm={optimizer_metrics[key] if torch.is_tensor(optimizer_metrics[key]) else optimizer_metrics[key]} "
+                    f"exp_avg_ptr={ptr} step_tensor={step_tensor.item() if isinstance(step_tensor, torch.Tensor) else step_tensor} time={now}"
                 )
 
         return optimizer_metrics

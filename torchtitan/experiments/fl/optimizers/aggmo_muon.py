@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 from typing import Any, Callable, ClassVar, Iterable, Sequence
+import time
 
 import torch
 from torch import Tensor
@@ -234,10 +235,11 @@ class AggMoMuon(TorchMuon):
             exp_avg = state.get("exp_avg")
             ptr = exp_avg.data_ptr() if isinstance(exp_avg, torch.Tensor) else None
             optimizer_metrics[key] = metric_fn(param, state, step_tensor)
+            now = time.time()
             print(
                 f"[DESLOC DEBUG] metrics read param={name} owner={optimizer_label} metric={metric_name} "
                 f"norm={optimizer_metrics[key] if torch.is_tensor(optimizer_metrics[key]) else optimizer_metrics[key]} "
-                f"exp_avg_ptr={ptr}"
+                f"exp_avg_ptr={ptr} step_tensor={step_tensor.item() if isinstance(step_tensor, torch.Tensor) else step_tensor} time={now}"
             )
         return optimizer_metrics
 
