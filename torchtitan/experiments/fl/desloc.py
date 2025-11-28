@@ -761,6 +761,14 @@ class _OptimizerStateFragment(_BaseFragment):
             param = self._param_map[name]
             state_tensor = self._optimizer.state[param][self.state_key]
             avg_state = state_tensor.detach().clone()
+            try:
+                norm_val = avg_state.norm().item()
+            except Exception:
+                norm_val = float("nan")
+            print(
+                f"[DESLOC DEBUG] pre-allreduce state_key={self.state_key} param={name} "
+                f"norm={norm_val}"
+            )
             work_items.append(self._manager.allreduce(avg_state))
             self._averaged_state_tensors.append(avg_state)
         return work_items
@@ -781,8 +789,13 @@ class _OptimizerStateFragment(_BaseFragment):
                 owner = getattr(self._optimizer.state, "_param_owner", {}).get(param)
                 owner_name = type(owner).__name__ if owner is not None else type(self._optimizer).__name__
                 self._optimizer.state[param][self.state_key].copy_(averaged)
+                try:
+                    norm_val = self._optimizer.state[param][self.state_key].norm().item()
+                except Exception:
+                    norm_val = float("nan")
                 print(
-                    f"[DESLOC DEBUG] apply averaged state_key={self.state_key} param={name} owner={owner_name}"
+                    f"[DESLOC DEBUG] apply averaged state_key={self.state_key} param={name} "
+                    f"owner={owner_name} norm={norm_val}"
                 )
 
     def register_state_dict_fn(self) -> None:
@@ -933,7 +946,16 @@ class _StreamingOptimizerStateFragment(_BaseFragment):
             for name in self._original_state_tensors:
                 param = self._param_map[name]
                 tensor = self._optimizer.state[param][self.state_key]
-                self._averaged_state_tensors.append((name, tensor.detach().clone()))
+                clone = tensor.detach().clone()
+                try:
+                    norm_val = clone.norm().item()
+                except Exception:
+                    norm_val = float("nan")
+                print(
+                    f"[DESLOC DEBUG] streaming pre-allreduce state_key={self.state_key} fragment={self._fragment_id} "
+                    f"param={name} norm={norm_val}"
+                )
+                self._averaged_state_tensors.append((name, clone))
         print(
             f"[DESLOC DEBUG] streaming captured {len(self._averaged_state_tensors)} tensors for state_key={self.state_key} "
             f"fragment={self._fragment_id}"
@@ -1043,8 +1065,13 @@ class _StreamingOptimizerStateFragment(_BaseFragment):
                 self._optimizer.state[param][self.state_key].copy_(averaged)
                 owner = getattr(self._optimizer.state, "_param_owner", {}).get(param)
                 owner_name = type(owner).__name__ if owner is not None else type(self._optimizer).__name__
+                try:
+                    norm_val = self._optimizer.state[param][self.state_key].norm().item()
+                except Exception:
+                    norm_val = float("nan")
                 print(
-                    f"[DESLOC DEBUG] streaming applied state_key={self.state_key} param={name} owner={owner_name}"
+                    f"[DESLOC DEBUG] streaming applied state_key={self.state_key} param={name} "
+                    f"owner={owner_name} norm={norm_val}"
                 )
 
     def register_state_dict_fn(self) -> None:
