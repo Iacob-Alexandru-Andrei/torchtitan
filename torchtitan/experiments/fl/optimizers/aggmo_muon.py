@@ -180,14 +180,14 @@ class AggMoMuon(TorchMuon):
         moment_specs: Sequence[tuple[float, str]],
         grad_coeff: float,
     ) -> Tensor:
-        direction = self._compute_direction(
-            grad,
-            buffers,
-            betas,
-            moment_specs,
-            grad_coeff,
-            bool(group["nesterov"]),
-        )
+        nesterov = bool(group["nesterov"])
+
+        # Build direction functionally to avoid mutating optimizer state during metrics.
+        direction = grad * grad_coeff
+        for (weight, _), buf, beta in zip(moment_specs, buffers, betas, strict=True):
+            blended = torch.lerp(grad, buf, beta) if nesterov else buf
+            direction = direction + blended * weight
+
         update = _zeropower_via_newtonschulz(
             direction,
             group["ns_coefficients"],
@@ -216,7 +216,14 @@ class AggMoMuon(TorchMuon):
         group = self.param_groups[0]
         moment_specs = _build_moment_specs(group["vs"])
         grad_coeff = 1.0 - _sum_weights(moment_specs)
-        buffers = [state.get(name, torch.zeros_like(param)) for _, name in moment_specs]
+        buffers = []
+        for _, name_key in moment_specs:
+            buffer = state.get(name_key)
+            if buffer is None:
+                buffer = torch.zeros_like(param)
+            else:
+                buffer = buffer.detach().clone()
+            buffers.append(buffer)
         step_tensor = self._build_step_tensor(param, param.grad, group, buffers, group["betas"], moment_specs, grad_coeff)
 
         step_key = f"max/{optimizer_label}/optimizer_step"
