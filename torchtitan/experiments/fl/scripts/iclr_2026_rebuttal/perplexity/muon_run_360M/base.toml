@@ -102,7 +102,7 @@ reset_momenta = ["exp_avg"]
 
 [training]
 local_batch_size = 64
-global_batch_size = 64
+global_batch_size = 256
 seq_len = 2048
 max_norm = 0.25  # grad norm clipping
 steps = 40960
@@ -133,7 +133,7 @@ enable = true
 bucket = "checkpoints"
 prefix = ""  # Root of bucket
 download_on_start = true
-resume_from_run_step = "iclr2026-qhmuon360M-20251128-132704/step-2048"
+# resume_from_run_step = "iclr2026-qhmuon360M-20251128-132704/step-2048"
 # run_uuid and remote_checkpoint_folder will be set via RUN_UUID environment variable
 
 [activation_checkpoint]
