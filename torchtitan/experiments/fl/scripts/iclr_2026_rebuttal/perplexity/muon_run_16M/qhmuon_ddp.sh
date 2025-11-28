@@ -16,16 +16,8 @@ TRAIN_MODULE=${TRAIN_MODULE:-"torchtitan.experiments.fl.train"}
 NGPU=${NGPU:-4}
 LOG_RANK=${LOG_RANK:-0}
 RDZV_HOST=${RDZV_HOST:-"localhost"}
-if [[ -z "${RDZV_PORT:-}" ]]; then
-  RDZV_PORT=$(python3 - <<'PY'
-import socket
-s = socket.socket()
-s.bind(("", 0))
-print(s.getsockname()[1])
-s.close()
-PY
-)
-fi
+# Fixed port to avoid clashes with TorchFT launcher.
+RDZV_PORT=${RDZV_PORT:-29550}
 RDZV_ENDPOINT="${RDZV_HOST}:${RDZV_PORT}"
 RDZV_ID=${RDZV_ID:-${RUN_UUID:-"qhmuon-$(date +%s)"}}
 

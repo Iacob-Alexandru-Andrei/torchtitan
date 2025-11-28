@@ -28,16 +28,8 @@ MIN_REPLICAS=${MIN_REPLICAS:-${NGPU}}
 QUORUM_TICK_MS=${QUORUM_TICK_MS:-100}
 
 LIGHTHOUSE_HOST=${LIGHTHOUSE_HOST:-"localhost"}
-if [[ -z "${LIGHTHOUSE_PORT:-}" ]]; then
-  LIGHTHOUSE_PORT=$(python3 - <<'PY'
-import socket
-s = socket.socket()
-s.bind(("", 0))
-print(s.getsockname()[1])
-s.close()
-PY
-)
-fi
+# Hard-coded to avoid random port conflicts with other runs.
+LIGHTHOUSE_PORT=${LIGHTHOUSE_PORT:-29540}
 LIGHTHOUSE_URL="http://${LIGHTHOUSE_HOST}:${LIGHTHOUSE_PORT}"
 
 LR_SWITCH_STEP=${LR_SWITCH_STEP:-2049}
@@ -109,17 +101,8 @@ echo "Lighthouse PID: ${LIGHTHOUSE_PID}"
 
 export TORCHFT_LIGHTHOUSE="${LIGHTHOUSE_URL}"
 
-# Base rendezvous port for per-replica torchrun; randomize if not provided.
-if [[ -z "${RDZV_BASE_PORT:-}" ]]; then
-  RDZV_BASE_PORT=$(python3 - <<'PY'
-import socket
-s = socket.socket()
-s.bind(("", 0))
-print(s.getsockname()[1])
-s.close()
-PY
-)
-fi
+# Base rendezvous port for per-replica torchrun; fixed to avoid clashes.
+RDZV_BASE_PORT=${RDZV_BASE_PORT:-29640}
 
 AVAILABLE_GPUS=()
 if [[ -n "${CUDA_VISIBLE_DEVICES:-}" ]]; then
