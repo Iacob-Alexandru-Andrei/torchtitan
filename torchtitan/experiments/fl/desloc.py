@@ -715,7 +715,7 @@ class _OptimizerStateFragment(_BaseFragment):
         self._param_map = dict(entries)
         self._state_owner: dict[str, Optimizer] = {}
         self._original_state_tensors: dict[str, torch.Tensor] = {}
-        self._averaged_state_tensors: list[torch.Tensor] = []
+        self._averaged_state_tensors: list[tuple[str, Optimizer, torch.Tensor]] = []
 
         self._init_backup_storage(entries)
         self.save_state()
@@ -778,7 +778,7 @@ class _OptimizerStateFragment(_BaseFragment):
         )
         for name in self._original_state_tensors:
             param = self._param_map[name]
-            owner = self._state_owner.get(name) or _resolve_param_owner(self._optimizer, param)
+            owner = _resolve_param_owner(self._optimizer, param)
             self._state_owner[name] = owner
             state_tensor = owner.state[param][self.state_key]
             avg_state = state_tensor.detach().clone()
@@ -791,7 +791,7 @@ class _OptimizerStateFragment(_BaseFragment):
                 f"norm={norm_val}"
             )
             work_items.append(self._manager.allreduce(avg_state))
-            self._averaged_state_tensors.append(avg_state)
+            self._averaged_state_tensors.append((name, owner, avg_state))
         return work_items
 
     def perform_sync(self) -> None:
@@ -801,14 +801,8 @@ class _OptimizerStateFragment(_BaseFragment):
                 f"params={list(self._original_state_tensors.keys())} "
                 f"optimizer={type(self._optimizer).__name__}"
             )
-            for name, averaged in zip(
-                self._original_state_tensors.keys(),
-                self._averaged_state_tensors,
-                strict=True,
-            ):
+            for name, owner, averaged in self._averaged_state_tensors:
                 param = self._param_map[name]
-                owner = self._state_owner.get(name) or _resolve_param_owner(self._optimizer, param)
-                self._state_owner[name] = owner
                 state = owner.state.setdefault(param, {})
                 target = state.get(self.state_key)
                 if target is None:
