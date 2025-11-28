@@ -857,7 +857,7 @@ class _StreamingOptimizerStateFragment(_BaseFragment):
 
         self._state_owner: dict[str, Optimizer] = {}
         self._original_state_tensors: dict[str, torch.Tensor] = {}
-        self._averaged_state_tensors: list[tuple[str, torch.Tensor]] = []
+        self._averaged_state_tensors: list[tuple[str, Optimizer, torch.Tensor]] = []
         self._allreduce_work: list[Work] = []
         self._stream = torch.cuda.Stream() if torch.cuda.is_available() else None
         self._stop_event: torch.cuda.Event | None = None
@@ -965,7 +965,7 @@ class _StreamingOptimizerStateFragment(_BaseFragment):
         with torch.no_grad():
             for name in self._original_state_tensors:
                 param = self._param_map[name]
-                owner = self._state_owner.get(name) or _resolve_param_owner(self._optimizer, param)
+                owner = _resolve_param_owner(self._optimizer, param)
                 self._state_owner[name] = owner
                 tensor = owner.state[param][self.state_key]
                 clone = tensor.detach().clone()
@@ -977,14 +977,14 @@ class _StreamingOptimizerStateFragment(_BaseFragment):
                     f"[DESLOC DEBUG] streaming pre-allreduce state_key={self.state_key} fragment={self._fragment_id} "
                     f"param={name} norm={norm_val}"
                 )
-                self._averaged_state_tensors.append((name, clone))
+                self._averaged_state_tensors.append((name, owner, clone))
         print(
             f"[DESLOC DEBUG] streaming captured {len(self._averaged_state_tensors)} tensors for state_key={self.state_key} "
             f"fragment={self._fragment_id}"
         )
 
     def _allreduce_states(self) -> None:
-        tensors = [tensor for _, tensor in self._averaged_state_tensors]
+        tensors = [tensor for _, _, tensor in self._averaged_state_tensors]
         if not tensors:
             return
         if self.use_bucketization:
@@ -1082,10 +1082,8 @@ class _StreamingOptimizerStateFragment(_BaseFragment):
 
     def _apply_states(self) -> None:
         with torch.no_grad():
-            for name, averaged in self._averaged_state_tensors:
+            for name, owner, averaged in self._averaged_state_tensors:
                 param = self._param_map[name]
-                owner = self._state_owner.get(name) or _resolve_param_owner(self._optimizer, param)
-                self._state_owner[name] = owner
                 state = owner.state.setdefault(param, {})
                 target = state.get(self.state_key)
                 if target is None:

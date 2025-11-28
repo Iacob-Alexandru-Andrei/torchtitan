@@ -295,6 +295,7 @@ class AggMoAdamW(QHAdamW):
         name: str,
         optimizer_metrics: dict[str, torch.Tensor],
     ) -> dict[str, torch.Tensor]:
+        optimizer_label = type(self).__name__
         lr = self.param_groups[0]["lr"]
         eps = self.param_groups[0]["eps"]
         weight_decay = self.param_groups[0]["weight_decay"]
@@ -309,14 +310,15 @@ class AggMoAdamW(QHAdamW):
         if param in self.state:
             param_optim_state = self.state[param]
             step_state = param_optim_state["step"]
-            if "max/optimizer_step" not in optimizer_metrics:
+            step_key = f"{optimizer_label}/max/optimizer_step"
+            if step_key not in optimizer_metrics:
                 if isinstance(step_state, torch.Tensor):
                     step_tensor = step_state.detach().clone()
                     if step_tensor.device != param.device:
                         step_tensor = step_tensor.to(param.device)
                 else:
                     step_tensor = torch.tensor(float(step_state), device=param.device)
-                optimizer_metrics["max/optimizer_step"] = step_tensor
+                optimizer_metrics[step_key] = step_tensor
 
             step = float(param_optim_state["step"].item())
 
@@ -340,7 +342,8 @@ class AggMoAdamW(QHAdamW):
                 step_tensor = step_tensor * (1 + scaling_factor) + param * scaling_factor
 
             for metric in self.metric_functions:
-                optimizer_metrics[f"{metric}/{name}"] = self.metric_functions[metric](
+                key = f"{optimizer_label}/{metric}/{name}"
+                optimizer_metrics[key] = self.metric_functions[metric](
                     param,
                     param_optim_state,
                     step_tensor,

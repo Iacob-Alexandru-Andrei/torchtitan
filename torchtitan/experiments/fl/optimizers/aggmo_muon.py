@@ -205,6 +205,7 @@ class AggMoMuon(TorchMuon):
         name: str,
         optimizer_metrics: dict[str, torch.Tensor],
     ) -> dict[str, torch.Tensor]:
+        optimizer_label = type(self).__name__
         if param.grad is None:
             return optimizer_metrics
         state = self.state.get(param)
@@ -217,7 +218,8 @@ class AggMoMuon(TorchMuon):
         buffers = [state.get(name, torch.zeros_like(param)) for _, name in moment_specs]
         step_tensor = self._build_step_tensor(param, param.grad, group, buffers, group["betas"], moment_specs, grad_coeff)
 
-        if "max/optimizer_step" not in optimizer_metrics:
+        step_key = f"{optimizer_label}/max/optimizer_step"
+        if step_key not in optimizer_metrics:
             step_state = state.get("step", 0)
             if isinstance(step_state, torch.Tensor):
                 step_value = step_state.detach().clone()
@@ -225,10 +227,11 @@ class AggMoMuon(TorchMuon):
                     step_value = step_value.to(param.device)
             else:
                 step_value = torch.tensor(float(step_state), device=param.device)
-            optimizer_metrics["max/optimizer_step"] = step_value
+            optimizer_metrics[step_key] = step_value
 
         for metric_name, metric_fn in self.metric_functions.items():
-            optimizer_metrics[f"{metric_name}/{name}"] = metric_fn(param, state, step_tensor)
+            key = f"{optimizer_label}/{metric_name}/{name}"
+            optimizer_metrics[key] = metric_fn(param, state, step_tensor)
         return optimizer_metrics
 
     @staticmethod
