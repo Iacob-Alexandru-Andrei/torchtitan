@@ -708,12 +708,24 @@ class _OptimizerStateFragment(_BaseFragment):
         self._param_map = dict(self._iter_named_parameters())
 
     def _init_backup_storage(self, entries: list[tuple[str, nn.Parameter]]) -> None:
+        param_owner: dict[nn.Parameter, Optimizer] | None = getattr(self._optimizer.state, "_param_owner", None)
         for name, param in entries:
             state = self._optimizer.state.get(param, {})
             tensor = state.get(self.state_key)
             if isinstance(tensor, torch.Tensor):
                 device = self._backup_device if self._backup_device is not None else tensor.device
                 self._original_state_tensors[name] = torch.empty_like(tensor, device=device)
+                owner_name = type(param_owner.get(param)).__name__ if param_owner else type(self._optimizer).__name__
+                print(
+                    f"[DESLOC DEBUG] tracking state_key={self.state_key} param={name} "
+                    f"owner={owner_name} shape={tuple(tensor.shape)}"
+                )
+            else:
+                owner_name = type(param_owner.get(param)).__name__ if param_owner else type(self._optimizer).__name__
+                print(
+                    f"[DESLOC DEBUG] skipping state_key={self.state_key} param={name} "
+                    f"owner={owner_name} reason=missing_state"
+                )
 
     def save_state(self) -> None:
         with torch.no_grad():
@@ -826,6 +838,7 @@ class _StreamingOptimizerStateFragment(_BaseFragment):
         return [name for name, _ in self._param_entries]
 
     def _init_backup_storage(self) -> None:
+        param_owner: dict[nn.Parameter, Optimizer] | None = getattr(self._optimizer.state, "_param_owner", None)
         for name, param in self._param_entries:
             state = self._optimizer.state.get(param, {})
             tensor = state.get(self.state_key)
@@ -840,6 +853,17 @@ class _StreamingOptimizerStateFragment(_BaseFragment):
                 ):
                     backup = backup.pin_memory()
                 self._original_state_tensors[name] = backup
+                owner_name = type(param_owner.get(param)).__name__ if param_owner else type(self._optimizer).__name__
+                print(
+                    f"[DESLOC DEBUG] streaming tracking state_key={self.state_key} param={name} "
+                    f"owner={owner_name} shape={tuple(tensor.shape)}"
+                )
+            else:
+                owner_name = type(param_owner.get(param)).__name__ if param_owner else type(self._optimizer).__name__
+                print(
+                    f"[DESLOC DEBUG] streaming skipping state_key={self.state_key} param={name} "
+                    f"owner={owner_name} reason=missing_state"
+                )
 
     def save_state(self) -> None:
         with torch.no_grad():
@@ -891,6 +915,10 @@ class _StreamingOptimizerStateFragment(_BaseFragment):
                 param = self._param_map[name]
                 tensor = self._optimizer.state[param][self.state_key]
                 self._averaged_state_tensors.append((name, tensor.detach().clone()))
+        print(
+            f"[DESLOC DEBUG] streaming captured {len(self._averaged_state_tensors)} tensors for state_key={self.state_key} "
+            f"fragment={self._fragment_id}"
+        )
 
     def _allreduce_states(self) -> None:
         tensors = [tensor for _, tensor in self._averaged_state_tensors]
@@ -994,6 +1022,11 @@ class _StreamingOptimizerStateFragment(_BaseFragment):
             for name, averaged in self._averaged_state_tensors:
                 param = self._param_map[name]
                 self._optimizer.state[param][self.state_key].copy_(averaged)
+                owner = getattr(self._optimizer.state, "_param_owner", {}).get(param)
+                owner_name = type(owner).__name__ if owner is not None else type(self._optimizer).__name__
+                print(
+                    f"[DESLOC DEBUG] streaming applied state_key={self.state_key} param={name} owner={owner_name}"
+                )
 
     def register_state_dict_fn(self) -> None:
         def load_fn(state_dict: dict[str, torch.Tensor]) -> None:
