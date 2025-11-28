@@ -210,7 +210,7 @@ def _maybe_refresh_projector(
     should_refresh = orthogonal is None or (iteration % update_proj_gap).item() == 0
     if not should_refresh:
         return
-
+    print("Refreshing the new-basis")
     new_basis = _orthogonal_matrix(weights, rank, resolved_proj_type)
     if (
         rotation_context is not None
@@ -410,7 +410,7 @@ class GaLore(AdamW):
                 use_low_rank = rank is not None and not suppress_low_rank
                 if use_low_rank and dim > GALORE_MAX_SUPPORT_DIM:
                     raise NotImplementedError("GaLore supports tensors up to 2 dimensions.")
-
+                print(f"Low-rank GaLore is on: {use_low_rank}.")
                 state = self.state[param]
                 if "step" not in state:
                     state["step"] = torch.zeros((), dtype=torch.float32, device=param.device)

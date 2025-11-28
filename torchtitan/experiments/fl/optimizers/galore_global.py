@@ -11,8 +11,7 @@ import inspect
 import logging
 import math
 import re
-from collections.abc import Callable, Iterable
-from typing import Any
+from typing import Any, TYPE_CHECKING
 
 import torch
 from torch import Tensor
@@ -20,6 +19,9 @@ from torch.optim import AdamW
 
 from ._decoupled_decay import _compute_decay_factor
 from ._metric_utils import prepare_metrics_for_reduction, reduce_metrics_across_ranks
+
+if TYPE_CHECKING:
+    from collections.abc import Callable, Iterable
 
 log = logging.getLogger(__name__)
 
@@ -47,7 +49,6 @@ ProjectionBasis = Tensor | list[Tensor]
 
 def _in_optimizer_state_initialization() -> bool:
     """Detect whether torch.distributed.checkpoint is priming optimizer state."""
-
     frame = inspect.currentframe()
     while frame:
         if frame.f_code.co_name == "_init_optim_state":
@@ -92,16 +93,20 @@ def _proj_name_from_value(value: Any, default: str = STD_PROJ) -> str:
 def _require_remote_projector(state: dict[str, Any]) -> ProjectionBasis:
     projector_basis = state.get("projector_basis")
     if projector_basis is None:
-        raise RuntimeError(
+        msg = (
             "GaLoreGlobal expected a server-provided projector basis. "
             "Ensure the optimizer state was initialized from the federated server before stepping."
+        )
+        raise RuntimeError(
+            msg
         )
     return projector_basis
 
 
 def _project(state: dict[str, Any], full_rank_grad: Tensor) -> Tensor:
     if full_rank_grad.ndim > GALORE_MAX_SUPPORT_DIM:
-        raise NotImplementedError("GaLoreGlobal currently supports tensors up to rank 2.")
+        msg = "GaLoreGlobal currently supports tensors up to rank 2."
+        raise NotImplementedError(msg)
 
     meta = state.setdefault(
         "projector_meta",
@@ -130,7 +135,8 @@ def _project(state: dict[str, Any], full_rank_grad: Tensor) -> Tensor:
         assert isinstance(orthogonal, list)
         a_matrix, b_matrix = orthogonal
         return a_matrix.T.to(full_rank_grad.device) @ full_rank_grad @ b_matrix.T.to(full_rank_grad.device)
-    raise ValueError(f"Unsupported projection type {proj_type!r}")
+    msg = f"Unsupported projection type {proj_type!r}"
+    raise ValueError(msg)
 
 
 def _project_back(state: dict[str, Any], low_rank_grad: Tensor) -> Tensor:
@@ -203,13 +209,17 @@ class GaLoreGlobal(AdamW):
         rotate_moments_on_refresh: bool = False,
     ) -> None:
         if lr < 0.0:
-            raise ValueError(f"Invalid learning rate: {lr}")
+            msg = f"Invalid learning rate: {lr}"
+            raise ValueError(msg)
         if not 0.0 <= betas[0] < 1.0 or not 0.0 <= betas[1] < 1.0:
-            raise ValueError(f"Invalid betas: {betas}")
+            msg = f"Invalid betas: {betas}"
+            raise ValueError(msg)
         if eps < 0.0:
-            raise ValueError(f"Invalid epsilon value: {eps}")
+            msg = f"Invalid epsilon value: {eps}"
+            raise ValueError(msg)
         if weight_decay < 0.0:
-            raise ValueError(f"Invalid weight_decay value: {weight_decay}")
+            msg = f"Invalid weight_decay value: {weight_decay}"
+            raise ValueError(msg)
         if weight_decay >= _HIGH_WEIGHT_DECAY_WARNING:
             log.warning(
                 "High weight_decay=%s for GaLoreGlobal. Model weights are multiplied by %.6f every step.",
@@ -217,8 +227,8 @@ class GaLoreGlobal(AdamW):
                 1.0 - weight_decay,
             )
         if not 0.0 <= v1 <= 1.0:
-            raise ValueError(f"Invalid quasi-hyperbolic parameter v1={v1}")
-        print(f"The learning rate is {lr}")
+            msg = f"Invalid quasi-hyperbolic parameter v1={v1}"
+            raise ValueError(msg)
         super().__init__(params=params, lr=lr, betas=betas, eps=eps, weight_decay=weight_decay)
         self.v1 = v1
         self._defaults = {
@@ -250,7 +260,7 @@ class GaLoreGlobal(AdamW):
 
     @torch.no_grad()
     def step(self, closure: Callable[[], Tensor] | None = None) -> Tensor | None:
-        loss = None 
+        loss = None
         if closure is not None:
             with torch.enable_grad():
                 loss = closure()
@@ -271,12 +281,14 @@ class GaLoreGlobal(AdamW):
                 if grad is None:
                     continue
                 if grad.is_sparse:
-                    raise RuntimeError("GaLoreGlobal does not support sparse gradients.")
+                    msg = "GaLoreGlobal does not support sparse gradients."
+                    raise RuntimeError(msg)
 
                 rank = self._resolve_rank_for_param(param, base_rank)
                 use_low_rank = rank is not None and not suppress_low_rank
                 if use_low_rank and dim > GALORE_MAX_SUPPORT_DIM:
-                    raise NotImplementedError("GaLoreGlobal supports tensors up to 2 dimensions.")
+                    msg = "GaLoreGlobal supports tensors up to 2 dimensions."
+                    raise NotImplementedError(msg)
 
                 state = self.state[param]
                 if "step" not in state:
@@ -436,7 +448,6 @@ class GaLoreGlobal(AdamW):
 
     def _repair_projector_states(self) -> None:
         """Ensure projector metadata matches the configured rank after load."""
-
         for group in self.param_groups:
             base_rank = group.get("rank")
             update_proj_gap = group.get("update_proj_gap")
@@ -471,18 +482,21 @@ class GaLoreGlobal(AdamW):
                     state.get("projector_basis"), resolved_proj_type
                 )
                 if current_rank is None:
+                    msg = "GaLoreGlobal requires a server-provided projector basis for each low-rank parameter."
                     raise RuntimeError(
-                        "GaLoreGlobal requires a server-provided projector basis for each low-rank parameter."
+                        msg
                     )
                 if current_rank != desired_rank:
-                    raise RuntimeError(
-                        "GaLoreGlobal cannot reconcile projector rank %s with configured rank %s for %s. "
-                        "Update the server-provided projector before resuming training."
-                        % (
+                    msg = (
+                        "GaLoreGlobal cannot reconcile projector rank {} with configured rank {} for {}. "
+                        "Update the server-provided projector before resuming training.".format(
                             current_rank,
                             desired_rank,
                             getattr(param, "_base_name", "<unnamed_param>"),
                         )
+                    )
+                    raise RuntimeError(
+                        msg
                     )
 
     def _resolve_rank_for_param(self, param: Tensor, fallback: int | None) -> int | None:
@@ -497,7 +511,6 @@ def classify_low_rank_parameters(
     optimizer_config: dict | None = None,
 ) -> dict[str, int]:
     """Classify parameter names as low-rank based on config patterns."""
-
     if not optimizer_config:
         return {}
     param_groups = optimizer_config.get("param_groups")

@@ -8,10 +8,12 @@ TRAIN_MODULE=${TRAIN_MODULE:-"torchtitan.experiments.fl.train"}
 RUN_PREFIX=${RUN_PREFIX:-"icml2026-galore"}
 LOG_RANK=${LOG_RANK:-0}
 
-PROJECTION_RANKS=${PROJECTION_RANKS:-"8 16 32 64 128 256"}
+# PROJECTION_RANKS=${PROJECTION_RANKS:-"8 16 32 64 128 256"}
+PROJECTION_RANKS=${PROJECTION_RANKS:-"256"}
 # LR_VALUES=${LR_VALUES:-"0.0005 0.001 0.002 0.004 0.008"}
-LR_VALUES=${LR_VALUES:-"0.016"}
+LR_VALUES=${LR_VALUES:-"0.0005 0.001 0.002 0.004 0.008 0.016"}
 ROTATE_MOMENTS_OPTIONS=${ROTATE_MOMENTS_OPTIONS:-"false true"}
+ADAM_SENTINEL_RANK=${ADAM_SENTINEL_RANK:-256}
 
 RUN_INDEX=${RUN_INDEX:-}
 RUN_INDEX_OFFSET=${RUN_INDEX_OFFSET:-0}
@@ -321,6 +323,7 @@ generate_run_config() {
   SWEEP_REGEX_PATTERN="${GALORE_REGEX_PATTERN}" \
   TARGET_RANK="${target_rank}" \
   ROTATE_MOMENTS_FLAG="${rotate_flag}" \
+  ADAM_SENTINEL_RANK="${ADAM_SENTINEL_RANK}" \
   uv run --no-sync python3  <<'PY'
 import os
 import sys
@@ -339,6 +342,9 @@ output = Path(os.environ["OUTPUT_CONFIG_PATH"])
 pattern = os.environ["SWEEP_REGEX_PATTERN"]
 rank = int(os.environ["TARGET_RANK"])
 rotate_flag = os.environ["ROTATE_MOMENTS_FLAG"].strip().lower()
+adam_rank_env = os.environ.get("ADAM_SENTINEL_RANK")
+adam_rank = int(adam_rank_env) if adam_rank_env not in {None, ""} else None
+disable_projection = adam_rank is not None and rank == adam_rank
 
 true_values = {"true", "1", "yes", "on"}
 false_values = {"false", "0", "no", "off", ""}
@@ -369,14 +375,17 @@ elif regex_entries is None:
 else:
     normalized = [dict(regex_entries)] if isinstance(regex_entries, dict) else []
 
-updated = False
-for entry in normalized:
+if disable_projection:
+  normalized = [entry for entry in normalized if entry.get("param_str_match") != pattern]
+else:
+  updated = False
+  for entry in normalized:
     if entry.get("param_str_match") == pattern:
-        entry["rank"] = rank
-        updated = True
-        break
+      entry["rank"] = rank
+      updated = True
+      break
 
-if not updated:
+  if not updated:
     normalized.append({"param_str_match": pattern, "rank": rank})
 
 optimizer["galore_param_regexes"] = normalized
