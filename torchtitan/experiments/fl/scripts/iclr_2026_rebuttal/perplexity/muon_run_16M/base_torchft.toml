@@ -42,18 +42,18 @@ implementation = "for-loop"
 beta1 = 0.9
 beta2 = 0.999
 decouple = false
-vs = [0.95]
+vs = [1.0]
 muon_nesterov = true
 
 [[optimizer.composite]]
 name = "AggMoMuon"
 labels = ["decay_lr"]
-config_overrides = { lr = 0.002, weight_decay = 0.1, eps = 1e-7, muon_nesterov = true, beta1 = 0.9, adjust_lr_fn = "match_rms_adamw", vs = [0.95] }
+config_overrides = { lr = 0.002, weight_decay = 0.1, eps = 1e-7, muon_nesterov = true, beta1 = 0.9, adjust_lr_fn = "match_rms_adamw", vs = [1.0] }
 
 [[optimizer.composite]]
 name = "AggMoAdamW"
 default = true
-config_overrides = { lr = 0.001, weight_decay = 0.1, betas = [0.9, 0.999], decouple = false, vs = [0.95] }
+config_overrides = { lr = 0.001, weight_decay = 0.1, betas = [0.9, 0.999], decouple = false, vs = [1.0] }
 
 
 [optimizer.desloc]
@@ -133,7 +133,7 @@ enable = true
 bucket = "checkpoints"
 prefix = ""  # Root of bucket
 download_on_start = true
-resume_from_run_step = "iclr2026-qhmuon16m-20251127-170157/step-2048"
+resume_from_run_step = "iclr2026-qhmuon16m-20251128-132704/step-2048"
 # run_uuid and remote_checkpoint_folder will be set via RUN_UUID environment variable
 
 [activation_checkpoint]
