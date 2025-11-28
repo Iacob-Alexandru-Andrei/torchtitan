@@ -206,7 +206,6 @@ class AggMoMuon(TorchMuon):
         name: str,
         optimizer_metrics: dict[str, torch.Tensor],
     ) -> dict[str, torch.Tensor]:
-        optimizer_label = type(self).__name__
         if param.grad is None:
             return optimizer_metrics
         state = self.state.get(param)
@@ -226,7 +225,7 @@ class AggMoMuon(TorchMuon):
             buffers.append(buffer)
         step_tensor = self._build_step_tensor(param, param.grad, group, buffers, group["betas"], moment_specs, grad_coeff)
 
-        step_key = f"max/{optimizer_label}/optimizer_step"
+        step_key = "max/optimizer_step"
         step_state = state.get("step", 0)
         if step_key not in optimizer_metrics:
             if isinstance(step_state, torch.Tensor):
@@ -238,19 +237,8 @@ class AggMoMuon(TorchMuon):
             optimizer_metrics[step_key] = step_value
 
         for metric_name, metric_fn in self.metric_functions.items():
-            key = f"{metric_name}/{optimizer_label}/{name}"
-            exp_avg = state.get("exp_avg")
-            ptr = exp_avg.data_ptr() if isinstance(exp_avg, torch.Tensor) else None
+            key = f"{metric_name}/{name}"
             optimizer_metrics[key] = metric_fn(param, state, step_tensor)
-            now = time.time()
-            step_scalar = (
-                float(step_state.detach().item()) if isinstance(step_state, torch.Tensor) else float(step_state)
-            )
-            print(
-                f"[DESLOC DEBUG] metrics read param={name} owner={optimizer_label} metric={metric_name} "
-                f"norm={optimizer_metrics[key] if torch.is_tensor(optimizer_metrics[key]) else optimizer_metrics[key]} "
-                f"exp_avg_ptr={ptr} step={step_scalar} time={now}"
-            )
         return optimizer_metrics
 
     @staticmethod

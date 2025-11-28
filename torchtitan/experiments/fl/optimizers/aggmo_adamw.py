@@ -296,7 +296,6 @@ class AggMoAdamW(QHAdamW):
         name: str,
         optimizer_metrics: dict[str, torch.Tensor],
     ) -> dict[str, torch.Tensor]:
-        optimizer_label = type(self).__name__
         lr = self.param_groups[0]["lr"]
         eps = self.param_groups[0]["eps"]
         weight_decay = self.param_groups[0]["weight_decay"]
@@ -311,7 +310,7 @@ class AggMoAdamW(QHAdamW):
         if param in self.state:
             param_optim_state = self.state[param]
             step_state = param_optim_state["step"]
-            step_key = f"max/{optimizer_label}/optimizer_step"
+            step_key = "max/optimizer_step"
             if step_key not in optimizer_metrics:
                 if isinstance(step_state, torch.Tensor):
                     step_tensor = step_state.detach().clone()
@@ -344,20 +343,11 @@ class AggMoAdamW(QHAdamW):
                 step_tensor = step_tensor * (1 + scaling_factor) + param * scaling_factor
 
             for metric in self.metric_functions:
-                key = f"{metric}/{optimizer_label}/{name}"
+                key = f"{metric}/{name}"
                 optimizer_metrics[key] = self.metric_functions[metric](
                     param,
                     param_optim_state,
                     step_tensor,
-                )
-                now = time.time()
-                exp_avg = param_optim_state.get("exp_avg")
-                ptr = exp_avg.data_ptr() if isinstance(exp_avg, torch.Tensor) else None
-                step_scalar = step_state_scalar
-                print(
-                    f"[DESLOC DEBUG] metrics read param={name} owner={optimizer_label} metric={metric} "
-                    f"norm={optimizer_metrics[key] if torch.is_tensor(optimizer_metrics[key]) else optimizer_metrics[key]} "
-                    f"exp_avg_ptr={ptr} step={step_scalar} time={now}"
                 )
 
         return optimizer_metrics

@@ -11,7 +11,6 @@ import logging
 import math
 import os
 import sys
-import time
 from collections import defaultdict
 from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass
@@ -783,14 +782,6 @@ class _OptimizerStateFragment(_BaseFragment):
             self._state_owner[name] = owner
             state_tensor = owner.state[param][self.state_key]
             avg_state = state_tensor.detach().clone()
-            try:
-                norm_val = avg_state.norm().item()
-            except Exception:
-                norm_val = float("nan")
-            print(
-                f"[DESLOC DEBUG] pre-allreduce state_key={self.state_key} param={name} "
-                f"norm={norm_val}"
-            )
             work_items.append(self._manager.allreduce(avg_state))
             self._averaged_state_tensors.append((name, owner, avg_state))
         return work_items
@@ -810,23 +801,7 @@ class _OptimizerStateFragment(_BaseFragment):
                 if target is None:
                     state[self.state_key] = averaged.clone()
                     target = state[self.state_key]
-                pre_ptr = target.data_ptr() if target is not None and target.is_contiguous() else None
-                avg_ptr = averaged.data_ptr() if averaged.is_contiguous() else None
                 target.copy_(averaged)
-                post_ptr = target.data_ptr() if target is not None and target.is_contiguous() else None
-                owner_name = type(owner).__name__
-                try:
-                    norm_val = target.norm().item()
-                except Exception:
-                    norm_val = float("nan")
-                now = time.time()
-                print(
-                    f"[DESLOC DEBUG] apply averaged state_key={self.state_key} param={name} "
-                    f"owner={owner_name} norm={norm_val} "
-                    f"ptr_before={pre_ptr} ptr_after={post_ptr} averaged_ptr={avg_ptr} "
-                    f"step={self._manager.current_step() if hasattr(self, '_manager') else 'unknown'} "
-                    f"time={now}"
-                )
 
     def register_state_dict_fn(self) -> None:
         def load_fn(state_dict: dict[str, torch.Tensor]) -> None:
@@ -978,14 +953,6 @@ class _StreamingOptimizerStateFragment(_BaseFragment):
                 self._state_owner[name] = owner
                 tensor = owner.state[param][self.state_key]
                 clone = tensor.detach().clone()
-                try:
-                    norm_val = clone.norm().item()
-                except Exception:
-                    norm_val = float("nan")
-                print(
-                    f"[DESLOC DEBUG] streaming pre-allreduce state_key={self.state_key} fragment={self._fragment_id} "
-                    f"param={name} norm={norm_val}"
-                )
                 self._averaged_state_tensors.append((name, owner, clone))
         print(
             f"[DESLOC DEBUG] streaming captured {len(self._averaged_state_tensors)} tensors for state_key={self.state_key} "
@@ -1098,23 +1065,7 @@ class _StreamingOptimizerStateFragment(_BaseFragment):
                 if target is None:
                     state[self.state_key] = averaged.clone()
                     target = state[self.state_key]
-                pre_ptr = target.data_ptr() if target is not None and target.is_contiguous() else None
-                avg_ptr = averaged.data_ptr() if averaged.is_contiguous() else None
                 target.copy_(averaged)
-                post_ptr = target.data_ptr() if target is not None and target.is_contiguous() else None
-                owner_name = type(owner).__name__
-                try:
-                    norm_val = target.norm().item()
-                except Exception:
-                    norm_val = float("nan")
-                now = time.time()
-                print(
-                    f"[DESLOC DEBUG] streaming applied state_key={self.state_key} param={name} "
-                    f"owner={owner_name} norm={norm_val} "
-                    f"ptr_before={pre_ptr} ptr_after={post_ptr} averaged_ptr={avg_ptr} "
-                    f"step={self._current_sync_step if self._current_sync_step is not None else 'unknown'} "
-                    f"time={now}"
-                )
 
     def register_state_dict_fn(self) -> None:
         def load_fn(state_dict: dict[str, torch.Tensor]) -> None:
