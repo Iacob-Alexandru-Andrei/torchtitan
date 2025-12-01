@@ -532,10 +532,12 @@ def _get_global_step(manager: Any) -> int | None:
     try:
         return int(step_attr())
     except TypeError:
-        try:
-            return int(step_attr)
-        except Exception:
-            return None
+        pass
+    try:
+        # Handle property-like attributes or tensor scalars.
+        if hasattr(step_attr, "item"):
+            return int(step_attr.item())
+        return int(step_attr)
     except Exception:
         return None
 
@@ -1648,6 +1650,7 @@ class DesLocController:
         self._is_opt_init = not self._optimizer_state_sync_enabled
 
         self._hook = config.optimizer.register_step_post_hook(self._step_post_hook)
+        self._warned_missing_step = False
 
     def close(self) -> None:
         """Detach the registered optimizer step hook."""
@@ -1781,13 +1784,19 @@ class DesLocController:
             self._lazy_init_optimizer_fragments()
 
         global_step = _get_global_step(self._manager)
+        if global_step is None and not self._warned_missing_step:
+            print(
+                f"[DESLOC DEBUG] controller={self._name_prefix} global_step unresolved; falling back to local clocks"
+            )
+            self._warned_missing_step = True
         ready_fragments = [fragment for fragment in self._fragments if fragment.tick(current_step=global_step)]
 
         if ready_fragments:
             print(
                 f"[DESLOC DEBUG] controller={self._name_prefix} global_step={global_step} "
                 f"ready_fragments={[type(f).__name__ for f in ready_fragments]} "
-                f"sync_every={[f.sync_every for f in ready_fragments]}"
+                f"sync_every={[f.sync_every for f in ready_fragments]} "
+                f"local_steps={[f._local_step for f in ready_fragments]}"
             )
             self._sync(ready_fragments)
 
@@ -1859,6 +1868,7 @@ class StreamingDesLocController:
         self._checkpoint_outer_optimizer = config.checkpoint_outer_optimizer
         self._streaming_cfg = streaming
         self._optimizer_state_sync_enabled = not config.disable_optimizer_state_sync
+        self._warned_missing_step = False
 
         if config.param_entries is not None:
             opt_params = {param for _, param in config.param_entries}
@@ -2423,7 +2433,8 @@ class StreamingDesLocController:
                 f"[DESLOC DEBUG] streaming controller={self._name_prefix} fragment_idx={fragment_idx} "
                 f"global_step={_get_global_step(self._manager)} "
                 f"ready_fragments={[type(f).__name__ for f in ready]} "
-                f"sync_every={[f.sync_every for f in ready]}"
+                f"sync_every={[f.sync_every for f in ready]} "
+                f"local_steps={[f._local_step for f in ready]}"
             )
         self._execute_state_sync_batch(ready)
 
