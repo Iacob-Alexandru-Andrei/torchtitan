@@ -101,8 +101,10 @@ class DesLocConfig:
 
     If ``None`` the parameter synchronization cadence is reused. A single integer
     applies to every optimizer state tensor. A list specifies the cadence per
-    discovered state (ordered alphabetically), while a dict maps explicit state
-    names (e.g. ``{"exp_avg": 4}``).
+    discovered state (ordered alphabetically), while a two-element list
+    broadcasts to first- and second-moment states (e.g. Muon momentum and Adam
+    ``exp_avg`` / ``exp_avg_sq``). A dict maps explicit state names or aliases
+    such as ``exp_avg``, ``momentum_buffer``, or ``exp_avg_sq``.
     """
 
     backup_device: str | torch.device | None = "cpu"

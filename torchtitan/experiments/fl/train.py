@@ -381,6 +381,15 @@ def _initialize_wandb_run_name_env(job_config: Any) -> None:
         logger.warning("Failed to preconfigure WandB run name: %s", exc)
 
 
+def _resolve_trainer_cls(job_config: MosaicJobConfig) -> type[Trainer]:
+    """Pick the appropriate Trainer implementation for the requested model."""
+    if job_config.model.name.lower() == "flux":
+        from torchtitan.experiments.flux.train import FluxTrainer
+
+        return FluxTrainer
+    return Trainer
+
+
 def _maybe_update_wandb_run_name(
     job_config: Any,
     *,
@@ -507,6 +516,7 @@ def main() -> None:  # noqa: C901, PLR0912, PLR0915
         logger.info(f"Will resume training from run step: {resume_from_run_step}")
 
     _initialize_wandb_run_name_env(job_config)
+    trainer_cls: type[Trainer] = _resolve_trainer_cls(job_config)
 
     # Launch the trainer
     trainer: Trainer | None = None
@@ -515,7 +525,7 @@ def main() -> None:  # noqa: C901, PLR0912, PLR0915
 
     try:
         with configure_desloc(job_config):
-            trainer = Trainer(job_config)
+            trainer = trainer_cls(job_config)
             ensure_torchft_init_sync(trainer)
             _log_model_summary(trainer)
 

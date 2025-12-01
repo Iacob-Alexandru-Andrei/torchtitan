@@ -1,0 +1,23 @@
+REPO_ROOT=/nfs-share/aai30/projects
+warning: `--no-sync` has no effect when used outside of a project
+W1129 09:19:29.880000 137232521623360 torch/distributed/run.py:757] 
+W1129 09:19:29.880000 137232521623360 torch/distributed/run.py:757] *****************************************
+W1129 09:19:29.880000 137232521623360 torch/distributed/run.py:757] Setting OMP_NUM_THREADS environment variable for each process to be 1 in default, to avoid your system being overloaded, please further tune the variable for optimal performance in your application as needed. 
+W1129 09:19:29.880000 137232521623360 torch/distributed/run.py:757] *****************************************
+Fatal Python error: Segmentation fault
+
+Current thread 0x00007ccfefb3f740 (most recent call first):
+  File "/nfs-share/aai30/projects/torchtitan/.venv/lib/python3.12/site-packages/torch/distributed/elastic/rendezvous/c10d_rendezvous_backend.py", line 113 in _call_store
+  File "/nfs-share/aai30/projects/torchtitan/.venv/lib/python3.12/site-packages/torch/distributed/elastic/rendezvous/c10d_rendezvous_backend.py", line 64 in __init__
+  File "/nfs-share/aai30/projects/torchtitan/.venv/lib/python3.12/site-packages/torch/distributed/elastic/rendezvous/c10d_rendezvous_backend.py", line 259 in create_backend
+  File "/nfs-share/aai30/projects/torchtitan/.venv/lib/python3.12/site-packages/torch/distributed/elastic/rendezvous/registry.py", line 36 in _create_c10d_handler
+  File "/nfs-share/aai30/projects/torchtitan/.venv/lib/python3.12/site-packages/torch/distributed/elastic/rendezvous/api.py", line 263 in create_handler
+  File "/nfs-share/aai30/projects/torchtitan/.venv/lib/python3.12/site-packages/torch/distributed/elastic/rendezvous/registry.py", line 66 in get_rendezvous_handler
+  File "/nfs-share/aai30/projects/torchtitan/.venv/lib/python3.12/site-packages/torch/distributed/launcher/api.py", line 235 in launch_agent
+  File "/nfs-share/aai30/projects/torchtitan/.venv/lib/python3.12/site-packages/torch/distributed/launcher/api.py", line 132 in __call__
+  File "/nfs-share/aai30/projects/torchtitan/.venv/lib/python3.12/site-packages/torch/distributed/run.py", line 870 in run
+  File "/nfs-share/aai30/projects/torchtitan/.venv/lib/python3.12/site-packages/torch/distributed/run.py", line 879 in main
+  File "/nfs-share/aai30/projects/torchtitan/.venv/lib/python3.12/site-packages/torch/distributed/elastic/multiprocessing/errors/__init__.py", line 347 in wrapper
+  File "/nfs-share/aai30/projects/torchtitan/.venv/bin/torchrun", line 8 in <module>
+
+Extension modules: numpy._core._multiarray_umath, numpy.linalg._umath_linalg, torch._C, torch._C._fft, torch._C._linalg, torch._C._nested, torch._C._nn, torch._C._sparse, torch._C._special (total: 9)

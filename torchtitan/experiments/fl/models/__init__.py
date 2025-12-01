@@ -9,6 +9,7 @@ from dataclasses import replace
 
 from torchtitan.protocols.train_spec import register_train_spec
 
+from .flux import get_train_spec as get_flux_train_spec
 from .llama3_mup.train_configs import get_train_spec as get_llama3_mup_train_spec
 from .llama3_mup_disco.train_configs import (
     get_train_spec as get_llama3_mup_disco_train_spec,
@@ -17,6 +18,7 @@ from .llama3_mup_disco.train_configs import (
 
 def _register_base_specs() -> None:
     """Register base (non-Mosaic) TrainSpecs."""
+    register_train_spec(get_flux_train_spec())
     register_train_spec(get_llama3_mup_train_spec())
     register_train_spec(get_llama3_mup_disco_train_spec())
 

@@ -16,8 +16,8 @@ from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass
 from datetime import timedelta
 from types import ModuleType
-from typing import Any, TYPE_CHECKING, Sequence
-from collections.abc import Iterable
+from typing import Any, TYPE_CHECKING, Literal, Sequence
+from collections.abc import Callable, Iterable
 from fnmatch import fnmatch
 
 import torch
@@ -138,6 +138,77 @@ class DesLocFTOptimizersConfig:
         DesLocOuterOptimizerConfig | Optimizer | list[Optimizer] | None
     ) = None
     streaming: "DesLocStreamingConfig | None" = None
+
+
+OptimizerStateGroup = Literal["first_moment", "second_moment", None]
+_FIRST_MOMENT_ALIASES: tuple[str, ...] = ("exp_avg", "momentum", "momentum_buffer", "first_moment")
+_SECOND_MOMENT_ALIASES: tuple[str, ...] = ("exp_avg_sq", "second_moment")
+
+
+def _classify_optimizer_state_key(state_key: str) -> OptimizerStateGroup:
+    """Return the moment category for a discovered optimizer state key."""
+    lowered = state_key.lower()
+    if "exp_avg_sq" in lowered or "second_moment" in lowered:
+        return "second_moment"
+    if "exp_avg" in lowered or "momentum" in lowered:
+        return "first_moment"
+    return None
+
+
+def _broadcast_moment_intervals(intervals: list[int], state_keys: list[str]) -> list[int] | None:
+    """Map two sync cadences onto first- and second-moment optimizer states.
+
+    Args:
+        intervals: Two-element list of sync cadences in the order [first_moment, second_moment].
+        state_keys: Discovered optimizer state tensor keys.
+
+    Returns:
+        A list of sync cadences aligned with ``state_keys`` or ``None`` if any key
+        cannot be classified as a first- or second-moment state.
+    """
+    if len(intervals) != 2:
+        return None
+
+    first_interval, second_interval = intervals
+    resolved: list[int] = []
+    for key in state_keys:
+        category = _classify_optimizer_state_key(key)
+        if category == "first_moment":
+            resolved.append(first_interval)
+        elif category == "second_moment":
+            resolved.append(second_interval)
+        else:
+            return None
+    return resolved
+
+
+def _resolve_interval_from_mapping(state_key: str, mapping: dict[str, int]) -> int | None:
+    """Resolve a sync cadence for ``state_key`` using explicit and alias mappings.
+
+    Args:
+        state_key: Optimizer state tensor key (e.g., ``exp_avg`` or ``momentum_buffer``).
+        mapping: User-provided sync cadences keyed by state names or aliases.
+
+    Returns:
+        The resolved sync cadence or ``None`` if no mapping matches.
+    """
+    candidates: list[str] = [state_key, state_key.lower()]
+    category = _classify_optimizer_state_key(state_key)
+    if category == "first_moment":
+        candidates.extend(_FIRST_MOMENT_ALIASES)
+        candidates.extend(alias.lower() for alias in _FIRST_MOMENT_ALIASES)
+    elif category == "second_moment":
+        candidates.extend(_SECOND_MOMENT_ALIASES)
+        candidates.extend(alias.lower() for alias in _SECOND_MOMENT_ALIASES)
+
+    seen: set[str] = set()
+    for candidate in candidates:
+        if candidate in seen:
+            continue
+        seen.add(candidate)
+        if candidate in mapping:
+            return int(mapping[candidate])
+    return None
 
 
 def _extract_local_tensor(tensor: torch.Tensor) -> torch.Tensor:
@@ -1591,23 +1662,38 @@ class DesLocController:
         return [interval for _ in keys]
 
     def _expand_list_intervals(self, intervals: list[int], keys: list[str]) -> list[int]:
-        if len(intervals) != len(keys):
-            msg = "Length of optimizer_sync_every list does not match discovered optimizer states."
-            raise ValueError(msg)
         normalized = [int(value) for value in intervals]
         for value in normalized:
             self._validate_positive_interval(value)
-        return normalized
+        if len(normalized) == len(keys):
+            return normalized
+
+        broadcasted = _broadcast_moment_intervals(normalized, keys)
+        if broadcasted is not None:
+            return broadcasted
+
+        msg = (
+            "Length of optimizer_sync_every list does not match discovered optimizer states; "
+            "provide one value per state or two values for [first_moment, second_moment]."
+        )
+        raise ValueError(msg)
 
     def _expand_dict_intervals(self, mapping: dict[str, int], keys: list[str]) -> list[int]:
+        normalized = {str(k): int(v) for k, v in mapping.items()}
         resolved: list[int] = []
+        missing: list[str] = []
         for key in keys:
-            if key not in mapping:
-                msg = f"Missing DES-LOC sync interval for optimizer state '{key}'."
-                raise ValueError(msg)
-            value = int(mapping[key])
+            value = _resolve_interval_from_mapping(key, normalized)
+            if value is None:
+                missing.append(key)
+                continue
             self._validate_positive_interval(value)
             resolved.append(value)
+
+        if missing:
+            missing_keys = ", ".join(sorted(missing))
+            msg = f"Missing DES-LOC sync interval for optimizer state(s): {missing_keys}."
+            raise ValueError(msg)
         return resolved
 
     def _validate_positive_interval(self, value: int) -> None:
@@ -2169,23 +2255,38 @@ class StreamingDesLocController:
         return [interval for _ in keys]
 
     def _expand_list_intervals(self, intervals: list[int], keys: list[str]) -> list[int]:
-        if len(intervals) != len(keys):
-            msg = "Length of optimizer_sync_every list does not match discovered optimizer states."
-            raise ValueError(msg)
         normalized = [int(value) for value in intervals]
         for value in normalized:
             self._validate_positive_interval(value)
-        return normalized
+        if len(normalized) == len(keys):
+            return normalized
+
+        broadcasted = _broadcast_moment_intervals(normalized, keys)
+        if broadcasted is not None:
+            return broadcasted
+
+        msg = (
+            "Length of optimizer_sync_every list does not match discovered optimizer states; "
+            "provide one value per state or two values for [first_moment, second_moment]."
+        )
+        raise ValueError(msg)
 
     def _expand_dict_intervals(self, mapping: dict[str, int], keys: list[str]) -> list[int]:
+        normalized = {str(k): int(v) for k, v in mapping.items()}
         resolved: list[int] = []
+        missing: list[str] = []
         for key in keys:
-            if key not in mapping:
-                msg = f"Missing DES-LOC sync interval for optimizer state '{key}'."
-                raise ValueError(msg)
-            value = int(mapping[key])
+            value = _resolve_interval_from_mapping(key, normalized)
+            if value is None:
+                missing.append(key)
+                continue
             self._validate_positive_interval(value)
             resolved.append(value)
+
+        if missing:
+            missing_keys = ", ".join(sorted(missing))
+            msg = f"Missing DES-LOC sync interval for optimizer state(s): {missing_keys}."
+            raise ValueError(msg)
         return resolved
 
     def _validate_positive_interval(self, value: int) -> None:
