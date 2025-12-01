@@ -550,20 +550,8 @@ class _BaseFragment:
         self.sync_every = sync_every
         self._local_step = 0
 
-    def tick(self, *, current_step: int | None = None) -> bool:
-        """
-        Advance the fragment clock and report readiness.
-
-        Args:
-            current_step: Optional global step number supplied by TorchFT.
-                When provided, readiness is computed from the global step to
-                avoid drift from repeated hook invocations (e.g., pipeline
-                micro-steps).
-        """
-        if current_step is not None:
-            # current_step is zero-based; trigger when (step + 1) hits the cadence.
-            return (current_step + 1) % self.sync_every == 0
-
+    def tick(self) -> bool:
+        """Advance the local fragment clock and report readiness."""
         self._local_step += 1
         return self._local_step >= self.sync_every
 
@@ -1789,7 +1777,7 @@ class DesLocController:
                 f"[DESLOC DEBUG] controller={self._name_prefix} global_step unresolved; falling back to local clocks"
             )
             self._warned_missing_step = True
-        ready_fragments = [fragment for fragment in self._fragments if fragment.tick(current_step=global_step)]
+        ready_fragments = [fragment for fragment in self._fragments if fragment.tick()]
 
         if ready_fragments:
             print(
@@ -2422,7 +2410,7 @@ class StreamingDesLocController:
         candidates = self._state_fragments_per_fragment[fragment_idx]
         ready: list[_StreamingOptimizerStateFragment] = []
         for fragment in candidates:
-            ready_flag = fragment.tick(current_step=_get_global_step(self._manager))
+            ready_flag = fragment.tick()
             if ready_flag:
                 ready.append(fragment)
                 if limit_one:
