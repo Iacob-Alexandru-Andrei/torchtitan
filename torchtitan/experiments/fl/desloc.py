@@ -524,6 +524,22 @@ def _format_fragment_membership(names: Sequence[str], limit: int = 8) -> str:
     return f"{', '.join(names[:limit])}, ... (+{remaining} more)"
 
 
+def _get_global_step(manager: Any) -> int | None:
+    """Best-effort retrieval of the TorchFT global step."""
+    step_attr = getattr(manager, "current_step", None)
+    if step_attr is None:
+        return None
+    try:
+        return int(step_attr())
+    except TypeError:
+        try:
+            return int(step_attr)
+        except Exception:
+            return None
+    except Exception:
+        return None
+
+
 class _BaseFragment:
     def __init__(self, sync_every: int) -> None:
         if sync_every <= 0:
@@ -1764,10 +1780,8 @@ class DesLocController:
         if not self._is_opt_init:
             self._lazy_init_optimizer_fragments()
 
-        global_step = getattr(self._manager, "current_step", lambda: None)()
-        ready_fragments = [
-            fragment for fragment in self._fragments if fragment.tick(current_step=global_step)
-        ]
+        global_step = _get_global_step(self._manager)
+        ready_fragments = [fragment for fragment in self._fragments if fragment.tick(current_step=global_step)]
 
         if ready_fragments:
             self._sync(ready_fragments)
@@ -2393,7 +2407,7 @@ class StreamingDesLocController:
         candidates = self._state_fragments_per_fragment[fragment_idx]
         ready: list[_StreamingOptimizerStateFragment] = []
         for fragment in candidates:
-            ready_flag = fragment.tick(current_step=getattr(self._manager, "current_step", lambda: None)())
+            ready_flag = fragment.tick(current_step=_get_global_step(self._manager))
             if ready_flag:
                 ready.append(fragment)
                 if limit_one:
