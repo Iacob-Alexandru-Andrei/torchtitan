@@ -24,14 +24,14 @@ TIMESTAMP=$(date +"%Y%m%d-%H%M%S")
 
 # Chain definition (rank, lr, resume path per run).
 declare -a CHAIN_RANKS=(8 16 32 64 128 256)
-declare -a CHAIN_LRS=(0.016 0.008 0.008 0.008 0.016 0.008)
+declare -a CHAIN_LRS=(0.016 0.008 0.008 0.008 0.016)
 declare -a CHAIN_RESUME_RUNS=(
-	"icml2026-galore-06db68b5-r8-lr0p016-rottrue-20251127-165236-idx1"
-	"icml2026-galore-5f8b3874-r16-lr0p008-rottrue-20251127-114042-idx3"
-	"icml2026-galore-5f8b3874-r32-lr0p008-rottrue-20251127-114042-idx5"
-	"icml2026-galore-5f8b3874-r64-lr0p008-rottrue-20251127-114042-idx7"
-	"icml2026-galore-06db68b5-r128-lr0p016-rottrue-20251127-165236-idx9"
-	"icml2026-galore-af449996-r256-lr0p008-rottrue-20251128-121225-idx9"
+	"icml2026-warmed-up-ddp-d99a5257-r8-lr0p016-rottrue-20251128-163213-idx0"
+	"icml2026-warmed-up-ddp-4dd9e45e-r16-lr0p008-rottrue-20251128-163510-idx0"
+	"icml2026-warmed-up-ddp-54f19506-r32-lr0p008-rottrue-20251128-163601-idx0"
+	"icml2026-warmed-up-ddp-ebf60169-r64-lr0p008-rottrue-20251128-163637-idx0"
+	"icml2026-warmed-up-ddp-a35e91e2-r128-lr0p016-rottrue-20251128-163708-idx0"
+	"icml2026-warmed-up-ddp-75a6984d-r256-lr0p008-rottrue-20251128-171759-idx0"
 )
 CHAIN_LENGTH=${#CHAIN_RANKS[@]}
 
