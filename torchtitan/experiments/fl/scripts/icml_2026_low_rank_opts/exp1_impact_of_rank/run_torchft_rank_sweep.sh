@@ -19,23 +19,19 @@ if [[ -z "${PYTHONPATH:-}" ]]; then
 else
   PYTHONPATH="${REPO_ROOT}:${PYTHONPATH}"
 fi
-RUN_PREFIX=${RUN_PREFIX:-"icml2026-exp1"}
+RUN_PREFIX=${RUN_PREFIX:-"icml2026-exp1-local"}
 TIMESTAMP=$(date +"%Y%m%d-%H%M%S")
 
 # Chain definition (rank, lr, resume path per run).
-# declare -a CHAIN_RANKS=(8 16 32 64 128)
-# declare -a CHAIN_LRS=(0.016 0.008 0.008 0.008 0.016)
-# declare -a CHAIN_RESUME_RUNS=(
-# 	"icml2026-galore-06db68b5-r8-lr0p016-rottrue-20251127-165236-idx1"
-# 	"icml2026-galore-5f8b3874-r16-lr0p008-rottrue-20251127-114042-idx3"
-# 	"icml2026-galore-5f8b3874-r32-lr0p008-rottrue-20251127-114042-idx5"
-# 	"icml2026-galore-5f8b3874-r64-lr0p008-rottrue-20251127-114042-idx7"
-# 	"icml2026-galore-06db68b5-r128-lr0p016-rottrue-20251127-165236-idx9"
-# )
-declare -a CHAIN_RANKS=(8)
-declare -a CHAIN_LRS=(0.016)
+declare -a CHAIN_RANKS=(8 16 32 64 128 256)
+declare -a CHAIN_LRS=(0.016 0.008 0.008 0.008 0.016 0.008)
 declare -a CHAIN_RESUME_RUNS=(
-	"icml2026-warmed-up-ddp-d99a5257-r8-lr0p016-rottrue-20251128-163213-idx0"
+	"icml2026-galore-06db68b5-r8-lr0p016-rottrue-20251127-165236-idx1"
+	"icml2026-galore-5f8b3874-r16-lr0p008-rottrue-20251127-114042-idx3"
+	"icml2026-galore-5f8b3874-r32-lr0p008-rottrue-20251127-114042-idx5"
+	"icml2026-galore-5f8b3874-r64-lr0p008-rottrue-20251127-114042-idx7"
+	"icml2026-galore-06db68b5-r128-lr0p016-rottrue-20251127-165236-idx9"
+	"icml2026-galore-af449996-r256-lr0p008-rottrue-20251128-121225-idx9"
 )
 CHAIN_LENGTH=${#CHAIN_RANKS[@]}
 
