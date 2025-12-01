@@ -1784,6 +1784,11 @@ class DesLocController:
         ready_fragments = [fragment for fragment in self._fragments if fragment.tick(current_step=global_step)]
 
         if ready_fragments:
+            print(
+                f"[DESLOC DEBUG] controller={self._name_prefix} global_step={global_step} "
+                f"ready_fragments={[type(f).__name__ for f in ready_fragments]} "
+                f"sync_every={[f.sync_every for f in ready_fragments]}"
+            )
             self._sync(ready_fragments)
 
     def _sync(self, fragments: list[_BaseFragment]) -> None:
@@ -2413,6 +2418,13 @@ class StreamingDesLocController:
                 if limit_one:
                     break
 
+        if ready:
+            print(
+                f"[DESLOC DEBUG] streaming controller={self._name_prefix} fragment_idx={fragment_idx} "
+                f"global_step={_get_global_step(self._manager)} "
+                f"ready_fragments={[type(f).__name__ for f in ready]} "
+                f"sync_every={[f.sync_every for f in ready]}"
+            )
         self._execute_state_sync_batch(ready)
 
     def _execute_state_sync_batch(self, fragments: list[_StreamingOptimizerStateFragment]) -> None:
