@@ -5,14 +5,18 @@ set -euo pipefail
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 CONFIG_FILE=${CONFIG_FILE:-"${SCRIPT_DIR}/base.toml"}
 TRAIN_MODULE=${TRAIN_MODULE:-"torchtitan.experiments.fl.train"}
-RUN_PREFIX=${RUN_PREFIX:-"icml2026-galore"}
+RUN_PREFIX=${RUN_PREFIX:-"icml2026-warmed-up-ddp"}
 LOG_RANK=${LOG_RANK:-0}
 
 # PROJECTION_RANKS=${PROJECTION_RANKS:-"8 16 32 64 128 256"}
 PROJECTION_RANKS=${PROJECTION_RANKS:-"256"}
-# LR_VALUES=${LR_VALUES:-"0.0005 0.001 0.002 0.004 0.008"}
-LR_VALUES=${LR_VALUES:-"0.0005 0.001 0.002 0.004 0.008 0.016"}
-ROTATE_MOMENTS_OPTIONS=${ROTATE_MOMENTS_OPTIONS:-"false true"}
+LR_VALUES=${LR_VALUES:-"0.008"}
+# LR_VALUES=${LR_VALUES:-"0.0005 0.001 0.002 0.004 0.008 0.016"}
+# (16, 0.008, "icml2026-galore-5f8b3874-r16-lr0p008-rottrue-20251127-114042-idx3")
+# (32, 0.008, "icml2026-galore-5f8b3874-r32-lr0p008-rottrue-20251127-114042-idx5")
+# (64, 0.008, "icml2026-galore-5f8b3874-r64-lr0p008-rottrue-20251127-114042-idx7")
+# (128, 0.016, "icml2026-galore-06db68b5-r128-lr0p016-rottrue-20251127-165236-idx9")
+ROTATE_MOMENTS_OPTIONS=${ROTATE_MOMENTS_OPTIONS:-"true"}
 ADAM_SENTINEL_RANK=${ADAM_SENTINEL_RANK:-256}
 
 RUN_INDEX=${RUN_INDEX:-}
@@ -20,8 +24,8 @@ RUN_INDEX_OFFSET=${RUN_INDEX_OFFSET:-0}
 RUN_INDEX_RANGE=${RUN_INDEX_RANGE:-}
 DRY_RUN=${DRY_RUN:-false}
 SBATCH_CPUS_PER_TASK=${SBATCH_CPUS_PER_TASK:-8}
-SBATCH_GPUS_PER_TASK=${SBATCH_GPUS_PER_TASK:-1}
-SBATCH_MAX_CHAINS=${SBATCH_MAX_CHAINS:-4}
+SBATCH_GPUS_PER_TASK=${SBATCH_GPUS_PER_TASK:-4}
+SBATCH_MAX_CHAINS=${SBATCH_MAX_CHAINS:-1}
 SBATCH_MEM=${SBATCH_MEM:-}
 SBATCH_TIME=${SBATCH_TIME:-}
 SBATCH_PARTITION=${SBATCH_PARTITION:-}
@@ -498,7 +502,7 @@ export TORCHTITAN_FORCE_WANDB_WORKER_SUFFIX=\${TORCHTITAN_FORCE_WANDB_WORKER_SUF
 export S3_ENDPOINT_URL='http://taranaki.cl.cam.ac.uk:9000'
 
 uv run --no-sync torchrun \
-  --nproc_per_node=1 \
+  --nproc_per_node=4 \
   --rdzv_backend=c10d \
   --rdzv_endpoint="${rdzv_endpoint}" \
   --rdzv_id "${run_uuid}" \
@@ -512,8 +516,7 @@ uv run --no-sync torchrun \
   --optimizer.lr "${lr_value}" \
   --training.global_batch_size 64 \
   --training.local_batch_size 16 \
-  --training.steps 6144 \
-  --parallelism.data_parallel_replicate_degree 1 \
+  --training.steps 2048 \
   ${TRAINING_ARGS_ESCAPED}
 echo "JOB FINISHED: \$(date)"
 EOF

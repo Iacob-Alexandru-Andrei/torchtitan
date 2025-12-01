@@ -92,6 +92,33 @@ class SaveDone:
     pass
 
 
+class _OptimizerStateLoadShim(Stateful):
+    """Wrap optimizers to strip GaLore metadata when building load state."""
+
+    def __init__(self, optimizer: OptimizersContainer) -> None:
+        self._optimizer = optimizer
+
+    def state_dict(self) -> dict[str, Any]:
+        state_dict = self._optimizer.state_dict()
+        if not isinstance(state_dict, dict):
+            return state_dict
+        filtered_keys = (
+            "projector_meta",
+            "projector_basis",
+        )
+        return {
+            key: value
+            for key, value in state_dict.items()
+            if not any(token in key for token in filtered_keys)
+        }
+
+    def load_state_dict(self, state_dict: dict[str, Any]) -> None:
+        self._optimizer.load_state_dict(state_dict)
+
+    def __getattr__(self, name: str) -> Any:  # pragma: no cover - simple delegation
+        return getattr(self._optimizer, name)
+
+
 def purge_thread(purge_queue: queue.Queue):
     """Thread to purge the old checkpoints.
 
@@ -617,6 +644,7 @@ class CheckpointManager:
         states = self._states_to_load(model_only)
         logger.info(f"[RESUME DEBUG] States to load keys: {list(states.keys())}")
         logger.info(f"[RESUME DEBUG] Model only: {model_only}")
+        states = self._prepare_states_for_load(states)
         self.dcp_load(
             states,
             checkpoint_id=checkpoint_id,
@@ -767,6 +795,16 @@ class CheckpointManager:
             states_to_load.pop(DATALOADER, None)
 
         return states_to_load
+
+    def _prepare_states_for_load(self, states: dict[str, Any]) -> dict[str, Any]:
+        """Apply backward-compat shims when loading checkpoints."""
+
+        optimizer_state = states.get(OPTIMIZER)
+        if isinstance(optimizer_state, OptimizersContainer):
+            wrapped_states = dict(states)
+            wrapped_states[OPTIMIZER] = _OptimizerStateLoadShim(optimizer_state)
+            return wrapped_states
+        return states
 
     def _save_last_step(self, curr_step: int) -> None:
         # We only consider saving model only at the end of the training. So this

@@ -116,11 +116,16 @@ def _rotate_moments_to_new_basis(
 
 
 def _in_optimizer_state_initialization() -> bool:
-    """Detect whether torch.distributed.checkpoint is priming optimizer state."""
+    """Return True when Torch Distributed Checkpoint primes optimizer state."""
 
     frame = inspect.currentframe()
+    target_modules = {
+        "torch.distributed.checkpoint.optimizer",
+        "torch.distributed.checkpoint.state_dict",
+    }
     while frame:
-        if frame.f_code.co_name == "_init_optim_state":
+        module_name = frame.f_globals.get("__name__")
+        if frame.f_code.co_name == "_init_optim_state" and module_name in target_modules:
             return True
         frame = frame.f_back
     return False
@@ -181,12 +186,23 @@ def _proj_name_from_value(value: Any, default: str = STD_PROJ) -> str:
     return default
 
 
+def _canonicalize_projection_tensor(tensor: Tensor) -> Tensor:
+    """Ensure tensors have at least 2 dims when building projectors."""
+
+    if tensor.ndim >= 2:
+        return tensor
+    if tensor.ndim == 1:
+        return tensor.reshape(-1, 1)
+    return tensor.reshape(1, 1)
+
+
 def _maybe_refresh_projector(
     state: dict[str, Any],
     weights: Tensor,
     iteration: Tensor,
     rotation_context: _RotationContext | None = None,
 ) -> None:
+    weights = _canonicalize_projection_tensor(weights)
     meta = state.setdefault(
         "projector_meta",
         {
@@ -238,11 +254,19 @@ def _project(
     if full_rank_grad.ndim > GALORE_MAX_SUPPORT_DIM:
         raise NotImplementedError("GaLore currently supports tensors up to rank 2.")
 
+    original_shape = tuple(full_rank_grad.shape)
+    full_rank_grad = _canonicalize_projection_tensor(full_rank_grad)
     meta = state.get("projector_meta", {})
     proj_type_name = _proj_name_from_value(meta.get("proj_type", STD_PROJ))
     proj_type = _resolve_proj_choice(proj_type_name, full_rank_grad)
     meta["proj_type"] = PROJ_TO_CODE[proj_type_name]
     meta["resolved_proj_type"] = PROJ_TO_CODE[proj_type]
+    if original_shape:
+        meta["full_rank_shape"] = torch.tensor(
+            list(original_shape),
+            device=full_rank_grad.device,
+            dtype=torch.int64,
+        )
     state["projector_meta"] = meta
     _maybe_refresh_projector(state, full_rank_grad, iteration, rotation_context)
     orthogonal = state.get("projector_basis")
@@ -264,17 +288,28 @@ def _project(
 
 def _project_back(state: dict[str, Any], low_rank_grad: Tensor) -> Tensor:
     orthogonal = state.get("projector_basis")
-    scale = state.get("projector_meta", {}).get("scale", 1.0)
+    meta = state.get("projector_meta", {})
+    scale = meta.get("scale", 1.0)
     if orthogonal is None:
         return low_rank_grad * scale
 
     if isinstance(orthogonal, Tensor):
         matrix = orthogonal.to(low_rank_grad.device)
         if matrix.shape[0] == low_rank_grad.shape[-1]:
-            return (low_rank_grad @ matrix) * scale
-        return (matrix @ low_rank_grad) * scale
-    a_matrix, b_matrix = orthogonal
-    return (a_matrix.to(low_rank_grad.device) @ low_rank_grad @ b_matrix.to(low_rank_grad.device)) * scale
+            restored = low_rank_grad @ matrix
+        else:
+            restored = matrix @ low_rank_grad
+    else:
+        a_matrix, b_matrix = orthogonal
+        restored = a_matrix.to(low_rank_grad.device) @ low_rank_grad @ b_matrix.to(low_rank_grad.device)
+
+    restored = restored * scale
+    shape_tensor = meta.get("full_rank_shape")
+    if isinstance(shape_tensor, torch.Tensor):
+        desired_shape = tuple(int(x) for x in shape_tensor.tolist())
+        if desired_shape and tuple(restored.shape) != desired_shape:
+            restored = restored.reshape(desired_shape)
+    return restored
 
 
 class GaLore(AdamW):
@@ -384,10 +419,6 @@ class GaLore(AdamW):
             with torch.enable_grad():
                 loss = closure()
 
-        suppress_low_rank = False
-        if not self.state:
-            suppress_low_rank = _in_optimizer_state_initialization()
-
         for group in self.param_groups:
             beta1, beta2 = group["betas"]
             eps = group["eps"]
@@ -407,7 +438,8 @@ class GaLore(AdamW):
                     raise RuntimeError("GaLore does not support sparse gradients.")
 
                 rank = self._resolve_rank_for_param(param, base_rank)
-                use_low_rank = rank is not None and not suppress_low_rank
+                print(rank, "rank")
+                use_low_rank = rank is not None
                 if use_low_rank and dim > GALORE_MAX_SUPPORT_DIM:
                     raise NotImplementedError("GaLore supports tensors up to 2 dimensions.")
                 print(f"Low-rank GaLore is on: {use_low_rank}.")

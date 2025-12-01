@@ -48,10 +48,15 @@ ProjectionBasis = Tensor | list[Tensor]
 
 
 def _in_optimizer_state_initialization() -> bool:
-    """Detect whether torch.distributed.checkpoint is priming optimizer state."""
+    """Return True when Torch Distributed Checkpoint primes optimizer state."""
     frame = inspect.currentframe()
+    target_modules = {
+        "torch.distributed.checkpoint.optimizer",
+        "torch.distributed.checkpoint.state_dict",
+    }
     while frame:
-        if frame.f_code.co_name == "_init_optim_state":
+        module_name = frame.f_globals.get("__name__")
+        if frame.f_code.co_name == "_init_optim_state" and module_name in target_modules:
             return True
         frame = frame.f_back
     return False
@@ -90,6 +95,16 @@ def _proj_name_from_value(value: Any, default: str = STD_PROJ) -> str:
     return default
 
 
+def _canonicalize_projection_tensor(tensor: Tensor) -> Tensor:
+    """Ensure tensors have at least 2 dims when building projectors."""
+
+    if tensor.ndim >= 2:
+        return tensor
+    if tensor.ndim == 1:
+        return tensor.reshape(-1, 1)
+    return tensor.reshape(1, 1)
+
+
 def _require_remote_projector(state: dict[str, Any]) -> ProjectionBasis:
     projector_basis = state.get("projector_basis")
     if projector_basis is None:
@@ -108,6 +123,8 @@ def _project(state: dict[str, Any], full_rank_grad: Tensor) -> Tensor:
         msg = "GaLoreGlobal currently supports tensors up to rank 2."
         raise NotImplementedError(msg)
 
+    original_shape = tuple(full_rank_grad.shape)
+    full_rank_grad = _canonicalize_projection_tensor(full_rank_grad)
     meta = state.setdefault(
         "projector_meta",
         {
@@ -122,6 +139,12 @@ def _project(state: dict[str, Any], full_rank_grad: Tensor) -> Tensor:
     proj_type = _resolve_proj_choice(proj_type_name, full_rank_grad)
     meta["proj_type"] = PROJ_TO_CODE[proj_type_name]
     meta["resolved_proj_type"] = PROJ_TO_CODE[proj_type]
+    if original_shape:
+        meta["full_rank_shape"] = torch.tensor(
+            list(original_shape),
+            device=full_rank_grad.device,
+            dtype=torch.int64,
+        )
     state["projector_meta"] = meta
     orthogonal = _require_remote_projector(state)
 
@@ -141,17 +164,28 @@ def _project(state: dict[str, Any], full_rank_grad: Tensor) -> Tensor:
 
 def _project_back(state: dict[str, Any], low_rank_grad: Tensor) -> Tensor:
     orthogonal = state.get("projector_basis")
-    scale = state.get("projector_meta", {}).get("scale", 1.0)
+    meta = state.get("projector_meta", {})
+    scale = meta.get("scale", 1.0)
     if orthogonal is None:
         return low_rank_grad * scale
 
     if isinstance(orthogonal, Tensor):
         matrix = orthogonal.to(low_rank_grad.device)
         if matrix.shape[0] == low_rank_grad.shape[-1]:
-            return (low_rank_grad @ matrix) * scale
-        return (matrix @ low_rank_grad) * scale
-    a_matrix, b_matrix = orthogonal
-    return (a_matrix.to(low_rank_grad.device) @ low_rank_grad @ b_matrix.to(low_rank_grad.device)) * scale
+            restored = low_rank_grad @ matrix
+        else:
+            restored = matrix @ low_rank_grad
+    else:
+        a_matrix, b_matrix = orthogonal
+        restored = a_matrix.to(low_rank_grad.device) @ low_rank_grad @ b_matrix.to(low_rank_grad.device)
+
+    restored = restored * scale
+    shape_tensor = meta.get("full_rank_shape")
+    if isinstance(shape_tensor, torch.Tensor):
+        desired_shape = tuple(int(x) for x in shape_tensor.tolist())
+        if desired_shape and tuple(restored.shape) != desired_shape:
+            restored = restored.reshape(desired_shape)
+    return restored
 
 
 class GaLoreGlobal(AdamW):
