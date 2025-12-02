@@ -1877,6 +1877,10 @@ class DesLocController:
         if not self._is_opt_init:
             self._lazy_init_optimizer_fragments()
 
+        print(
+            f"[DESLOC DEBUG] controller={self._name_prefix} hook_enter "
+            f"claims existing_step={_get_global_step(self._manager)}"
+        )
         step_signal = self._clock.claim_step(
             self._clock_consumer_id,
             external_step=_get_global_step(self._manager),
@@ -2370,6 +2374,10 @@ class StreamingDesLocController:
         self._manager.allow_state_dict_read()
         if not self._is_opt_init:
             self._lazy_init_optimizer_fragments()
+        print(
+            f"[DESLOC DEBUG] streaming controller={self._name_prefix} hook_enter "
+            f"claims existing_step={_get_global_step(self._manager)}"
+        )
         step_signal = self._clock.claim_step(
             self._clock_consumer_id,
             external_step=_get_global_step(self._manager),
