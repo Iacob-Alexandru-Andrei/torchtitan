@@ -42,65 +42,6 @@ export HF_DATASETS_CACHE="${HF_DATASETS_CACHE:-${DATA_CACHE_ROOT}/datasets}"
 export HF_HUB_CACHE="${HF_HUB_CACHE:-${DATA_CACHE_ROOT}/hub}"
 mkdir -p "${HF_DATASETS_CACHE}" "${HF_HUB_CACHE}"
 
-# Prefetch dataset shards to cover the planned training duration.
-if [ "${PREFETCH_DATA:-1}" != "0" ]; then
-  PREFETCH_STEPS=${PREFETCH_STEPS:-5120}
-  PREFETCH_GLOBAL_BATCH=${PREFETCH_GLOBAL_BATCH:-}
-  PREFETCH_SAMPLES=${PREFETCH_SAMPLES:-}
-  DATASET_NAME=${DATASET_NAME:-}
-  DATASET_PATH=${DATASET_PATH:-}
-  echo "[flux] Prefetching dataset into ${HF_DATASETS_CACHE} (steps=${PREFETCH_STEPS})..."
-  uv run --no-sync python - <<'PY'
-import itertools
-import os
-import tomllib
-from datasets import load_dataset, DownloadConfig
-
-cfg_file = os.environ.get("CONFIG_FILE")
-dataset_name = os.environ.get("DATASET_NAME")
-dataset_path = os.environ.get("DATASET_PATH") or None
-prefetch_steps = int(os.environ.get("PREFETCH_STEPS", "0"))
-prefetch_samples_env = os.environ.get("PREFETCH_SAMPLES")
-prefetch_global_batch_env = os.environ.get("PREFETCH_GLOBAL_BATCH")
-ngpu = int(os.environ.get("NGPU", "1"))
-
-if cfg_file and (not dataset_name or not prefetch_global_batch_env):
-    with open(cfg_file, "rb") as f:
-        cfg = tomllib.load(f)
-    training_cfg = cfg.get("training", {})
-    if not dataset_name:
-        dataset_name = training_cfg.get("dataset", "pixparse/cc12m-wds")
-    if not prefetch_global_batch_env:
-        local_bs = int(training_cfg.get("local_batch_size", 1))
-        prefetch_global_batch_env = str(local_bs * ngpu)
-
-dataset_name = dataset_name or "pixparse/cc12m-wds"
-global_batch = int(prefetch_global_batch_env or 256)
-target = int(prefetch_samples_env or global_batch * prefetch_steps)
-
-cache_dir = os.environ["HF_DATASETS_CACHE"]
-download_cfg = DownloadConfig(cache_dir=cache_dir, max_retries=5)
-
-print(f"[prefetch] dataset={dataset_name} target_samples={target} cache={cache_dir}")
-if target <= 0:
-    raise SystemExit("[prefetch] Target samples is zero; skipping prefetch.")
-
-ds = load_dataset(
-    dataset_name,
-    split="train",
-    streaming=True,
-    download_config=download_cfg,
-    data_dir=dataset_path,
-)
-
-for i, _ in zip(range(target), ds):
-    if (i + 1) % 10000 == 0:
-        print(f"[prefetch] streamed {i + 1}/{target}", flush=True)
-
-print(f"[prefetch] streamed {target} samples into cache.")
-PY
-fi
-
 # Remove stale shared-memory artifacts owned by the current user.
 find /dev/shm -maxdepth 1 -user "${USER}" -exec rm -rf {} + 2>/dev/null || true
 
