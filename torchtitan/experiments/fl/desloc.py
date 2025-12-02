@@ -1868,6 +1868,9 @@ class DesLocController:
         _args: tuple[Any, ...],
         _kwargs: dict[str, Any],
     ) -> None:
+        # Skip re-entrant calls triggered by TorchFT dispatching into the same optimizer.
+        if getattr(self._optimizer, "_use_ft_optimizer", True) is False:
+            return
         if not self._is_opt_init:
             self._lazy_init_optimizer_fragments()
 
@@ -2339,6 +2342,8 @@ class StreamingDesLocController:
         _args: tuple[Any, ...],
         _kwargs: dict[str, Any],
     ) -> None:
+        if getattr(self._optimizer, "_use_ft_optimizer", True) is False:
+            return
         self._manager.allow_state_dict_read()
         if not self._is_opt_init:
             self._lazy_init_optimizer_fragments()
