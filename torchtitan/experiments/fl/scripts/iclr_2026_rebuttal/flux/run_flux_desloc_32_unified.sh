@@ -80,6 +80,8 @@ export WANDB_TEAM=${WANDB_TEAM:-"camlsys"}
 export WANDB_RUN_NAME="${RUN_UUID}"
 export TORCHTITAN_WANDB_BASE_RUN_NAME="${RUN_UUID}"
 export TORCHTITAN_FORCE_WANDB_WORKER_SUFFIX=${TORCHTITAN_FORCE_WANDB_WORKER_SUFFIX:-1}
+export FLUX_DATALOADER_WORKERS=1
+export FLUX_DATALOADER_PREFETCH=2
 
 echo "=========================================="
 echo "TorchFT AdeMaMix Launch"

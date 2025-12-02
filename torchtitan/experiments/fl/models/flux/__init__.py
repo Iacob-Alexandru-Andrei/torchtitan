@@ -10,8 +10,13 @@ from __future__ import annotations
 from dataclasses import replace
 
 from torchtitan.experiments.fl.components import build_metrics_processor
+from torchtitan.experiments.fl.dataloader.flux_builder import (
+    build_fl_flux_dataloader,
+    build_fl_flux_validation_dataloader,
+)
 from torchtitan.experiments.fl.lr_scheduler import build_fl_lr_schedulers
 from torchtitan.experiments.fl.optimizer_builder import build_mosaic_optimizers
+from torchtitan.experiments.fl.validate.flux_validator import build_fl_flux_validator
 from torchtitan.experiments.flux import get_train_spec as get_flux_train_spec
 from torchtitan.protocols.train_spec import TrainSpec
 from torchtitan.tools.logging import logger
@@ -28,6 +33,8 @@ def _build_flux_spec() -> TrainSpec:
         base_spec,
         build_optimizers_fn=build_mosaic_optimizers,
         build_lr_schedulers_fn=build_fl_lr_schedulers,
+        build_dataloader_fn=build_fl_flux_dataloader,
+        build_validator_fn=build_fl_flux_validator,
         build_metrics_processor_fn=build_metrics_processor,
     )
 

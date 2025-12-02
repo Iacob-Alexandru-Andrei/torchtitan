@@ -19,7 +19,6 @@ from torch.distributed.checkpoint.stateful import Stateful
 
 from torch.utils.data import IterableDataset
 from torchtitan.components.dataloader import ParallelAwareDataloader
-
 from torchtitan.components.tokenizer import BaseTokenizer
 from torchtitan.config import JobConfig
 from torchtitan.datasets import DatasetConfig
