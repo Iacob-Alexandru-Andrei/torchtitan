@@ -19,6 +19,7 @@ from types import ModuleType
 from typing import Any, TYPE_CHECKING, Literal, Sequence
 from collections.abc import Callable, Iterable
 from fnmatch import fnmatch
+from weakref import WeakKeyDictionary, ref
 
 import torch
 from torch import nn
@@ -115,6 +116,7 @@ class DesLocControllerConfig:
     pin_memory: bool
     name_prefix: str
     quorum_timeout_seconds: int
+    clock: "_DeslocClock | None" = None
     param_entries: list[tuple[str, nn.Parameter]] | None = None
     outer_optimizer: DesLocOuterOptimizerConfig | Optimizer | None = None
     log_outer_metrics: bool = False
@@ -542,21 +544,123 @@ def _get_global_step(manager: Any) -> int | None:
         return None
 
 
+@dataclass(frozen=True)
+class _StepSignal:
+    """Represents a shared DES-LOC step observation."""
+
+    logical_step: int
+    delta: int
+    external_step: int | None
+
+
+class _DeslocClock:
+    """Shared, per-manager clock; parameter leader drives cadence."""
+
+    def __init__(self, manager: Any) -> None:
+        self._manager_ref = ref(manager)
+        self._step_index = 0
+        self._last_external_step: int | None = None
+        self._claims: dict[str, int] = {}
+        self._leader_id: str | None = None
+
+    def _resolve_external_step(self, override: int | None = None) -> int | None:
+        if override is not None:
+            return override
+        manager = self._manager_ref()
+        if manager is None:
+            return None
+        return _get_global_step(manager)
+
+    def _advance_external(self, external_step: int | None) -> None:
+        if external_step is None:
+            return
+        if self._last_external_step is None:
+            self._last_external_step = external_step
+            self._step_index = max(self._step_index, external_step)
+            return
+        if external_step > self._last_external_step:
+            delta = max(1, external_step - self._last_external_step)
+            self._step_index += delta
+            self._last_external_step = external_step
+
+    def _emit_claim(self, consumer_id: str, external_step: int | None) -> _StepSignal | None:
+        current = max(1, self._step_index)
+        last_claimed = self._claims.get(consumer_id, 0)
+        if current == last_claimed:
+            return None
+        delta = max(1, current - last_claimed)
+        self._claims[consumer_id] = current
+        return _StepSignal(
+            logical_step=current,
+            delta=delta,
+            external_step=external_step if external_step is not None else self._last_external_step,
+        )
+
+    def claim_step(
+        self,
+        consumer_id: str,
+        *,
+        external_step: int | None = None,
+        lead: bool = False,
+    ) -> _StepSignal | None:
+        resolved = self._resolve_external_step(external_step)
+
+        if lead:
+            if self._leader_id is None:
+                self._leader_id = consumer_id
+            if consumer_id != self._leader_id:
+                return self.claim_step(consumer_id, external_step=resolved, lead=False)
+
+            if resolved is None:
+                self._step_index += 1
+            else:
+                self._advance_external(resolved)
+                if self._step_index == 0:
+                    self._step_index = max(1, resolved)
+            return self._emit_claim(consumer_id, resolved)
+
+        self._advance_external(resolved)
+        if self._step_index == 0:
+            self._step_index = max(1, resolved or 1)
+        return self._emit_claim(consumer_id, resolved)
+
+
+_CLOCKS: "WeakKeyDictionary[Any, _DeslocClock]" = WeakKeyDictionary()
+
+
+def _get_desloc_clock(manager: Any) -> _DeslocClock:
+    """Return the shared DES-LOC clock for a given manager handle."""
+    try:
+        clock = _CLOCKS.get(manager)
+    except TypeError:
+        clock = None
+    if clock is not None:
+        return clock
+    clock = _DeslocClock(manager)
+    try:
+        _CLOCKS[manager] = clock
+    except TypeError:
+        pass
+    return clock
+
+
 class _BaseFragment:
     def __init__(self, sync_every: int) -> None:
         if sync_every <= 0:
             message = "sync_every must be a positive integer"
             raise ValueError(message)
         self.sync_every = sync_every
-        self._local_step = 0
+        self._steps_since_sync = 0
 
-    def tick(self) -> bool:
-        """Advance the local fragment clock and report readiness."""
-        self._local_step += 1
-        return self._local_step >= self.sync_every
+    def advance(self, steps: int) -> bool:
+        """Advance the fragment clock by ``steps`` and report readiness."""
+        if steps <= 0:
+            return False
+        self._steps_since_sync += steps
+        return self._steps_since_sync >= self.sync_every
 
     def reset(self) -> None:
-        self._local_step = 0
+        self._steps_since_sync = 0
 
     def prepare_sync(self) -> list[Any]:
         raise NotImplementedError
@@ -1585,6 +1689,7 @@ class DesLocController:
         self._manager = config.manager
         self._model = config.model
         self._optimizer = config.optimizer
+        self._clock = config.clock or _get_desloc_clock(self._manager)
         self._backup_device = config.backup_device
         self._pin_memory = config.pin_memory
         self._name_prefix = config.name_prefix
@@ -1637,6 +1742,7 @@ class DesLocController:
         self._allreduce_work: list[Any] = []
         self._is_opt_init = not self._optimizer_state_sync_enabled
 
+        self._clock_consumer_id = f"{self._name_prefix}_controller"
         self._hook = config.optimizer.register_step_post_hook(self._step_post_hook)
         self._warned_missing_step = False
 
@@ -1771,22 +1877,32 @@ class DesLocController:
         if not self._is_opt_init:
             self._lazy_init_optimizer_fragments()
 
-        global_step = _get_global_step(self._manager)
-        if global_step is None and not self._warned_missing_step:
-            print(
-                f"[DESLOC DEBUG] controller={self._name_prefix} global_step unresolved; falling back to local clocks"
-            )
-            self._warned_missing_step = True
-        ready_fragments = [fragment for fragment in self._fragments if fragment.tick()]
+        step_signal = self._clock.claim_step(
+            self._clock_consumer_id,
+            external_step=_get_global_step(self._manager),
+            lead=True,
+        )
+        if step_signal is None:
+            if not self._warned_missing_step and _get_global_step(self._manager) is None:
+                print(
+                    f"[DESLOC DEBUG] controller={self._name_prefix} could not resolve external step; "
+                    "using parameter-led DES-LOC clock"
+                )
+                self._warned_missing_step = True
+            return
 
-        if ready_fragments:
-            print(
-                f"[DESLOC DEBUG] controller={self._name_prefix} global_step={global_step} "
-                f"ready_fragments={[type(f).__name__ for f in ready_fragments]} "
-                f"sync_every={[f.sync_every for f in ready_fragments]} "
-                f"local_steps={[f._local_step for f in ready_fragments]}"
-            )
-            self._sync(ready_fragments)
+        steps = max(1, step_signal.delta)
+        for _ in range(steps):
+            ready_fragments = [fragment for fragment in self._fragments if fragment.advance(1)]
+
+            if ready_fragments:
+                print(
+                    f"[DESLOC DEBUG] controller={self._name_prefix} global_step={step_signal.external_step} "
+                    f"ready_fragments={[type(f).__name__ for f in ready_fragments]} "
+                    f"sync_every={[f.sync_every for f in ready_fragments]} "
+                    f"local_steps={[f._steps_since_sync for f in ready_fragments]}"
+                )
+                self._sync(ready_fragments)
 
     def _sync(self, fragments: list[_BaseFragment]) -> None:
         self._manager.disallow_state_dict_read()
@@ -1846,6 +1962,7 @@ class StreamingDesLocController:
         self._manager = config.manager
         self._model = config.model
         self._optimizer = config.optimizer
+        self._clock = config.clock or _get_desloc_clock(self._manager)
         self._backup_device = config.backup_device
         self._pin_memory = config.pin_memory
         self._name_prefix = config.name_prefix
@@ -1967,6 +2084,7 @@ class StreamingDesLocController:
         self._hooks.append(self._optimizer.register_step_pre_hook(self._step_pre_hook))
         self._hooks.append(self._optimizer.register_step_post_hook(self._step_post_hook))
 
+        self._clock_consumer_id = f"{self._name_prefix}_controller"
         self._inner_step = 0
         self._state_cursor = 0
         self._optimizer_state_log_emitted = False
@@ -1976,6 +2094,7 @@ class StreamingDesLocController:
         self._is_opt_init = not self._optimizer_state_sync_enabled
         self._fragments_synced_this_step: set[int] = set()
         self._pending_aligned_state_frags: dict[int, list[tuple[_StreamingOptimizerStateFragment, int]]] = {}
+        self._warned_missing_step = False
 
         self._register_state_dict_functions()
         self._log_parameter_fragment_assignments()
@@ -2246,24 +2365,42 @@ class StreamingDesLocController:
         self._manager.allow_state_dict_read()
         if not self._is_opt_init:
             self._lazy_init_optimizer_fragments()
-        self._inner_step += 1
-        self._drive_fragment_schedule()
-
-        if not self._fragments or not self._state_fragments_per_fragment:
-            self._fragments_synced_this_step.clear()
-            self._pending_aligned_state_frags.clear()
+        step_signal = self._clock.claim_step(
+            self._clock_consumer_id,
+            external_step=_get_global_step(self._manager),
+            lead=True,
+        )
+        if step_signal is None:
+            if not self._warned_missing_step and _get_global_step(self._manager) is None:
+                print(
+                    f"[DESLOC DEBUG] streaming controller={self._name_prefix} could not resolve external step; "
+                    "using parameter-led DES-LOC clock"
+                )
+                self._warned_missing_step = True
             return
 
-        if self._optimizer_state_schedule == "aligned":
-            self._drive_aligned_state_completion()
+        start = self._inner_step
+        target = self._inner_step + max(1, step_signal.delta)
+        for current in range(start + 1, target + 1):
+            self._inner_step = current
             self._fragments_synced_this_step.clear()
-            return
+            self._drive_fragment_schedule()
 
-        synced_fragments = tuple(self._fragments_synced_this_step)
-        self._fragments_synced_this_step.clear()
+            if not self._fragments or not self._state_fragments_per_fragment:
+                self._fragments_synced_this_step.clear()
+                self._pending_aligned_state_frags.clear()
+                continue
 
-        if not synced_fragments:
-            self._drive_staggered_state_schedule()
+            if self._optimizer_state_schedule == "aligned":
+                self._drive_aligned_state_completion()
+                self._fragments_synced_this_step.clear()
+                continue
+
+            synced_fragments = tuple(self._fragments_synced_this_step)
+            self._fragments_synced_this_step.clear()
+
+            if not synced_fragments:
+                self._drive_staggered_state_schedule()
 
     def _resolve_optimizer_sync_intervals(self, state_keys: Iterable[str]) -> list[int]:
         keys = list(state_keys)
@@ -2399,18 +2536,20 @@ class StreamingDesLocController:
         self._is_opt_init = True
         self._log_optimizer_state_fragment_assignments()
 
-    def _sync_state_fragments(self, fragment_idx: int, *, limit_one: bool = False) -> None:
+    def _sync_state_fragments(self, fragment_idx: int, *, limit_one: bool = False, step_delta: int = 1) -> None:
         if not self._optimizer_state_sync_enabled:
             return
         if not self._state_fragments_per_fragment:
             return
         if fragment_idx >= len(self._state_fragments_per_fragment):
             return
+        if step_delta <= 0:
+            return
 
         candidates = self._state_fragments_per_fragment[fragment_idx]
         ready: list[_StreamingOptimizerStateFragment] = []
         for fragment in candidates:
-            ready_flag = fragment.tick()
+            ready_flag = fragment.advance(step_delta)
             if ready_flag:
                 ready.append(fragment)
                 if limit_one:
@@ -2422,7 +2561,7 @@ class StreamingDesLocController:
                 f"global_step={_get_global_step(self._manager)} "
                 f"ready_fragments={[type(f).__name__ for f in ready]} "
                 f"sync_every={[f.sync_every for f in ready]} "
-                f"local_steps={[f._local_step for f in ready]}"
+                f"local_steps={[f._steps_since_sync for f in ready]}"
             )
         self._execute_state_sync_batch(ready)
 
@@ -2459,7 +2598,7 @@ class StreamingDesLocController:
         if not self._state_fragments_per_fragment or not self._fragments:
             return
         fragment_idx = self._state_cursor
-        self._sync_state_fragments(fragment_idx, limit_one=True)
+        self._sync_state_fragments(fragment_idx, limit_one=True, step_delta=1)
         self._state_cursor = (self._state_cursor + 1) % len(self._fragments)
 
     def _log_optimizer_state_fragment_assignments(self) -> None:
@@ -2519,6 +2658,7 @@ class DesLocFTOptimizersContainer(FTOptimizersContainer):
             param_groups=config.param_groups,
         )
 
+        self._desloc_clock = _get_desloc_clock(config.ft_manager)
         backup_device = desloc_config.resolved_backup_device()
         optimizer_sync = desloc_config.normalized_optimizer_sync()
         outer_optimizer_spec = config.outer_optimizer or desloc_config.normalized_outer_optimizer()
@@ -2529,6 +2669,7 @@ class DesLocFTOptimizersContainer(FTOptimizersContainer):
                 manager=config.ft_manager,
                 model=model,
                 optimizer=optimizer,
+                clock=self._desloc_clock,
                 param_sync_every=desloc_config.param_sync_every,
                 optimizer_sync_every=optimizer_sync,
                 backup_device=backup_device,

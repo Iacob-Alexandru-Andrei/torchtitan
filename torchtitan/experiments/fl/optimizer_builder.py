@@ -40,6 +40,7 @@ from torchtitan.experiments.fl.desloc import (
     DesLocFTOptimizersConfig,
     DesLocFTOptimizersContainer,
     StreamingDesLocController,
+    _get_desloc_clock,
 )
 from torchtitan.experiments.fl.optimizers import (
     ADOPT,
@@ -472,6 +473,7 @@ class CompositeDesLocFTOptimizersContainer(CompositeFTOptimizersContainer):
         streaming_cfg = streaming or desloc_config.resolved_streaming()
         super().__init__(model_parts, optimizers, ft_manager, use_ft_optimizer=use_ft_optimizer)
 
+        self._desloc_clock = _get_desloc_clock(ft_manager)
         backup_device = desloc_config.resolved_backup_device()
         optimizer_sync = desloc_config.normalized_optimizer_sync()
         outer_optimizer_spec = outer_optimizer or desloc_config.normalized_outer_optimizer()
@@ -481,6 +483,7 @@ class CompositeDesLocFTOptimizersContainer(CompositeFTOptimizersContainer):
             manager=ft_manager,
             model=self.model_parts[0],
             optimizer=self,
+            clock=self._desloc_clock,
             param_entries=None,
             param_sync_every=desloc_config.param_sync_every,
             optimizer_sync_every=optimizer_sync,

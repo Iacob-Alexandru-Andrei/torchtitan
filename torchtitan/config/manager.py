@@ -154,7 +154,24 @@ class ConfigManager:
             if name not in b_map:
                 result.append((name, f.type, f))
 
-        return make_dataclass(f"Merged{base.__name__}", result, bases=(base,))
+        merged_module_name = f"{base.__module__}__merged__{custom.__module__}"
+        merged_module = sys.modules.get(merged_module_name)
+        if merged_module is None:
+            merged_module = types.ModuleType(merged_module_name)
+            for module_name in {base.__module__, custom.__module__}:
+                module = sys.modules.get(module_name)
+                if module is not None:
+                    merged_module.__dict__.update(vars(module))
+            sys.modules[merged_module_name] = merged_module
+
+        merged_cls = make_dataclass(
+            f"Merged{base.__name__}",
+            result,
+            bases=(base,),
+            namespace={"__module__": merged_module_name},
+        )
+        merged_cls.__module__ = merged_module_name
+        return merged_cls
 
     def _dict_to_dataclass(self, cls, data: dict[str, Any]) -> Any:
         """Convert dictionary to dataclass, handling nested structures."""
@@ -169,7 +186,7 @@ class ConfigManager:
                 "Run `NGPU=1 ./run_train.sh --help` to read all valid fields."
             )
 
-        type_hints = get_type_hints(cls)
+        type_hints = ConfigManager._resolve_type_hints(cls)
         result = {}
         for f in fields(cls):
             if f.name in data:
@@ -199,6 +216,24 @@ class ConfigManager:
             if nested is not None:
                 return nested
         return None
+
+    @staticmethod
+    def _resolve_type_hints(cls: Type[Any]) -> dict[str, Any]:
+        """
+        Safely resolve type hints for dataclasses, including ones created via make_dataclass.
+
+        When custom JobConfig extensions are merged, the resulting dataclass can live in this
+        module instead of the originals, so its forward references need a merged globals mapping.
+        """
+        try:
+            return get_type_hints(cls)
+        except NameError:
+            globalns: dict[str, Any] = {}
+            for base in cls.mro():
+                module = sys.modules.get(base.__module__)
+                if module is not None:
+                    globalns.update(vars(module))
+            return get_type_hints(cls, globalns=globalns)
 
     @staticmethod
     def _coerce_value(field_type: Any, value: Any) -> Any:
