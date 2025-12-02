@@ -1892,7 +1892,12 @@ class DesLocController:
             return
 
         steps = max(1, step_signal.delta)
-        for _ in range(steps):
+        for offset in range(steps):
+            print(
+                f"[DESLOC DEBUG] controller={self._name_prefix} clock "
+                f"logical_step={step_signal.logical_step - steps + offset + 1} "
+                f"delta={step_signal.delta} external_step={step_signal.external_step}"
+            )
             ready_fragments = [fragment for fragment in self._fragments if fragment.advance(1)]
 
             if ready_fragments:
@@ -2384,6 +2389,10 @@ class StreamingDesLocController:
         for current in range(start + 1, target + 1):
             self._inner_step = current
             self._fragments_synced_this_step.clear()
+            print(
+                f"[DESLOC DEBUG] streaming controller={self._name_prefix} clock "
+                f"logical_step={current} delta={step_signal.delta} external_step={step_signal.external_step}"
+            )
             self._drive_fragment_schedule()
 
             if not self._fragments or not self._state_fragments_per_fragment:
