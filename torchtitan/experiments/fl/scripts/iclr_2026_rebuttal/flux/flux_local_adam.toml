@@ -28,6 +28,14 @@ lr = 1e-4
 eps = 1e-8
 betas = [0.9, 0.999]
 
+
+[optimizer.desloc]
+enabled = true
+param_sync_every = 32
+optimizer_sync_every = 32
+backup_device = "cpu"
+pin_memory = true
+
 [fl_metrics.optimizer_monitor]
 interval = 16
 only_global = false
@@ -102,10 +110,11 @@ enable = true
 bucket = "checkpoints"
 prefix = ""  # Root of bucket
 download_on_start = true
+resume_from_run_step = "flux-ddp-20251202-111337/step-512"
 # run_uuid and remote_checkpoint_folder will be set via RUN_UUID environment variable
 
 [fault_tolerance]
-enable = false
+enable = true
 process_group = "gloo"
 process_group_timeout_ms = 999999
 replica_id = 0

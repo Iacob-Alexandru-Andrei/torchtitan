@@ -1,11 +1,21 @@
 #!/usr/bin/env bash
-# Launch Flux-schnell with DES-LOC (param+opt sync every 32 steps).
+# Launch the AdeMaMix TorchFT (\"mt_dao\") experiment with TorchFT replicas.
 set -euo pipefail
 
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
-REPO_ROOT=$(cd -- "${SCRIPT_DIR}/../../../../../../.." && pwd -P)
+if [[ -n "${SLURM_SUBMIT_DIR:-}" ]]; then
+  REPO_ROOT=$(cd -- "${SLURM_SUBMIT_DIR}" && pwd -P)
+else
+  REPO_ROOT=$(cd -- "${SCRIPT_DIR}/../../../../../.." && pwd -P)
+fi
 cd "${REPO_ROOT}"
-echo REPO_ROOT="${REPO_ROOT}"
+export REPO_ROOT
+
+CONFIG_FILE=${CONFIG_FILE:-"${SCRIPT_DIR}/flux_local_adam.toml"}
+TRAIN_MODULE=${TRAIN_MODULE:-"torchtitan.experiments.fl.train"}
+NGPU=${NGPU:-4}
+MIN_REPLICAS=${MIN_REPLICAS:-${NGPU}}
+QUORUM_TICK_MS=${QUORUM_TICK_MS:-100}
 
 # Ensure autoencoder checkpoint is available.
 AE_PATH=${AUTOENCODER_PATH:-"${REPO_ROOT}/torchtitan/experiments/flux/assets/autoencoder/ae.safetensors"}
@@ -25,19 +35,104 @@ if [ ! -f "${AE_PATH}" ]; then
     --hf_token "${HF_TOKEN_VALUE}"
 fi
 
+# Persist HuggingFace caches so streaming datasets are reused across runs.
+DATA_CACHE_ROOT=${DATA_CACHE_ROOT:-"${REPO_ROOT}/.cache/hf"}
+export HF_HOME="${HF_HOME:-${DATA_CACHE_ROOT}}"
+export HF_DATASETS_CACHE="${HF_DATASETS_CACHE:-${DATA_CACHE_ROOT}/datasets}"
+export HF_HUB_CACHE="${HF_HUB_CACHE:-${DATA_CACHE_ROOT}/hub}"
+mkdir -p "${HF_DATASETS_CACHE}" "${HF_HUB_CACHE}"
+
+# Prefetch dataset shards to cover the planned training duration.
+if [ "${PREFETCH_DATA:-1}" != "0" ]; then
+  PREFETCH_STEPS=${PREFETCH_STEPS:-5120}
+  PREFETCH_GLOBAL_BATCH=${PREFETCH_GLOBAL_BATCH:-}
+  PREFETCH_SAMPLES=${PREFETCH_SAMPLES:-}
+  DATASET_NAME=${DATASET_NAME:-}
+  DATASET_PATH=${DATASET_PATH:-}
+  echo "[flux] Prefetching dataset into ${HF_DATASETS_CACHE} (steps=${PREFETCH_STEPS})..."
+  uv run --no-sync python - <<'PY'
+import itertools
+import os
+import tomllib
+from datasets import load_dataset, DownloadConfig
+
+cfg_file = os.environ.get("CONFIG_FILE")
+dataset_name = os.environ.get("DATASET_NAME")
+dataset_path = os.environ.get("DATASET_PATH") or None
+prefetch_steps = int(os.environ.get("PREFETCH_STEPS", "0"))
+prefetch_samples_env = os.environ.get("PREFETCH_SAMPLES")
+prefetch_global_batch_env = os.environ.get("PREFETCH_GLOBAL_BATCH")
+ngpu = int(os.environ.get("NGPU", "1"))
+
+if cfg_file and (not dataset_name or not prefetch_global_batch_env):
+    with open(cfg_file, "rb") as f:
+        cfg = tomllib.load(f)
+    training_cfg = cfg.get("training", {})
+    if not dataset_name:
+        dataset_name = training_cfg.get("dataset", "pixparse/cc12m-wds")
+    if not prefetch_global_batch_env:
+        local_bs = int(training_cfg.get("local_batch_size", 1))
+        prefetch_global_batch_env = str(local_bs * ngpu)
+
+dataset_name = dataset_name or "pixparse/cc12m-wds"
+global_batch = int(prefetch_global_batch_env or 256)
+target = int(prefetch_samples_env or global_batch * prefetch_steps)
+
+cache_dir = os.environ["HF_DATASETS_CACHE"]
+download_cfg = DownloadConfig(cache_dir=cache_dir, max_retries=5)
+
+print(f"[prefetch] dataset={dataset_name} target_samples={target} cache={cache_dir}")
+if target <= 0:
+    raise SystemExit("[prefetch] Target samples is zero; skipping prefetch.")
+
+ds = load_dataset(
+    dataset_name,
+    split="train",
+    streaming=True,
+    download_config=download_cfg,
+    data_dir=dataset_path,
+)
+
+for i, _ in zip(range(target), ds):
+    if (i + 1) % 10000 == 0:
+        print(f"[prefetch] streamed {i + 1}/{target}", flush=True)
+
+print(f"[prefetch] streamed {target} samples into cache.")
+PY
+fi
+
 # Remove stale shared-memory artifacts owned by the current user.
 find /dev/shm -maxdepth 1 -user "${USER}" -exec rm -rf {} + 2>/dev/null || true
 
 export S3_ENDPOINT_URL=${S3_ENDPOINT_URL:-'http://taranaki.cl.cam.ac.uk:9000'}
+if [[ -z "${PYTHONPATH:-}" ]]; then
+  export PYTHONPATH="${REPO_ROOT}"
+else
+  export PYTHONPATH="${REPO_ROOT}:${PYTHONPATH}"
+fi
 
-CONFIG_FILE=${CONFIG_FILE:-"${SCRIPT_DIR}/flux_desloc_32_unified.toml"}
-TRAIN_MODULE=${TRAIN_MODULE:-"torchtitan.experiments.fl.train"}
-NGPU=${NGPU:-8}
-LOG_RANK=${LOG_RANK:-0}
-RDZV_ENDPOINT=${RDZV_ENDPOINT:-"localhost:0"}
+LIGHTHOUSE_HOST=${LIGHTHOUSE_HOST:-"localhost"}
+LIGHTHOUSE_PORT=${LIGHTHOUSE_PORT:-29010}
+LIGHTHOUSE_URL="http://${LIGHTHOUSE_HOST}:${LIGHTHOUSE_PORT}"
+
+LR_SWITCH_STEP=${LR_SWITCH_STEP:-2049}
+ADEMAMIX_SWITCH_SCALE=${ADEMAMIX_SWITCH_SCALE:-2.0}
+ADEMAMIX_NEW_VS=${ADEMAMIX_NEW_VS:-"0.05 0.95"}
+ADEMAMIX_NEW_BETAS=${ADEMAMIX_NEW_BETAS:-"0.9 0.999 0.999"}
+ADEMAMIX_RESET_MOMENTA=${ADEMAMIX_RESET_MOMENTA:-"exp_avg exp_avg_2"}
+
+read -r -a ADEMAMIX_NEW_VS_ARRAY <<< "${ADEMAMIX_NEW_VS}"
+read -r -a ADEMAMIX_NEW_BETAS_ARRAY <<< "${ADEMAMIX_NEW_BETAS}"
+read -r -a ADEMAMIX_RESET_MOMENTA_ARRAY <<< "${ADEMAMIX_RESET_MOMENTA}"
+
+TRAINING_ARGS=("$@")
+
+LOG_DIR="${REPO_ROOT}/outputs/torchft_logs_flux"
+mkdir -p "${LOG_DIR}"
+LIGHTHOUSE_LOG_FILE="${LOG_DIR}/lighthouse.log"
 
 TIMESTAMP=$(date +"%Y%m%d-%H%M%S")
-RUN_PREFIX=${RUN_PREFIX:-"flux-desloc-32-unified"}
+RUN_PREFIX=${RUN_PREFIX:-"flux-localadam"}
 export RUN_UUID=${RUN_UUID:-"${RUN_PREFIX}-${TIMESTAMP}"}
 export WANDB_PROJECT=${WANDB_PROJECT:-"torchtitan_flux"}
 export WANDB_TEAM=${WANDB_TEAM:-"camlsys"}
@@ -45,17 +140,131 @@ export WANDB_RUN_NAME="${RUN_UUID}"
 export TORCHTITAN_WANDB_BASE_RUN_NAME="${RUN_UUID}"
 export TORCHTITAN_FORCE_WANDB_WORKER_SUFFIX=${TORCHTITAN_FORCE_WANDB_WORKER_SUFFIX:-1}
 
-TRAINING_ARGS=("$@")
+echo "=========================================="
+echo "TorchFT AdeMaMix Launch"
+echo "=========================================="
+echo "Repo root: ${REPO_ROOT}"
+echo "Config   : ${CONFIG_FILE}"
+echo "Replicas : ${NGPU}"
+echo "Lighthouse: ${LIGHTHOUSE_URL}"
+echo "Log dir  : ${LOG_DIR}"
+echo "=========================================="
 
-PYTORCH_ALLOC_CONF="expandable_segments:True" \
-uv run --no-sync torchrun \
-  --nproc_per_node="${NGPU}" \
-  --rdzv_backend=c10d \
-  --rdzv_endpoint="${RDZV_ENDPOINT}" \
-  --local-ranks-filter "${LOG_RANK}" \
-  --role rank \
-  --tee 3 \
-  -m "${TRAIN_MODULE}" \
-  --job.config_file "${CONFIG_FILE}" \
-  --run_uuid "${RUN_UUID}" \
-  "${TRAINING_ARGS[@]}"
+declare -a REPLICA_PIDS=()
+LIGHTHOUSE_PID=""
+
+cleanup() {
+  set +e
+  for pid in "${REPLICA_PIDS[@]:-}"; do
+    if [[ -n "${pid}" ]] && kill -0 "${pid}" 2>/dev/null; then
+      kill "${pid}" 2>/dev/null || true
+      wait "${pid}" 2>/dev/null || true
+    fi
+  done
+  if [[ -n "${LIGHTHOUSE_PID}" ]] && kill -0 "${LIGHTHOUSE_PID}" 2>/dev/null; then
+    kill "${LIGHTHOUSE_PID}" 2>/dev/null || true
+    wait "${LIGHTHOUSE_PID}" 2>/dev/null || true
+  fi
+  set -e
+}
+trap cleanup EXIT INT TERM
+
+echo "[Lighthouse] starting at ${LIGHTHOUSE_URL}"
+uv run --no-sync torchft_lighthouse \
+  --min_replicas "${MIN_REPLICAS}" \
+  --quorum_tick_ms "${QUORUM_TICK_MS}" \
+  --bind "${LIGHTHOUSE_HOST}:${LIGHTHOUSE_PORT}" \
+  > "${LIGHTHOUSE_LOG_FILE}" 2>&1 &
+LIGHTHOUSE_PID=$!
+sleep 2
+if ! kill -0 "${LIGHTHOUSE_PID}" 2>/dev/null; then
+  echo "ERROR: torchft_lighthouse failed to start. Check ${LIGHTHOUSE_LOG_FILE}" >&2
+  exit 1
+fi
+echo "Lighthouse PID: ${LIGHTHOUSE_PID}"
+
+export TORCHFT_LIGHTHOUSE="${LIGHTHOUSE_URL}"
+
+AVAILABLE_GPUS=()
+if [[ -n "${CUDA_VISIBLE_DEVICES:-}" ]]; then
+  IFS=',' read -r -a AVAILABLE_GPUS <<< "${CUDA_VISIBLE_DEVICES}"
+else
+  for ((i=0; i<NGPU; i++)); do
+    AVAILABLE_GPUS+=("${i}")
+  done
+fi
+
+if (( ${#AVAILABLE_GPUS[@]} < NGPU )); then
+  echo "ERROR: Requested ${NGPU} replicas but only ${#AVAILABLE_GPUS[@]} GPU(s) available." >&2
+  exit 1
+fi
+
+REPLICA_GPUS=("${AVAILABLE_GPUS[@]:0:NGPU}")
+for ((i=0; i<NGPU; i++)); do
+  echo "Replica ${i} -> GPU ${REPLICA_GPUS[$i]}"
+done
+
+for ((replica_id=0; replica_id<NGPU; replica_id++)); do
+  gpu_id="${REPLICA_GPUS[$replica_id]}"
+  log_file="${LOG_DIR}/replica_${replica_id}.log"
+  echo "[Replica ${replica_id}] logging to ${log_file}"
+
+  (
+    set -euo pipefail
+    cd "${REPO_ROOT}"
+    export CUDA_VISIBLE_DEVICES="${gpu_id}"
+    export PYTORCH_ALLOC_CONF="expandable_segments:True"
+    rdzv_port=$((29900 + replica_id))
+    uv run --no-sync torchrun \
+      --nproc_per_node=1 \
+      --rdzv_backend=c10d \
+      --rdzv_endpoint="localhost:${rdzv_port}" \
+      --role rank \
+      --tee 3 \
+      -m "${TRAIN_MODULE}" \
+      --job.config_file "${CONFIG_FILE}" \
+      --run_uuid "${RUN_UUID}" \
+      --fault_tolerance.replica_id "${replica_id}" \
+      --fault_tolerance.group_size "${NGPU}" \
+      --fault_tolerance.min_replica_size "${MIN_REPLICAS}" \
+      "${TRAINING_ARGS[@]}"
+  ) > "${log_file}" 2>&1 &
+  REPLICA_PIDS[$replica_id]=$!
+  sleep 1
+done
+
+echo ""
+echo "Lighthouse log: tail -f ${LIGHTHOUSE_LOG_FILE}"
+for ((i=0; i<NGPU; i++)); do
+  echo "Replica ${i} log: tail -f ${LOG_DIR}/replica_${i}.log"
+done
+echo ""
+
+set +e
+REPLICA_EXIT=0
+for ((replica_id=0; replica_id<NGPU; replica_id++)); do
+  pid=${REPLICA_PIDS[$replica_id]}
+  if wait "${pid}"; then
+    echo "Replica ${replica_id} completed successfully."
+  else
+    status=$?
+    echo "Replica ${replica_id} exited with status ${status}."
+    REPLICA_EXIT=${status}
+  fi
+done
+set -e
+
+if [[ -n "${LIGHTHOUSE_PID}" ]] && kill -0 "${LIGHTHOUSE_PID}" 2>/dev/null; then
+  echo "Stopping lighthouse..."
+  kill "${LIGHTHOUSE_PID}" 2>/dev/null || true
+  wait "${LIGHTHOUSE_PID}" 2>/dev/null || true
+  LIGHTHOUSE_PID=""
+fi
+
+if (( REPLICA_EXIT == 0 )); then
+  echo "All replicas completed successfully!"
+else
+  echo "Some replicas failed. Check logs in ${LOG_DIR}/"
+fi
+
+exit "${REPLICA_EXIT}"

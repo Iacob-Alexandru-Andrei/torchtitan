@@ -1,0 +1,26 @@
+==========================================
+TorchFT AdeMaMix Launch
+==========================================
+Repo root: /home/ubuntu/projects/torchtitan
+Config   : /home/ubuntu/projects/torchtitan/torchtitan/experiments/fl/scripts/iclr_2026_rebuttal/flux/flux_local_adam.toml
+Replicas : 4
+Lighthouse: http://localhost:29010
+Log dir  : /home/ubuntu/projects/torchtitan/outputs/torchft_logs_flux
+==========================================
+[Lighthouse] starting at http://localhost:29010
+Lighthouse PID: 2827362
+Replica 0 -> GPU 4
+Replica 1 -> GPU 5
+Replica 2 -> GPU 6
+Replica 3 -> GPU 7
+[Replica 0] logging to /home/ubuntu/projects/torchtitan/outputs/torchft_logs_flux/replica_0.log
+[Replica 1] logging to /home/ubuntu/projects/torchtitan/outputs/torchft_logs_flux/replica_1.log
+[Replica 2] logging to /home/ubuntu/projects/torchtitan/outputs/torchft_logs_flux/replica_2.log
+[Replica 3] logging to /home/ubuntu/projects/torchtitan/outputs/torchft_logs_flux/replica_3.log
+
+Lighthouse log: tail -f /home/ubuntu/projects/torchtitan/outputs/torchft_logs_flux/lighthouse.log
+Replica 0 log: tail -f /home/ubuntu/projects/torchtitan/outputs/torchft_logs_flux/replica_0.log
+Replica 1 log: tail -f /home/ubuntu/projects/torchtitan/outputs/torchft_logs_flux/replica_1.log
+Replica 2 log: tail -f /home/ubuntu/projects/torchtitan/outputs/torchft_logs_flux/replica_2.log
+Replica 3 log: tail -f /home/ubuntu/projects/torchtitan/outputs/torchft_logs_flux/replica_3.log
+

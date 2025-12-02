@@ -2637,10 +2637,13 @@ class DesLocFTOptimizersContainer(FTOptimizersContainer):
 
         self._desloc_controllers: list[DesLocController | StreamingDesLocController] = []
         for idx, (model, optimizer) in enumerate(zip(self.model_parts, self.optimizers, strict=True)):
+            controller_optimizer = (
+                getattr(self, "_ft_optimizer", None) if config.use_ft_optimizer else optimizer
+            )
             controller_config = DesLocControllerConfig(
                 manager=config.ft_manager,
                 model=model,
-                optimizer=optimizer,
+                optimizer=controller_optimizer,
                 param_sync_every=desloc_config.param_sync_every,
                 optimizer_sync_every=optimizer_sync,
                 backup_device=backup_device,
