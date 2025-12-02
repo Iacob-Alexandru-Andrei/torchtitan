@@ -1736,6 +1736,7 @@ class DesLocController:
         self._fragments: list[_BaseFragment] = [self._param_fragment]
         self._allreduce_work: list[Any] = []
         self._is_opt_init = not self._optimizer_state_sync_enabled
+        self._in_step_hook = False
 
         self._hook = config.optimizer.register_step_post_hook(self._step_post_hook)
         self._warned_missing_step = False
@@ -1868,9 +1869,10 @@ class DesLocController:
         _args: tuple[Any, ...],
         _kwargs: dict[str, Any],
     ) -> None:
-        # Skip re-entrant calls triggered by TorchFT dispatching into the same optimizer.
-        if getattr(self._optimizer, "_use_ft_optimizer", True) is False:
+        # Skip re-entrant calls (e.g., FT wrapper dispatch).
+        if self._in_step_hook:
             return
+        self._in_step_hook = True
         if not self._is_opt_init:
             self._lazy_init_optimizer_fragments()
 
@@ -1883,6 +1885,7 @@ class DesLocController:
 
         if ready_fragments:
             self._sync(ready_fragments)
+        self._in_step_hook = False
 
     def _sync(self, fragments: list[_BaseFragment]) -> None:
         self._manager.disallow_state_dict_read()
@@ -2075,6 +2078,7 @@ class StreamingDesLocController:
         self._pending_aligned_state_frags: dict[int, list[tuple[_StreamingOptimizerStateFragment, int]]] = {}
         self._warned_missing_step = False
         self._step_counter = 0
+        self._in_step_hook = False
 
         self._register_state_dict_functions()
         self._log_parameter_fragment_assignments()
@@ -2342,8 +2346,9 @@ class StreamingDesLocController:
         _args: tuple[Any, ...],
         _kwargs: dict[str, Any],
     ) -> None:
-        if getattr(self._optimizer, "_use_ft_optimizer", True) is False:
+        if self._in_step_hook:
             return
+        self._in_step_hook = True
         self._manager.allow_state_dict_read()
         if not self._is_opt_init:
             self._lazy_init_optimizer_fragments()
@@ -2370,6 +2375,7 @@ class StreamingDesLocController:
 
         if not synced_fragments:
             self._drive_staggered_state_schedule()
+        self._in_step_hook = False
 
     def _resolve_optimizer_sync_intervals(self, state_keys: Iterable[str]) -> list[int]:
         keys = list(state_keys)
