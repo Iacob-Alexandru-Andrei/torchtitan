@@ -792,6 +792,7 @@ class _ParameterFragment(_BaseFragment):
                 for name, avg_param in self._averaged_parameters:
                     param = self._param_map[name]
                     _copy_into_tensor(param.data, avg_param)
+            self._averaged_parameters.clear()
             return
 
         pseudo_norm_sq = 0.0
@@ -822,6 +823,7 @@ class _ParameterFragment(_BaseFragment):
                 for name, avg_param in self._averaged_parameters:
                     param = self._param_map[name]
                     _copy_into_tensor(param.data, avg_param)
+            self._averaged_parameters.clear()
             return
 
         self._outer_optimizer.step()
@@ -843,6 +845,7 @@ class _ParameterFragment(_BaseFragment):
                 self._metrics_logger(metrics)
             except Exception:  # pragma: no cover - diagnostics only
                 logger.exception("DES-LOC failed to log outer optimizer metrics; continuing.")
+        self._averaged_parameters.clear()
 
     def register_state_dict_fn(self) -> None:
         def load_fn(state_dict: dict[str, torch.Tensor]) -> None:
@@ -994,6 +997,7 @@ class _OptimizerStateFragment(_BaseFragment):
                     state[self.state_key] = averaged.clone()
                     target = state[self.state_key]
                 target.copy_(averaged)
+        self._averaged_state_tensors.clear()
 
     def register_state_dict_fn(self) -> None:
         def load_fn(state_dict: dict[str, torch.Tensor]) -> None:
