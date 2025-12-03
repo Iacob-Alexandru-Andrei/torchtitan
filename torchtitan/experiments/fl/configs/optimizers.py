@@ -128,6 +128,12 @@ class DesLocConfig:
     disable_optimizer_state_sync: bool = False
     """When True, never synchronize optimizer state tensors (parameters still sync)."""
 
+    fragment_sync_batch_fraction: float | None = None
+    """Optional fraction of fragments to synchronize per batch (0 < fraction <= 1)."""
+
+    max_parallel_fragments: int | None = None
+    """Optional hard cap on the number of fragments synchronized together."""
+
     streaming: Suppress[DesLocStreamingConfig | dict[str, Any] | None] = None
     """Optional configuration for streaming DES-LOC."""
 
