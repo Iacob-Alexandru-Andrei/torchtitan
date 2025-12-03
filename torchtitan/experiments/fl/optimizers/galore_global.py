@@ -7,7 +7,6 @@
 
 from __future__ import annotations
 
-import inspect
 import logging
 import math
 import re
@@ -25,7 +24,7 @@ if TYPE_CHECKING:
 
 log = logging.getLogger(__name__)
 
-__all__ = ["GaLoreGlobal", "classify_low_rank_parameters", ]
+__all__ = ["GaLoreGlobal", "classify_low_rank_parameters"]
 
 GALORE_MAX_SUPPORT_DIM = 2
 _HIGH_WEIGHT_DECAY_WARNING = 1e-1
@@ -45,21 +44,100 @@ PROJ_TO_CODE: dict[str, int] = {
 CODE_TO_PROJ: dict[int, str] = {code: name for name, code in PROJ_TO_CODE.items()}
 
 ProjectionBasis = Tensor | list[Tensor]
+_OPTIONAL_PROJECTOR_META_KEYS: tuple[str, ...] = ("full_rank_shape",)
+_RUNTIME_PROJECTOR_STATE_KEYS: tuple[str, ...] = (
+    "_bootstrap_projector",
+    "_placeholder_projector",
+    "_bootstrap_identity_logged",
+    "_placeholder_identity_logged",
+)
 
 
-def _in_optimizer_state_initialization() -> bool:
-    """Return True when Torch Distributed Checkpoint primes optimizer state."""
-    frame = inspect.currentframe()
-    target_modules = {
-        "torch.distributed.checkpoint.optimizer",
-        "torch.distributed.checkpoint.state_dict",
-    }
-    while frame:
-        module_name = frame.f_globals.get("__name__")
-        if frame.f_code.co_name == "_init_optim_state" and module_name in target_modules:
-            return True
-        frame = frame.f_back
-    return False
+def _strip_optional_projector_metadata(state: Any) -> None:
+    """Remove optional projector metadata fields from serialized state."""
+
+    if not isinstance(state, dict):
+        return
+
+    for entry in state.values():
+        if not isinstance(entry, dict):
+            continue
+        for key in _RUNTIME_PROJECTOR_STATE_KEYS:
+            entry.pop(key, None)
+        meta = entry.get("projector_meta")
+        if not isinstance(meta, dict):
+            continue
+        for key in _OPTIONAL_PROJECTOR_META_KEYS:
+            meta.pop(key, None)
+
+
+def _apply_axis_transform(tensor: Tensor, matrix: Tensor, axis: int) -> Tensor:
+    if axis == -1:
+        original_shape = tensor.shape
+        reshaped = tensor.reshape(-1, original_shape[-1])
+        rotated = reshaped @ matrix
+        return rotated.reshape(original_shape)
+    if axis == 0:
+        original_shape = tensor.shape
+        reshaped = tensor.reshape(original_shape[0], -1)
+        rotated = matrix @ reshaped
+        return rotated.reshape(original_shape)
+    msg = f"Unsupported axis {axis} for GaLore moment rotation."
+    raise ValueError(msg)
+
+
+def _rotate_moments_to_new_basis(
+    state: dict[str, Any],
+    *,
+    old_basis: Tensor,
+    new_basis: Tensor,
+    proj_type: str,
+    beta1: float,
+    beta2: float,
+) -> None:
+    if proj_type not in {LEFT_PROJ, RIGHT_PROJ}:
+        return
+
+    exp_avg: Tensor | None = state.get("exp_avg")
+    exp_avg_sq: Tensor | None = state.get("exp_avg_sq")
+    step_tensor: Tensor | None = state.get("step")
+    if exp_avg is None or exp_avg_sq is None or step_tensor is None:
+        return
+
+    step_value = int(step_tensor.item())
+    if step_value <= 0:
+        return
+
+    beta1_corr = 1.0 - beta1**step_value
+    beta2_corr = 1.0 - beta2**step_value
+    if beta1_corr <= 0.0 or beta2_corr <= 0.0:
+        return
+
+    device = exp_avg.device
+    dtype = exp_avg.dtype
+    old_basis_tensor = old_basis.to(device=device, dtype=dtype)
+    new_basis_tensor = new_basis.to(device=device, dtype=dtype)
+
+    old_columns = old_basis_tensor.T if proj_type == RIGHT_PROJ else old_basis_tensor
+    new_columns = new_basis_tensor.T if proj_type == RIGHT_PROJ else new_basis_tensor
+    transform = new_columns.transpose(-1, -2) @ old_columns
+    coeff_matrix = transform.T if proj_type == RIGHT_PROJ else transform
+    coeff_matrix = coeff_matrix.to(device=device, dtype=dtype)
+    var_matrix = coeff_matrix.pow(2)
+    axis = -1 if proj_type == RIGHT_PROJ else 0
+
+    m_hat_old = exp_avg / beta1_corr
+    v_hat_old = exp_avg_sq / beta2_corr
+    var_hat_old = torch.clamp(v_hat_old - m_hat_old.pow(2), min=0.0)
+
+    rotated_exp_avg = _apply_axis_transform(exp_avg, coeff_matrix, axis)
+    m_hat_rot = _apply_axis_transform(m_hat_old, coeff_matrix, axis)
+    var_hat_rot = _apply_axis_transform(var_hat_old, var_matrix, axis)
+    v_hat_rot = torch.abs(var_hat_rot + m_hat_rot.pow(2))
+
+    state["exp_avg"] = rotated_exp_avg
+    state["exp_avg_sq"] = v_hat_rot * beta2_corr
+
 
 
 def _infer_projector_rank(
@@ -105,20 +183,12 @@ def _canonicalize_projection_tensor(tensor: Tensor) -> Tensor:
     return tensor.reshape(1, 1)
 
 
-def _require_remote_projector(state: dict[str, Any]) -> ProjectionBasis:
-    projector_basis = state.get("projector_basis")
-    if projector_basis is None:
-        msg = (
-            "GaLoreGlobal expected a server-provided projector basis. "
-            "Ensure the optimizer state was initialized from the federated server before stepping."
-        )
-        raise RuntimeError(
-            msg
-        )
-    return projector_basis
 
 
-def _project(state: dict[str, Any], full_rank_grad: Tensor) -> Tensor:
+def _project(
+    state: dict[str, Any],
+    full_rank_grad: Tensor,
+) -> Tensor:
     if full_rank_grad.ndim > GALORE_MAX_SUPPORT_DIM:
         msg = "GaLoreGlobal currently supports tensors up to rank 2."
         raise NotImplementedError(msg)
@@ -146,7 +216,41 @@ def _project(state: dict[str, Any], full_rank_grad: Tensor) -> Tensor:
             dtype=torch.int64,
         )
     state["projector_meta"] = meta
-    orthogonal = _require_remote_projector(state)
+    orthogonal = state.get("projector_basis")
+    if orthogonal is None:
+        step_entry = state.get("step")
+        step_zero = False
+        if step_entry is None:
+            step_zero = True
+        elif isinstance(step_entry, torch.Tensor):
+            step_zero = bool(step_entry.numel() == 1 and step_entry.item() == 0)
+        else:
+            step_zero = int(step_entry) == 0
+
+        if step_zero:
+            bootstrap_rank = meta.get("rank")
+            resolved_proj_type = _proj_name_from_value(
+                meta.get("resolved_proj_type", meta.get("proj_type", proj_type)),
+                proj_type,
+            )
+            bootstrap_basis = GaLoreGlobal._build_identity_projector(
+                full_rank_grad,
+                rank=bootstrap_rank or 0,
+                resolved_proj_type=resolved_proj_type,
+                device=full_rank_grad.device,
+                dtype=full_rank_grad.dtype,
+            )
+            if bootstrap_basis is not None:
+                state["projector_basis"] = bootstrap_basis
+                state["_bootstrap_projector"] = True
+                orthogonal = bootstrap_basis
+
+        if orthogonal is None:
+            msg = (
+                "GaLoreGlobal requires projector bases for all low-rank parameters. "
+                "Ensure the federated server provides projector tensors before stepping."
+            )
+            raise RuntimeError(msg)
 
     if proj_type == RIGHT_PROJ:
         assert isinstance(orthogonal, Tensor)
@@ -288,9 +392,16 @@ class GaLoreGlobal(AdamW):
             group.setdefault("rotate_moments_on_refresh", rotate_moments_on_refresh)
             group["initial_lr"] = group["lr"]
 
+        self._placeholder_projectors_enabled = False
+        self._placeholder_cleanup_ready = False
         self.register_load_state_dict_post_hook(
             lambda optimizer: optimizer._repair_projector_states()  # type: ignore[attr-defined]
         )
+
+    def state_dict(self) -> dict[str, Any]:  # type: ignore[override]
+        serialized = super().state_dict()
+        _strip_optional_projector_metadata(serialized.get("state"))
+        return serialized
 
     @torch.no_grad()
     def step(self, closure: Callable[[], Tensor] | None = None) -> Tensor | None:
@@ -298,10 +409,6 @@ class GaLoreGlobal(AdamW):
         if closure is not None:
             with torch.enable_grad():
                 loss = closure()
-
-        suppress_low_rank = False
-        if not self.state:
-            suppress_low_rank = _in_optimizer_state_initialization()
 
         for group in self.param_groups:
             beta1, beta2 = group["betas"]
@@ -319,7 +426,7 @@ class GaLoreGlobal(AdamW):
                     raise RuntimeError(msg)
 
                 rank = self._resolve_rank_for_param(param, base_rank)
-                use_low_rank = rank is not None and not suppress_low_rank
+                use_low_rank = rank is not None
                 if use_low_rank and dim > GALORE_MAX_SUPPORT_DIM:
                     msg = "GaLoreGlobal supports tensors up to 2 dimensions."
                     raise NotImplementedError(msg)
@@ -516,10 +623,11 @@ class GaLoreGlobal(AdamW):
                     state.get("projector_basis"), resolved_proj_type
                 )
                 if current_rank is None:
-                    msg = "GaLoreGlobal requires a server-provided projector basis for each low-rank parameter."
-                    raise RuntimeError(
-                        msg
-                    )
+                    msg = (
+                        "GaLoreGlobal requires a projector basis for parameter {} when resuming. "
+                        "Provide server-supplied projectors before loading optimizer state."
+                    ).format(getattr(param, "_base_name", "<unnamed_param>"))
+                    raise RuntimeError(msg)
                 if current_rank != desired_rank:
                     msg = (
                         "GaLoreGlobal cannot reconcile projector rank {} with configured rank {} for {}. "
@@ -533,12 +641,166 @@ class GaLoreGlobal(AdamW):
                         msg
                     )
 
+    def enable_placeholder_projectors(self) -> None:
+        """Seed identity projectors so optimizer state can initialize safely."""
+
+        if self._placeholder_projectors_enabled:
+            return
+
+        self._placeholder_projectors_enabled = True
+        self._placeholder_cleanup_ready = False
+        for group in self.param_groups:
+            base_rank = group.get("rank")
+            if base_rank is None:
+                continue
+            proj_type_name = _proj_name_from_value(group.get("proj_type", STD_PROJ))
+            for param in group.get("params", []):
+                rank = self._resolve_rank_for_param(param, base_rank)
+                if rank is None or rank <= 0:
+                    continue
+                canonical = _canonicalize_projection_tensor(param.detach())
+                resolved_proj_type = _resolve_proj_choice(proj_type_name, canonical)
+                basis = self._build_identity_projector(
+                    canonical,
+                    rank,
+                    resolved_proj_type,
+                    device=param.device,
+                    dtype=param.dtype,
+                )
+                if basis is None:
+                    continue
+
+                state = self.state[param]
+                meta = state.setdefault(
+                    "projector_meta",
+                    {
+                        "rank": rank,
+                        "update_proj_gap": group.get("update_proj_gap"),
+                        "scale": group.get("scale"),
+                        "proj_type": PROJ_TO_CODE[proj_type_name],
+                        "resolved_proj_type": PROJ_TO_CODE[resolved_proj_type],
+                    },
+                )
+                meta["rank"] = rank
+                meta["update_proj_gap"] = group.get("update_proj_gap")
+                meta["scale"] = group.get("scale")
+                meta["proj_type"] = PROJ_TO_CODE[proj_type_name]
+                meta["resolved_proj_type"] = PROJ_TO_CODE[resolved_proj_type]
+
+                state["projector_basis"] = basis
+                state["_placeholder_projector"] = True
+
+    def disable_placeholder_projectors(self, force: bool = False) -> None:
+        """Remove placeholder projectors once real server projectors are ready."""
+        if not self._placeholder_projectors_enabled:
+            return
+
+        if not force and not self._placeholder_cleanup_ready:
+            # Defer cleanup until the server has supplied replacement projectors.
+            return
+
+        removed = False
+        for state in self.state.values():
+            placeholder = state.pop("_placeholder_projector", False)
+            bootstrap = state.pop("_bootstrap_projector", False)
+            if placeholder or (force and bootstrap):
+                state.pop("projector_basis", None)
+                removed = True
+
+        if removed or force:
+            self._placeholder_projectors_enabled = False
+            self._placeholder_cleanup_ready = False
+
+    def finalize_placeholder_projectors(self) -> None:
+        """Mark placeholder projectors safe to remove and perform cleanup."""
+
+        self._placeholder_cleanup_ready = True
+        self.disable_placeholder_projectors()
+
+    @staticmethod
+    def _build_identity_projector(
+        canonical_tensor: Tensor,
+        rank: int,
+        resolved_proj_type: str,
+        *,
+        device: torch.device,
+        dtype: torch.dtype,
+    ) -> ProjectionBasis | None:
+        canonical = _canonicalize_projection_tensor(canonical_tensor)
+        rows = int(canonical.shape[0])
+        cols = int(canonical.shape[1])
+
+        if resolved_proj_type == RIGHT_PROJ:
+            dim = cols
+            effective_rank = min(rank, dim)
+            if effective_rank <= 0 or dim <= 0:
+                return None
+            identity = torch.eye(dim, device=device, dtype=dtype)[:effective_rank]
+            return identity
+
+        if resolved_proj_type == LEFT_PROJ:
+            dim = rows
+            effective_rank = min(rank, dim)
+            if effective_rank <= 0 or dim <= 0:
+                return None
+            identity = torch.eye(dim, device=device, dtype=dtype)[:, :effective_rank]
+            return identity
+
+        if resolved_proj_type == FULL_PROJ:
+            row_rank = min(rank, rows)
+            col_rank = min(rank, cols)
+            if row_rank <= 0 or col_rank <= 0:
+                return None
+            left = torch.eye(rows, device=device, dtype=dtype)[:, :row_rank]
+            right = torch.eye(cols, device=device, dtype=dtype)[:, :col_rank]
+            return [left, right]
+
+        return None
+
     def _resolve_rank_for_param(self, param: Tensor, fallback: int | None) -> int | None:
         override = self._param_rank_overrides.get(id(param))
         if override is not None:
             return override
         return fallback
 
+    def rotate_momenta(
+        self,
+        param: Tensor,
+        *,
+        old_basis: ProjectionBasis | None,
+        new_basis: ProjectionBasis | None,
+        proj_type: str,
+    ) -> None:
+        """Rotate first and second moments when the server refreshes projector bases."""
+        if old_basis is None or new_basis is None:
+            return
+        if not isinstance(old_basis, Tensor) or not isinstance(new_basis, Tensor):
+            return
+        state = self.state.get(param)
+        if not state:
+            return
+
+        target_group: dict[str, Any] | None = None
+        for group in self.param_groups:
+            for group_param in group.get("params", []):
+                if group_param is param:
+                    target_group = group
+                    break
+            if target_group is not None:
+                break
+
+        if not target_group or not target_group.get("rotate_moments_on_refresh", False):
+            return
+        beta1, beta2 = target_group["betas"]
+        with torch.no_grad():
+            _rotate_moments_to_new_basis(
+                state,
+                old_basis=old_basis,
+                new_basis=new_basis,
+                proj_type=proj_type,
+                beta1=beta1,
+                beta2=beta2,
+            )
 
 def classify_low_rank_parameters(
     parameter_names: list[str],

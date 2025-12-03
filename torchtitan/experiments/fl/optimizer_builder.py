@@ -32,6 +32,7 @@ from torchtitan.experiments.fl.optimizers import (
     AggMoAdamW,
     AggMoAdopt,
     DecoupledAdamW,
+    GaLoreGlobal,
     GaLore,
     Muon,
     QHAdamW,
@@ -94,6 +95,7 @@ _MOSAIC_OPTIMIZER_CLASSES: dict[str, type[Optimizer]] = {
     "ScionQH": QHScion,
     "ScionAggMo": ScionAggMo,
     "GaLore": GaLore,
+    "GaLoreGlobal": GaLoreGlobal,
     "Muon": Muon,
 }
 
@@ -181,7 +183,7 @@ def _build_optimizer_kwargs(config: MosaicOptimizerConfig, extra_kwargs: dict[st
         }
         kwargs.update(extra_kwargs)
         return kwargs
-    if config.name == "GaLore":
+    if config.name in {"GaLore", "GaLoreGlobal"}:
         kwargs: dict[str, Any] = {
             "lr": config.lr,
             "betas": (config.beta1, config.beta2),
@@ -485,7 +487,7 @@ def build_mosaic_optimizers(
     optimizer_cls = _resolve_optimizer_class(normalized_config.name)
 
     effective_extra_kwargs = extra_kwargs
-    if normalized_config.name == "GaLore":
+    if normalized_config.name in {"GaLore", "GaLoreGlobal"}:
         rank_overrides = _compute_galore_rank_overrides(model_parts, normalized_config)
 
         if param_groups is None:

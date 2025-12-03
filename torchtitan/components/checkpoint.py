@@ -93,30 +93,109 @@ class SaveDone:
 
 
 class _OptimizerStateLoadShim(Stateful):
-    """Wrap optimizers to strip GaLore metadata when building load state."""
+    """Wrap optimizers to strip selected GaLore metadata when loading state."""
 
-    def __init__(self, optimizer: OptimizersContainer) -> None:
+    def __init__(
+        self,
+        optimizer: OptimizersContainer,
+        *,
+        drop_projector_state: bool = False,
+        drop_projector_tokens: tuple[str, ...] | None = None,
+        requires_projector_state: bool = False,
+    ) -> None:
         self._optimizer = optimizer
+        self._drop_tokens: tuple[str, ...] = drop_projector_tokens or tuple()
+        self._requires_projector_state = requires_projector_state
+        if drop_projector_state:
+            self._drop_tokens = self._drop_tokens + (
+                "projector_meta",
+                "projector_basis",
+                "initial_projector",
+            )
+        self._cached_tokens: dict[str, Any] = {}
 
     def state_dict(self) -> dict[str, Any]:
         state_dict = self._optimizer.state_dict()
-        if not isinstance(state_dict, dict):
+        if not isinstance(state_dict, dict) or not self._drop_tokens:
             return state_dict
-        filtered_keys = (
-            "projector_meta",
-            "projector_basis",
-        )
-        return {
-            key: value
-            for key, value in state_dict.items()
-            if not any(token in key for token in filtered_keys)
-        }
+
+        filtered_state: dict[str, Any] = {}
+        self._cached_tokens = {}
+        for key, value in state_dict.items():
+            if any(token in key for token in self._drop_tokens):
+                self._cached_tokens[key] = value
+                continue
+            filtered_state[key] = value
+        return filtered_state
 
     def load_state_dict(self, state_dict: dict[str, Any]) -> None:
+        if self._cached_tokens:
+            patched_state_dict = dict(state_dict)
+            for key, value in self._cached_tokens.items():
+                patched_state_dict.setdefault(key, value)
+            state_dict = patched_state_dict
+            self._cached_tokens = {}
         self._optimizer.load_state_dict(state_dict)
+
+    def maybe_warm_projector_state(self) -> None:
+        if not self._requires_projector_state:
+            return
+        optimizers = getattr(self._optimizer, "optimizers", None)
+        if not optimizers:
+            return
+        try:
+            from torchtitan.experiments.fl.optimizers.galore_global import GaLoreGlobal
+        except Exception:  # pragma: no cover - optional dependency
+            return
+
+        for inner in optimizers:
+            if isinstance(inner, GaLoreGlobal):
+                try:
+                    inner._repair_projector_states()
+                except Exception as exc:  # pragma: no cover - safety net
+                    logger.warning(
+                        "Unable to refresh GaLoreGlobal projector state after load: %s",
+                        exc,
+                    )
+                    continue
+
+                total_params = 0
+                projector_ready = 0
+                for group in inner.param_groups:
+                    for param in group.get("params", []):
+                        if not isinstance(param, torch.nn.Parameter):
+                            continue
+                        total_params += 1
+                        param_state = inner.state.get(param)
+                        if param_state and param_state.get("projector_basis") is not None:
+                            print("[GaLoreGlobal][checkpoint] parameter has projector basis:")
+                            print(param_state.get("projector_basis"))
+                            projector_ready += 1
+
+                print(
+                    "[GaLoreGlobal][checkpoint] projector bases present "
+                    f"for {projector_ready}/{total_params} parameters after load"
+                )
 
     def __getattr__(self, name: str) -> Any:  # pragma: no cover - simple delegation
         return getattr(self._optimizer, name)
+
+
+def _optimizer_requires_projector_basis(
+    optimizer: OptimizersContainer,
+) -> bool:
+    """Return True when optimizer needs projector bases preserved for resume."""
+
+    optimizers = getattr(optimizer, "optimizers", None)
+    if not optimizers:
+        return False
+
+    try:  # Avoid hard dependency when GaLore experiments are absent.
+        from torchtitan.experiments.fl.optimizers.galore_global import GaLoreGlobal
+    except Exception:  # pragma: no cover - optional dependency
+        return False
+
+    return any(isinstance(inner, GaLoreGlobal) for inner in optimizers)
 
 
 def purge_thread(purge_queue: queue.Queue):
@@ -262,6 +341,7 @@ class CheckpointManager:
                 LR_SCHEDULER: lr_schedulers,
             }
         )
+        self._optimizer_state_shim: _OptimizerStateLoadShim | None = None
         self.ft_states = {DATALOADER: dataloader}
         self.ft_dataloader_loaded = False
 
@@ -650,6 +730,10 @@ class CheckpointManager:
             checkpoint_id=checkpoint_id,
             from_hf=from_hf,
         )
+        shim = getattr(self, "_optimizer_state_shim", None)
+        if isinstance(shim, _OptimizerStateLoadShim):
+            shim.maybe_warm_projector_state()
+            self._optimizer_state_shim = None
         GarbageCollection.collect("GC collection for checkpoint loading.")
         logger.info(
             f"Finished loading the checkpoint in {time.monotonic() - begin:.2f} seconds."
@@ -800,9 +884,18 @@ class CheckpointManager:
         """Apply backward-compat shims when loading checkpoints."""
 
         optimizer_state = states.get(OPTIMIZER)
+        self._optimizer_state_shim = None
         if isinstance(optimizer_state, OptimizersContainer):
             wrapped_states = dict(states)
-            wrapped_states[OPTIMIZER] = _OptimizerStateLoadShim(optimizer_state)
+            requires_projector_basis = _optimizer_requires_projector_basis(optimizer_state)
+            drop_tokens = ("initial_projector", "initial_projector_mode") if not requires_projector_basis else tuple()
+            wrapped_states[OPTIMIZER] = _OptimizerStateLoadShim(
+                optimizer_state,
+                drop_projector_state=not requires_projector_basis,
+                drop_projector_tokens=drop_tokens,
+                requires_projector_state=requires_projector_basis,
+            )
+            self._optimizer_state_shim = wrapped_states[OPTIMIZER]
             return wrapped_states
         return states
 

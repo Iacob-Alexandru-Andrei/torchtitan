@@ -5,7 +5,7 @@
 # LICENSE file in the root directory of this source tree.
 
 import functools
-from collections.abc import MutableMapping
+from collections.abc import Callable, MutableMapping
 from typing import Any, Generic, Iterator, TypeVar
 
 import torch
@@ -310,28 +310,49 @@ class FTOptimizersContainer(OptimizersContainer):
 
         # Force to initialize the optimizer state so that `optim.step()`
         # won't be called by state_dict() and load_state_dict().
-        _ = {
-            k: v
-            for sd in map(get_optimizer_state_dict, model_parts, self.optimizers)
-            for k, v in sd.items()
-        }
+        placeholder_cleanups: list[Callable[[], None]] = []
+        for optimizer in self.optimizers:
+            enable_placeholder = getattr(optimizer, "enable_placeholder_projectors", None)
+            disable_placeholder = getattr(optimizer, "disable_placeholder_projectors", None)
+            if callable(enable_placeholder) and callable(disable_placeholder):
+                enable_placeholder()
+                placeholder_cleanups.append(disable_placeholder)
+
+        try:
+            _ = {
+                k: v
+                for sd in map(get_optimizer_state_dict, model_parts, self.optimizers)
+                for k, v in sd.items()
+            }
+        finally:
+            for cleanup in placeholder_cleanups:
+                cleanup()
         self.cache_state_dict: dict[str, Any] = {}
+        self._cache_dirty: bool = True
         self._ft_optimizer = ft.Optimizer(ft_manager, self)
         # Whether to determine quorum using FT.optimizer,
         # in semi-sync training we use the synchronization step to start quorum
         self._use_ft_optimizer: bool = use_ft_optimizer
+        self.init_cache_state_dict()
 
     def init_cache_state_dict(self) -> None:
         self.cache_state_dict = super().state_dict()
+        self._cache_dirty = False
 
     def state_dict(self) -> dict[str, Any]:
+        if self._cache_dirty:
+            self.init_cache_state_dict()
         return self.cache_state_dict
+
+    def mark_state_dirty(self) -> None:
+        self._cache_dirty = True
 
     def load_state_dict(self, state_dict: dict[str, Any]) -> None:
         # We have to invalidate the `cache_state_dict` because optimizer uses
         # assign instead of copy when doing `load_state_dict()`. Without
         # invalidating the `cache_state_dict`, there will be memory leakage.
         self.cache_state_dict = {}
+        self._cache_dirty = True
         super().load_state_dict(state_dict)
         self.init_cache_state_dict()
 

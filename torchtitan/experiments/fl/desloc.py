@@ -32,6 +32,23 @@ except ImportError:  # pragma: no cover - DTensor is optional
 
 from torchtitan.components.optimizer import FTOptimizersContainer
 
+try:  # pragma: no cover - optional GaLore dependency
+    from torchtitan.experiments.fl.optimizers.galore_global import (
+        CODE_TO_PROJ,
+        FULL_PROJ,
+        GaLoreGlobal,
+        LEFT_PROJ,
+        RIGHT_PROJ,
+        STD_PROJ,
+    )
+except Exception:  # pragma: no cover - GaLore optional
+    GaLoreGlobal = None  # type: ignore[assignment]
+    LEFT_PROJ = "left"
+    RIGHT_PROJ = "right"
+    FULL_PROJ = "full"
+    CODE_TO_PROJ: dict[int, str] = {}
+    STD_PROJ = "std"
+
 _MODULE_PROXY = sys.modules.get(__name__)
 if _MODULE_PROXY is None:
     _MODULE_PROXY = ModuleType(__name__)
@@ -63,9 +80,12 @@ class ParameterFragmentConfig:
     pin_memory: bool
     name_prefix: str
     outer_optimizer: DesLocOuterOptimizerConfig | Optimizer | list[Optimizer] | None = None
+    local_optimizer: Optimizer | None = None
     log_outer_metrics: bool = False
     metrics_logger: Callable[[dict[str, float]], None] | None = None
     checkpoint_outer_optimizer: bool = True
+    low_rank_server_update: bool = False
+    outer_optimizer_low_rank: bool = False
 
 
 @dataclass(frozen=True)
@@ -117,6 +137,8 @@ class DesLocControllerConfig:
     metrics_logger: Callable[[dict[str, float]], None] | None = None
     checkpoint_outer_optimizer: bool = True
     disable_optimizer_state_sync: bool = False
+    low_rank_server_update: bool = False
+    outer_optimizer_low_rank: bool = False
 
 
 @dataclass(frozen=True)
@@ -487,6 +509,18 @@ class _ParameterFragment(_BaseFragment):
             msg = "outer_optimizer must be an Optimizer, DesLocOuterOptimizerConfig, or None."
             raise TypeError(msg)
 
+        self._local_optimizer = config.local_optimizer
+        self._low_rank_enabled = bool(
+            config.low_rank_server_update
+            and GaLoreGlobal is not None
+            and isinstance(self._local_optimizer, GaLoreGlobal)
+        )
+        self._outer_low_rank_enabled = bool(
+            config.outer_optimizer_low_rank
+            and self._outer_optimizer is not None
+        )
+        self._pre_sync_parameters: dict[str, torch.Tensor] = {}
+
         self._init_backup_storage()
         self.save_state()
         if self._outer_optimizer is not None:
@@ -520,8 +554,12 @@ class _ParameterFragment(_BaseFragment):
             self.save_state()
         self._averaged_parameters.clear()
         work_items: list[Any] = []
+        if self._low_rank_enabled:
+            self._pre_sync_parameters.clear()
         for name, param in self._model.named_parameters():
             avg_param = _extract_local_tensor(param.data)
+            if self._low_rank_enabled:
+                self._pre_sync_parameters[name] = avg_param.clone()
             work_items.append(self._manager.allreduce(avg_param))
             self._averaged_parameters.append((name, avg_param))
 
@@ -554,6 +592,9 @@ class _ParameterFragment(_BaseFragment):
                 for name, avg_param in self._averaged_parameters:
                     param = self._param_map[name]
                     _copy_into_tensor(param.data, avg_param)
+            if self._low_rank_enabled:
+                self._update_low_rank_projectors()
+                self._pre_sync_parameters.clear()
             return
 
         pseudo_norm_sq = 0.0
@@ -584,6 +625,9 @@ class _ParameterFragment(_BaseFragment):
                 for name, avg_param in self._averaged_parameters:
                     param = self._param_map[name]
                     _copy_into_tensor(param.data, avg_param)
+            if self._low_rank_enabled:
+                self._update_low_rank_projectors()
+                self._pre_sync_parameters.clear()
             return
 
         self._outer_optimizer.step()
@@ -605,6 +649,10 @@ class _ParameterFragment(_BaseFragment):
                 self._metrics_logger(metrics)
             except Exception:  # pragma: no cover - diagnostics only
                 logger.exception("DES-LOC failed to log outer optimizer metrics; continuing.")
+
+        if self._low_rank_enabled:
+            self._update_low_rank_projectors()
+            self._pre_sync_parameters.clear()
 
     def register_state_dict_fn(self) -> None:
         def load_fn(state_dict: dict[str, torch.Tensor]) -> None:
@@ -640,6 +688,106 @@ class _ParameterFragment(_BaseFragment):
                 load_outer,
                 save_outer,
             )
+
+    def _decode_projection_type(self, meta: dict[str, Any]) -> str:
+        value = meta.get("resolved_proj_type") or meta.get("proj_type")
+        if isinstance(value, int) and CODE_TO_PROJ:
+            return CODE_TO_PROJ.get(value, STD_PROJ)
+        if isinstance(value, str):
+            return value
+        return STD_PROJ
+
+    def _build_projection_basis(
+        self,
+        pseudo_grad: torch.Tensor,
+        rank: int,
+        meta: dict[str, Any],
+    ) -> torch.Tensor | list[torch.Tensor] | None:
+        if rank <= 0:
+            return None
+        matrix = pseudo_grad.detach()
+        if matrix.ndim == 0:
+            matrix = matrix.reshape(1, 1)
+        elif matrix.ndim == 1:
+            matrix = matrix.unsqueeze(0)
+        if not torch.isfinite(matrix).all() or matrix.abs().max().item() == 0:
+            matrix = torch.randn_like(matrix)
+        reduced_rank = min(rank, min(matrix.shape))
+        if reduced_rank <= 0:
+            return None
+        try:
+            u, _s, v_h = torch.linalg.svd(matrix, full_matrices=False)
+            u = u[:, :reduced_rank].contiguous()
+            v_h = v_h[:reduced_rank, :].contiguous()
+        except RuntimeError:
+            # Fall back to random orthogonal bases when SVD fails.
+            u_rand = torch.randn(matrix.shape[0], reduced_rank, device=matrix.device, dtype=matrix.dtype)
+            u, _ = torch.linalg.qr(u_rand, mode="reduced")
+            v_h = torch.randn(reduced_rank, matrix.shape[1], device=matrix.device, dtype=matrix.dtype)
+
+        proj_type = self._decode_projection_type(meta)
+        if proj_type == FULL_PROJ:
+            return [u, v_h]
+        if proj_type == LEFT_PROJ:
+            return u
+        return v_h
+
+    def _update_low_rank_projectors(self) -> None:
+        optimizer = self._local_optimizer
+        if not self._low_rank_enabled or optimizer is None:
+            return
+
+        for name, avg_param in self._averaged_parameters:
+            local_snapshot = self._pre_sync_parameters.get(name)
+            if local_snapshot is None:
+                continue
+            param = self._param_map[name]
+            state = optimizer.state.get(param)
+            if not state:
+                continue
+            meta = state.get("projector_meta")
+            if not isinstance(meta, dict):
+                continue
+            rank = int(meta.get("rank") or 0)
+            if rank <= 0:
+                continue
+            pseudo_grad = local_snapshot - avg_param
+            basis = self._build_projection_basis(pseudo_grad, rank, meta)
+            if basis is not None:
+                old_basis = state.get("projector_basis")
+                proj_type = self._decode_projection_type(meta)
+                rotate_fn = getattr(self._local_optimizer, "rotate_momenta", None)
+                if rotate_fn is not None and old_basis is not None:
+                    try:
+                        rotate_fn(
+                            param,
+                            old_basis=old_basis,
+                            new_basis=basis,
+                            proj_type=proj_type,
+                        )
+                    except Exception:  # pragma: no cover - diagnostics only
+                        logger.exception("DES-LOC momentum rotation failed; continuing without rotation.")
+                state["projector_basis"] = basis
+                state.pop("_placeholder_projector", None)
+                state.pop("_bootstrap_projector", None)
+                if self._outer_low_rank_enabled:
+                    self._apply_outer_low_rank_basis(param, basis, meta)
+
+        finalize_placeholders = getattr(optimizer, "finalize_placeholder_projectors", None)
+        if callable(finalize_placeholders):
+            finalize_placeholders()
+
+    def _apply_outer_low_rank_basis(
+        self,
+        param: torch.Tensor,
+        basis: torch.Tensor | list[torch.Tensor],
+        meta: dict[str, Any],
+    ) -> None:
+        msg = (
+            "DES-LOC outer optimizer low-rank support is not implemented yet. "
+            "Disable desloc.low_rank_outer_optimizer while this branch is under development."
+        )
+        raise NotImplementedError(msg)
 
 
 class _OuterOptimizingParameterFragment(_ParameterFragment):
@@ -1373,9 +1521,12 @@ class DesLocController:
             pin_memory=config.pin_memory,
             name_prefix=config.name_prefix,
             outer_optimizer=config.outer_optimizer,
+            local_optimizer=config.optimizer,
             log_outer_metrics=config.log_outer_metrics,
             metrics_logger=config.metrics_logger,
             checkpoint_outer_optimizer=config.checkpoint_outer_optimizer,
+            low_rank_server_update=config.low_rank_server_update,
+            outer_optimizer_low_rank=config.outer_optimizer_low_rank,
         )
         fragment_cls = (
             _OuterOptimizingParameterFragment
@@ -2193,6 +2344,8 @@ class DesLocFTOptimizersContainer(FTOptimizersContainer):
                 metrics_logger=None,
                 checkpoint_outer_optimizer=desloc_config.checkpoint_outer_optimizer,
                 disable_optimizer_state_sync=desloc_config.disable_optimizer_state_sync,
+                low_rank_server_update=desloc_config.low_rank_server_update,
+                outer_optimizer_low_rank=desloc_config.low_rank_outer_optimizer,
             )
             if streaming_cfg is not None:
                 controller = StreamingDesLocController(controller_config, streaming_cfg)

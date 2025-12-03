@@ -42,6 +42,33 @@ PROJ_TO_CODE: dict[str, int] = {
 }
 CODE_TO_PROJ: dict[int, str] = {code: name for name, code in PROJ_TO_CODE.items()}
 
+ProjectionBasis = Tensor | list[Tensor]
+_OPTIONAL_PROJECTOR_META_KEYS: tuple[str, ...] = ("full_rank_shape",)
+_RUNTIME_PROJECTOR_STATE_KEYS: tuple[str, ...] = (
+    "_bootstrap_projector",
+    "_placeholder_projector",
+    "_bootstrap_identity_logged",
+    "_placeholder_identity_logged",
+)
+
+
+def _strip_optional_projector_metadata(state: Any) -> None:
+    """Remove optional projector metadata fields from serialized state."""
+
+    if not isinstance(state, dict):
+        return
+
+    for entry in state.values():
+        if not isinstance(entry, dict):
+            continue
+        for key in _RUNTIME_PROJECTOR_STATE_KEYS:
+            entry.pop(key, None)
+        meta = entry.get("projector_meta")
+        if not isinstance(meta, dict):
+            continue
+        for key in _OPTIONAL_PROJECTOR_META_KEYS:
+            meta.pop(key, None)
+
 
 class _RotationContext(NamedTuple):
     beta1: float
@@ -115,22 +142,6 @@ def _rotate_moments_to_new_basis(
     print("Finished rortating GaLore moment tensors to new basis.")
 
 
-def _in_optimizer_state_initialization() -> bool:
-    """Return True when Torch Distributed Checkpoint primes optimizer state."""
-
-    frame = inspect.currentframe()
-    target_modules = {
-        "torch.distributed.checkpoint.optimizer",
-        "torch.distributed.checkpoint.state_dict",
-    }
-    while frame:
-        module_name = frame.f_globals.get("__name__")
-        if frame.f_code.co_name == "_init_optim_state" and module_name in target_modules:
-            return True
-        frame = frame.f_back
-    return False
-
-
 def _infer_projector_rank(
     orthogonal: Tensor | list[Tensor] | None,
     resolved_proj_type: str | None,
@@ -148,7 +159,7 @@ def _infer_projector_rank(
     return None
 
 
-def _orthogonal_matrix(weights: Tensor, rank: int, proj_type: str) -> Tensor | list[Tensor]:
+def _orthogonal_matrix(weights: Tensor, rank: int, proj_type: str) -> ProjectionBasis:
     matrix = weights.data
     original_dtype = matrix.dtype
     original_device = matrix.device
@@ -411,6 +422,11 @@ class GaLore(AdamW):
         self.register_load_state_dict_post_hook(
             lambda optimizer: optimizer._repair_projector_states()  # type: ignore[attr-defined]
         )
+
+    def state_dict(self) -> dict[str, Any]:  # type: ignore[override]
+        serialized = super().state_dict()
+        _strip_optional_projector_metadata(serialized.get("state"))
+        return serialized
 
     @torch.no_grad()
     def step(self, closure: Callable[[], Tensor] | None = None) -> Tensor | None:

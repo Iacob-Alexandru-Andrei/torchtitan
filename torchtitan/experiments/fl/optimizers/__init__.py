@@ -14,20 +14,22 @@ from .desloc_outer import DES_LOC_OUTER
 from .qhadamw import QHAdamW
 from .qhadopt import QHADOPT
 from .galore import GaLore
+from .galore_global import GaLoreGlobal
 from .scion import Muon, Scion, ScionAggMo, ScionLight, QHScion
 
 __all__ = [
     "ADOPT",
+    "DES_LOC_OUTER",
     "QHADOPT",
     "AggMoAdamW",
     "AggMoAdopt",
     "DecoupledAdamW",
-    "DES_LOC_OUTER",
-    "QHAdamW",
     "GaLore",
+    "GaLoreGlobal",
+    "Muon",
+    "QHAdamW",
+    "QHScion",
     "Scion",
     "ScionAggMo",
-    "QHScion",
     "ScionLight",
-    "Muon",
 ]

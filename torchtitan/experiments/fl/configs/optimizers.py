@@ -106,6 +106,12 @@ class DesLocConfig:
     disable_optimizer_state_sync: bool = False
     """When True, never synchronize optimizer state tensors (parameters still sync)."""
 
+    low_rank_server_update: bool = False
+    """Enable server-side GaLore projector refreshes during DES-LOC synchronization."""
+
+    low_rank_outer_optimizer: bool = False
+    """When True, prepare DES-LOC outer optimizer for low-rank projector updates (stubbed)."""
+
     streaming: Suppress[DesLocStreamingConfig | dict[str, Any] | None] = None
     """Optional configuration for streaming DES-LOC."""
 

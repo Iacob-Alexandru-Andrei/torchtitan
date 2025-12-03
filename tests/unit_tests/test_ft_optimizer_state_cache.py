@@ -5,24 +5,25 @@ from types import SimpleNamespace
 from torchtitan.components import optimizer as optimizer_mod
 
 
+class _StubFTOptimizer:
+    def __init__(self, manager, optim_container):
+        self.manager = manager
+        self.optim_container = optim_container
+
+    def step(self, *args, **kwargs):
+        # When use_ft_optimizer=False this is never invoked.
+        pass
+
+    def zero_grad(self, *args, **kwargs):
+        pass
+
+
 @pytest.mark.skipif(
     not getattr(optimizer_mod, "has_torchft", False),
     reason="TorchFT is not installed; FT optimizer cache not exercised.",
 )
 def test_ft_optimizer_state_cache_refresh(monkeypatch):
-    class StubFTOptimizer:
-        def __init__(self, manager, optim_container):
-            self.manager = manager
-            self.optim_container = optim_container
-
-        def step(self, *args, **kwargs):
-            # When use_ft_optimizer=False this is never invoked.
-            pass
-
-        def zero_grad(self, *args, **kwargs):
-            pass
-
-    monkeypatch.setattr(optimizer_mod.ft, "Optimizer", StubFTOptimizer)
+    monkeypatch.setattr(optimizer_mod.ft, "Optimizer", _StubFTOptimizer)
 
     model = torch.nn.Linear(4, 4)
     container = optimizer_mod.FTOptimizersContainer(
@@ -64,3 +65,43 @@ def test_ft_optimizer_state_cache_refresh(monkeypatch):
     exp_mutated = state_after_mutation[exp_key]
     assert torch.allclose(exp_mutated, torch.zeros_like(exp_mutated))
     assert container._cache_dirty is False
+
+
+@pytest.mark.skipif(
+    not getattr(optimizer_mod, "has_torchft", False),
+    reason="TorchFT is not installed; FT optimizer cache not exercised.",
+)
+def test_placeholder_projectors_wrapped_during_state_init(monkeypatch):
+    monkeypatch.setattr(optimizer_mod.ft, "Optimizer", _StubFTOptimizer)
+
+    class RecorderAdamW(torch.optim.AdamW):
+        def __init__(self, params, **kwargs):
+            super().__init__(params, **kwargs)
+            self.enable_calls = 0
+            self.disable_calls = 0
+
+        def enable_placeholder_projectors(self) -> None:
+            self.enable_calls += 1
+
+        def disable_placeholder_projectors(self) -> None:
+            self.disable_calls += 1
+
+    model = torch.nn.Linear(4, 4)
+    container = optimizer_mod.FTOptimizersContainer(
+        [model],
+        RecorderAdamW,
+        {
+            "lr": 0.01,
+            "betas": (0.9, 0.999),
+            "eps": 1e-8,
+            "weight_decay": 0.0,
+            "fused": False,
+            "foreach": False,
+        },
+        SimpleNamespace(),
+        use_ft_optimizer=False,
+    )
+
+    recorder = container.optimizers[0]
+    assert recorder.enable_calls == 1
+    assert recorder.disable_calls == 1
