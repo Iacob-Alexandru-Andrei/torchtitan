@@ -125,6 +125,7 @@ class DesLocControllerConfig:
     disable_optimizer_state_sync: bool = False
     fragment_sync_batch_fraction: float | None = None
     max_parallel_fragments: int | None = None
+    fragment_sync_mode: Literal["unified", "split"] = "unified"
 
 
 @dataclass(frozen=True)
@@ -1695,6 +1696,7 @@ class DesLocController:
         self._step_counter = 0
         self._fragment_sync_batch_fraction = config.fragment_sync_batch_fraction
         self._max_parallel_fragments = config.max_parallel_fragments
+        self._fragment_sync_mode = config.fragment_sync_mode
 
         if config.param_entries is not None:
             opt_param_entries = list(config.param_entries)
@@ -1748,6 +1750,9 @@ class DesLocController:
                 raise ValueError(msg)
         if self._max_parallel_fragments is not None and self._max_parallel_fragments <= 0:
             msg = "max_parallel_fragments must be a positive integer."
+            raise ValueError(msg)
+        if self._fragment_sync_mode not in ("unified", "split"):
+            msg = "fragment_sync_mode must be either 'unified' or 'split'."
             raise ValueError(msg)
 
         self._hook = config.optimizer.register_step_post_hook(self._step_post_hook)
@@ -1919,18 +1924,21 @@ class DesLocController:
                     fragment.reset()
                 return
 
-            if not self._should_batch_fragments(len(fragments)):
-                self._prepare_sync(fragments)
-                self._perform_sync(fragments)
-                for fragment in fragments:
-                    fragment.reset()
-            else:
-                commit_allowed: bool | None = None
-                for batch in self._iter_fragment_batches(fragments):
-                    self._prepare_sync(batch)
-                    commit_allowed = self._perform_sync(batch, commit_override=commit_allowed)
-                    for fragment in batch:
+            commit_allowed: bool | None = None
+            for stage in self._iter_sync_stages(fragments):
+                if not stage:
+                    continue
+                if not self._should_batch_fragments(len(stage)):
+                    self._prepare_sync(stage)
+                    commit_allowed = self._perform_sync(stage, commit_override=commit_allowed)
+                    for fragment in stage:
                         fragment.reset()
+                else:
+                    for batch in self._iter_fragment_batches(stage):
+                        self._prepare_sync(batch)
+                        commit_allowed = self._perform_sync(batch, commit_override=commit_allowed)
+                        for fragment in batch:
+                            fragment.reset()
         finally:
             self._manager.allow_state_dict_read()
 
@@ -1955,6 +1963,33 @@ class DesLocController:
         batch_size = self._compute_sync_batch_size(len(fragments))
         for idx in range(0, len(fragments), batch_size):
             yield fragments[idx : idx + batch_size]
+
+    def _iter_sync_stages(self, fragments: list[_BaseFragment]) -> Iterable[list[_BaseFragment]]:
+        if self._fragment_sync_mode == "unified":
+            yield fragments
+            return
+
+        param_frags: list[_BaseFragment] = []
+        state_groups: dict[str, list[_BaseFragment]] = {}
+        state_order: list[str] = []
+
+        for fragment in fragments:
+            if isinstance(fragment, (_ParameterFragment, _OuterOptimizingParameterFragment)):
+                param_frags.append(fragment)
+            elif isinstance(fragment, _OptimizerStateFragment):
+                key = fragment.state_key
+                if key not in state_groups:
+                    state_groups[key] = []
+                    state_order.append(key)
+                state_groups[key].append(fragment)
+            else:
+                # Unknown fragment type; treat it like a param fragment to avoid starvation.
+                param_frags.append(fragment)
+
+        if param_frags:
+            yield param_frags
+        for key in state_order:
+            yield state_groups[key]
 
     def _prepare_sync(self, fragments: list[_BaseFragment]) -> None:
         self._allreduce_work.clear()
@@ -2701,6 +2736,7 @@ class DesLocFTOptimizersContainer(FTOptimizersContainer):
                 disable_optimizer_state_sync=desloc_config.disable_optimizer_state_sync,
                 fragment_sync_batch_fraction=desloc_config.fragment_sync_batch_fraction,
                 max_parallel_fragments=desloc_config.max_parallel_fragments,
+                fragment_sync_mode=desloc_config.fragment_sync_mode,
             )
             if streaming_cfg is not None:
                 controller = StreamingDesLocController(controller_config, streaming_cfg)

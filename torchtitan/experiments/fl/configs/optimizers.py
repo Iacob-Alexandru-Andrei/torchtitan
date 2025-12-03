@@ -134,6 +134,9 @@ class DesLocConfig:
     max_parallel_fragments: int | None = None
     """Optional hard cap on the number of fragments synchronized together."""
 
+    fragment_sync_mode: Literal["unified", "split"] = "unified"
+    """Controls whether parameter and optimizer fragments sync together (unified) or in stages (split)."""
+
     streaming: Suppress[DesLocStreamingConfig | dict[str, Any] | None] = None
     """Optional configuration for streaming DES-LOC."""
 
