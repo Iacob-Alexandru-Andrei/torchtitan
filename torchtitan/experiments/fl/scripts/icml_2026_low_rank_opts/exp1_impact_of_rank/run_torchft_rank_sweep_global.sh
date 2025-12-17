@@ -12,20 +12,23 @@ NGPU=${NGPU:-4}
 MIN_REPLICAS=${MIN_REPLICAS:-${NGPU}}
 QUORUM_TICK_MS=${QUORUM_TICK_MS:-100}
 LIGHTHOUSE_HOST=${LIGHTHOUSE_HOST:-"localhost"}
-LIGHTHOUSE_PORT=${LIGHTHOUSE_PORT:-29510}
+LIGHTHOUSE_PORT_BASE=${LIGHTHOUSE_PORT_BASE:-29510}
+RDZV_PORT_BASE=${RDZV_PORT_BASE:-30000}
+# PORT_OFFSET allows running multiple experiments simultaneously without port conflicts.
+# Set PORT_OFFSET=100 for a second experiment, PORT_OFFSET=200 for a third, etc.
+PORT_OFFSET=${PORT_OFFSET:-100}
 S3_ENDPOINT_URL=${S3_ENDPOINT_URL:-"http://taranaki.cl.cam.ac.uk:9000"}
 if [[ -z "${PYTHONPATH:-}" ]]; then
   PYTHONPATH="${REPO_ROOT}"
 else
   PYTHONPATH="${REPO_ROOT}:${PYTHONPATH}"
 fi
-RUN_PREFIX=${RUN_PREFIX:-"icml2026-exp1-global-test"}
+RUN_PREFIX=${RUN_PREFIX:-"icml2026-exp1-global-sim-scores"}
 TIMESTAMP=$(date +"%Y%m%d-%H%M%S")
 
 # Chain definition (rank, lr, resume path per run).
 # declare -a CHAIN_RANKS=(8 16 32 64 128 256)
 # declare -a CHAIN_LRS=(0.016 0.008 0.008 0.008 0.016 0.008)
-
 # declare -a CHAIN_RESUME_RUNS=(
 # 	"icml2026-warmed-up-ddp-d99a5257-r8-lr0p016-rottrue-20251128-163213-idx0"
 # 	"icml2026-warmed-up-ddp-4dd9e45e-r16-lr0p008-rottrue-20251128-163510-idx0"
@@ -36,7 +39,6 @@ TIMESTAMP=$(date +"%Y%m%d-%H%M%S")
 # )
 declare -a CHAIN_RANKS=(8)
 declare -a CHAIN_LRS=(0.016)
-
 declare -a CHAIN_RESUME_RUNS=(
 	"icml2026-warmed-up-ddp-d99a5257-r8-lr0p016-rottrue-20251128-163213-idx0"
 )
@@ -51,11 +53,46 @@ if (( ${#CHAIN_LRS[@]} != CHAIN_LENGTH || ${#CHAIN_RESUME_RUNS[@]} != CHAIN_LENG
 	exit 1
 fi
 
+CHAIN_COUNT=${CHAIN_COUNT:-1}
+if (( CHAIN_COUNT < 1 )); then
+	echo "CHAIN_COUNT must be >= 1 (got ${CHAIN_COUNT})." >&2
+	exit 1
+fi
+if (( CHAIN_COUNT > CHAIN_LENGTH )); then
+	echo "CHAIN_COUNT (${CHAIN_COUNT}) exceeds number of runs (${CHAIN_LENGTH}); capping to ${CHAIN_LENGTH}." >&2
+	CHAIN_COUNT=${CHAIN_LENGTH}
+fi
+
+declare -a CHAIN_SIZES=()
+base_chain_size=$((CHAIN_LENGTH / CHAIN_COUNT))
+chain_remainder=$((CHAIN_LENGTH % CHAIN_COUNT))
+for ((chain_idx=0; chain_idx<CHAIN_COUNT; chain_idx++)); do
+	size=${base_chain_size}
+	if (( chain_idx < chain_remainder )); then
+		((size++))
+	fi
+	CHAIN_SIZES[$chain_idx]=${size}
+done
+
+declare -a CHAIN_ASSIGNMENTS=()
+offset=0
+for ((chain_idx=0; chain_idx<CHAIN_COUNT; chain_idx++)); do
+	size=${CHAIN_SIZES[$chain_idx]}
+	for ((k=0; k<size; k++)); do
+		CHAIN_ASSIGNMENTS[$((offset + k))]=${chain_idx}
+	done
+	((offset+=size))
+done
+
 RESUME_STEP=${RESUME_STEP:-2048}
 TRAIN_STEPS=${TRAIN_STEPS:-6144}
 ROTATE_MOMENTS=${ROTATE_MOMENTS:-true}
 LOW_RANK_SERVER_UPDATE=${LOW_RANK_SERVER_UPDATE:-true}
+LOW_RANK_PROJECTOR_ERROR_FEEDBACK=${LOW_RANK_PROJECTOR_ERROR_FEEDBACK:-false}
+LOW_RANK_PROJECTOR_MOMENTUM_WEIGHT=${LOW_RANK_PROJECTOR_MOMENTUM_WEIGHT:-""}
+GALORE_USE_ERROR_FEEDBACK=${GALORE_USE_ERROR_FEEDBACK:-false}
 GALORE_REGEX_PATTERN=${GALORE_REGEX_PATTERN:-"attention\\.w[qkv]|attention\\.wo|feed_forward\\.w[12]"}
+FULL_RANK_THRESHOLD=${FULL_RANK_THRESHOLD:-256}
 GENERATED_CONFIG_DIR=${GENERATED_CONFIG_DIR:-"${SCRIPT_DIR}/generated_configs"}
 ARGS_DIR=${ARGS_DIR:-"${GENERATED_CONFIG_DIR}/args"}
 LOG_ROOT=${LOG_ROOT:-"${SCRIPT_DIR}/logs"}
@@ -81,6 +118,9 @@ run_python_config() {
 	local resume_run=$5
 	local rotate_flag=$(normalize_bool "${ROTATE_MOMENTS}")
 	local low_rank_flag=$(normalize_bool "${LOW_RANK_SERVER_UPDATE}")
+	local error_feedback_flag=$(normalize_bool "${LOW_RANK_PROJECTOR_ERROR_FEEDBACK}")
+	local galore_error_feedback_flag=$(normalize_bool "${GALORE_USE_ERROR_FEEDBACK}")
+	local momentum_weight="${LOW_RANK_PROJECTOR_MOMENTUM_WEIGHT}"
 	BASE_CONFIG_PATH="${base_cfg}" \
 	OUTPUT_CONFIG_PATH="${output_cfg}" \
 	TARGET_RANK="${rank}" \
@@ -91,6 +131,10 @@ run_python_config() {
 	SWEEP_REGEX_PATTERN="${GALORE_REGEX_PATTERN}" \
 	ROTATE_MOMENTS="${rotate_flag}" \
 	DESLOC_LOW_RANK_UPDATE="${low_rank_flag}" \
+	DESLOC_PROJECTOR_ERROR_FEEDBACK="${error_feedback_flag}" \
+	DESLOC_PROJECTOR_MOMENTUM_WEIGHT="${momentum_weight}" \
+	GALORE_USE_ERROR_FEEDBACK="${galore_error_feedback_flag}" \
+	FULL_RANK_THRESHOLD="${FULL_RANK_THRESHOLD}" \
 	uv run --no-sync python3 <<'PY'
 import os
 from pathlib import Path
@@ -112,39 +156,65 @@ resume_run = os.environ["RESUME_RUN"]
 resume_step = os.environ["RESUME_STEP"]
 rotate_flag = os.environ["ROTATE_MOMENTS"].strip().lower() in {"true", "1", "yes", "on"}
 low_rank_update = os.environ["DESLOC_LOW_RANK_UPDATE"].strip().lower() in {"true", "1", "yes", "on"}
+error_feedback = os.environ["DESLOC_PROJECTOR_ERROR_FEEDBACK"].strip().lower() in {"true", "1", "yes", "on"}
+galore_error_feedback = os.environ["GALORE_USE_ERROR_FEEDBACK"].strip().lower() in {"true", "1", "yes", "on"}
+full_rank_threshold = int(os.environ["FULL_RANK_THRESHOLD"])
+momentum_weight_raw = os.environ.get("DESLOC_PROJECTOR_MOMENTUM_WEIGHT", "").strip()
 
 data = tomllib.loads(base.read_text(encoding="utf-8"))
 optimizer = data.setdefault("optimizer", {})
-optimizer["name"] = "GaLoreGlobal"
 optimizer["lr"] = lr
-optimizer["galore_rotate_moments_on_refresh"] = rotate_flag
 desloc_cfg = optimizer.setdefault("desloc", {})
 if not isinstance(desloc_cfg, dict):  # pragma: no cover - defensive guard
 	desloc_cfg = {}
 	optimizer["desloc"] = desloc_cfg
 desloc_cfg.setdefault("enabled", True)
-desloc_cfg["low_rank_server_update"] = low_rank_update
+is_full_rank = rank >= full_rank_threshold
+desloc_cfg["low_rank_server_update"] = low_rank_update and not is_full_rank
+desloc_cfg["low_rank_projector_error_feedback"] = error_feedback and not is_full_rank
+if not is_full_rank:
+	if momentum_weight_raw:
+		weight_val = float(momentum_weight_raw)
+		if weight_val < 0.0 or weight_val > 1.0:
+			raise ValueError("DESLOC_PROJECTOR_MOMENTUM_WEIGHT must be within [0,1]")
+		desloc_cfg["low_rank_projector_momentum_weight"] = weight_val
+	else:
+		desloc_cfg.pop("low_rank_projector_momentum_weight", None)
+else:
+	desloc_cfg.pop("low_rank_projector_momentum_weight", None)
 param_sync = desloc_cfg.get("param_sync_every")
 if param_sync is None:
 	param_sync = optimizer.get("galore_update_proj_gap", 32)
 desloc_cfg["param_sync_every"] = param_sync
-optimizer["galore_update_proj_gap"] = param_sync
-regex_entries = optimizer.get("galore_param_regexes")
-normalized = []
-if isinstance(regex_entries, list):
-		for entry in regex_entries:
-				if isinstance(entry, dict):
-						normalized.append(dict(entry))
-elif isinstance(regex_entries, dict):
-		normalized = [dict(regex_entries)]
-if not any(entry.get("param_str_match") == pattern for entry in normalized):
-		normalized.append({"param_str_match": pattern, "rank": rank})
+if is_full_rank:
+	desloc_cfg["optimizer_sync_every"] = [param_sync, param_sync]
+	optimizer["name"] = "AdamW"
+	optimizer.pop("galore_param_regexes", None)
+	for key in list(optimizer.keys()):
+		if key.startswith("galore_"):
+			optimizer.pop(key, None)
 else:
+	desloc_cfg["optimizer_sync_every"] = [param_sync, param_sync, param_sync]
+	optimizer["name"] = "GaLoreGlobal"
+	optimizer["galore_rotate_moments_on_refresh"] = rotate_flag
+	optimizer["galore_use_error_feedback"] = galore_error_feedback
+	optimizer["galore_update_proj_gap"] = param_sync
+	regex_entries = optimizer.get("galore_param_regexes")
+	normalized = []
+	if isinstance(regex_entries, list):
+		for entry in regex_entries:
+			if isinstance(entry, dict):
+				normalized.append(dict(entry))
+	elif isinstance(regex_entries, dict):
+		normalized = [dict(regex_entries)]
+	if not any(entry.get("param_str_match") == pattern for entry in normalized):
+		normalized.append({"param_str_match": pattern, "rank": rank})
+	else:
 		for entry in normalized:
-				if entry.get("param_str_match") == pattern:
-						entry["rank"] = rank
-						break
-optimizer["galore_param_regexes"] = normalized
+			if entry.get("param_str_match") == pattern:
+				entry["rank"] = rank
+				break
+	optimizer["galore_param_regexes"] = normalized
 
 data.setdefault("training", {})["steps"] = train_steps
 s3_cfg = data.setdefault("s3_checkpoint", {})
@@ -204,21 +274,44 @@ COMMON_SBATCH_ARGS=(
 [[ -n "${SBATCH_QOS}" ]] && COMMON_SBATCH_ARGS+=(--qos="${SBATCH_QOS}")
 COMMON_SBATCH_ARGS+=("${SBATCH_EXTRA_ARRAY[@]}")
 
-echo "Planned GaLoreGlobal chain (${CHAIN_LENGTH} runs):"
-for ((idx=0; idx<CHAIN_LENGTH; idx++)); do
-	printf '  [%d] rank=%-4d lr=%-6s resume=%s\n' "${idx}" "${CHAIN_RANKS[$idx]}" "${CHAIN_LRS[$idx]}" "${CHAIN_RESUME_RUNS[$idx]}"
+# Show port configuration for debugging concurrent runs
+effective_lighthouse_port=$((LIGHTHOUSE_PORT_BASE + PORT_OFFSET))
+effective_rdzv_base=$((RDZV_PORT_BASE + PORT_OFFSET))
+echo "Port configuration (PORT_OFFSET=${PORT_OFFSET}):"
+echo "  Lighthouse port: ${effective_lighthouse_port}"
+echo "  Rendezvous ports: ${effective_rdzv_base} - $((effective_rdzv_base + NGPU - 1))"
+echo ""
+
+echo "Planned GaLoreGlobal chains (${CHAIN_LENGTH} runs split across ${CHAIN_COUNT} chain(s)):"
+offset=0
+for ((chain_idx=0; chain_idx<CHAIN_COUNT; chain_idx++)); do
+	size=${CHAIN_SIZES[chain_idx]}
+	chain_label=$((chain_idx + 1))
+	if (( size == 0 )); then
+		echo "  Chain ${chain_label}: (no runs)"
+		continue
+	fi
+	echo "  Chain ${chain_label} (${size} runs):"
+	for ((k=0; k<size; k++)); do
+		run_idx=$((offset + k))
+		printf '    [%d] rank=%-4d lr=%-6s resume=%s\n' "${run_idx}" "${CHAIN_RANKS[$run_idx]}" "${CHAIN_LRS[$run_idx]}" "${CHAIN_RESUME_RUNS[$run_idx]}"
+	done
+	((offset+=size))
 done
 echo ""
 
-previous_job_id=""
+declare -a PREVIOUS_JOB_IDS=()
 declare -a SUBMITTED_JOB_IDS=()
+declare -a SUBMITTED_JOB_IDS_PER_CHAIN=()
 
 for ((idx=0; idx<CHAIN_LENGTH; idx++)); do
+	chain_idx=${CHAIN_ASSIGNMENTS[$idx]}
+	chain_label=$((chain_idx + 1))
 	rank=${CHAIN_RANKS[$idx]}
 	lr=${CHAIN_LRS[$idx]}
 	resume_run=${CHAIN_RESUME_RUNS[$idx]}
 	lr_tag=${lr/./p}
-	run_suffix=$(printf "idx%02d-r%d-lr%s" $((idx + 1)) "${rank}" "${lr_tag}")
+	run_suffix=$(printf "chain%02d-idx%02d-r%d-lr%s" "${chain_label}" $((idx + 1)) "${rank}" "${lr_tag}")
 	run_uuid="${RUN_PREFIX}-${TIMESTAMP}-${run_suffix}"
 	config_path="${GENERATED_CONFIG_DIR}/${run_uuid}.toml"
 	args_file="${ARGS_DIR}/${run_uuid}.args"
@@ -228,14 +321,18 @@ for ((idx=0; idx<CHAIN_LENGTH; idx++)); do
 	run_python_config "${CONFIG_FILE}" "${config_path}" "${rank}" "${lr}" "${resume_run}"
 	write_args_file "${args_file}" "${TRAINING_ARGS[@]}"
 
-	job_name="galore_global_chain_r${rank}_lr${lr_tag}"
+	job_name="galore_global_chain${chain_label}_r${rank}_lr${lr_tag}"
 	sbatch_args=("${COMMON_SBATCH_ARGS[@]}" --job-name="${job_name}" --output="${SLURM_LOG_DIR}/slurm-${run_uuid}-%j.out")
+	previous_job_id="${PREVIOUS_JOB_IDS[$chain_idx]:-}"
 	if [[ -n "${previous_job_id}" ]]; then
 		sbatch_args+=(--dependency="afterok:${previous_job_id}")
 	fi
 
 	# Export run-specific values directly to the sbatch job so we can use a
 	# single-quoted heredoc without triggering premature shell expansion.
+	# Compute actual ports using base + offset to avoid conflicts with other experiments.
+	lighthouse_port=$((LIGHTHOUSE_PORT_BASE + PORT_OFFSET))
+	rdzv_port_base=$((RDZV_PORT_BASE + PORT_OFFSET))
 	sbatch_export_arg="ALL"
 	for kv in \
 		"RUN_UUID=${run_uuid}" \
@@ -248,7 +345,8 @@ for ((idx=0; idx<CHAIN_LENGTH; idx++)); do
 		"MIN_REPLICAS=${MIN_REPLICAS}" \
 		"QUORUM_TICK_MS=${QUORUM_TICK_MS}" \
 		"LIGHTHOUSE_HOST=${LIGHTHOUSE_HOST}" \
-		"LIGHTHOUSE_PORT=${LIGHTHOUSE_PORT}" \
+		"LIGHTHOUSE_PORT=${lighthouse_port}" \
+		"RDZV_PORT_BASE=${rdzv_port_base}" \
 		"S3_ENDPOINT_URL=${S3_ENDPOINT_URL}" \
 		"PYTHONPATH=${PYTHONPATH}"; do
 		sbatch_export_arg+="${kv:+,${kv}}"
@@ -339,7 +437,7 @@ for ((replica_id=0; replica_id<NGPU; replica_id++)); do
 		cd "${REPO_ROOT}"
 		export CUDA_VISIBLE_DEVICES="${gpu_id}"
 		export PYTORCH_ALLOC_CONF="expandable_segments:True"
-		rdzv_port=$((30000 + replica_id))
+		rdzv_port=$((RDZV_PORT_BASE + replica_id))
 		uv run --no-sync torchrun \
 			--nproc_per_node=1 \
 			--rdzv_backend=c10d \
@@ -380,8 +478,13 @@ EOF
 
 	if [[ "${sbatch_output}" =~ Submitted\ batch\ job\ ([0-9]+) ]]; then
 		job_id=${BASH_REMATCH[1]}
-		previous_job_id=${job_id}
+		PREVIOUS_JOB_IDS[$chain_idx]=${job_id}
 		SUBMITTED_JOB_IDS+=(${job_id})
+		if [[ -n "${SUBMITTED_JOB_IDS_PER_CHAIN[$chain_idx]:-}" ]]; then
+			SUBMITTED_JOB_IDS_PER_CHAIN[$chain_idx]+=" ${job_id}"
+		else
+			SUBMITTED_JOB_IDS_PER_CHAIN[$chain_idx]="${job_id}"
+		fi
 		echo "Submitted job ${job_id} (${job_name})"
 	else
 		echo "Failed to submit job for run ${run_uuid}" >&2
@@ -390,5 +493,15 @@ EOF
 done
 
 echo ""
-echo "Submitted jobs in chain order: ${SUBMITTED_JOB_IDS[*]}"
+echo "Submitted jobs by chain:"
+for ((chain_idx=0; chain_idx<CHAIN_COUNT; chain_idx++)); do
+	chain_label=$((chain_idx + 1))
+	jobs="${SUBMITTED_JOB_IDS_PER_CHAIN[$chain_idx]:-}"
+	if [[ -n "${jobs}" ]]; then
+		echo "  Chain ${chain_label}: ${jobs}"
+	else
+		echo "  Chain ${chain_label}: (no jobs submitted)"
+	fi
+done
+echo "Submission order across all chains: ${SUBMITTED_JOB_IDS[*]}"
 echo "Use 'squeue -u ${USER}' to monitor progress."

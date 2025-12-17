@@ -38,6 +38,7 @@ galore_scale = 1.0
 galore_dim = 2
 galore_v1 = 0.0
 galore_rotate_moments_on_refresh = false
+galore_use_error_feedback = true
 # Keep regex-based rank selection identical to the checkpoint.
 galore_param_regexes = [
   { param_str_match = "attention\\.w[qkv]|attention\\.wo|feed_forward\\.w[12]", rank = 32 },
@@ -109,7 +110,7 @@ context_parallel_degree = 1
 enable = true
 keep_latest_k = 20
 folder = "checkpoints"
-interval = 2048
+interval = 9999999999
 last_save_model_only = false
 export_dtype = "float32"
 async_mode = "async_with_pinned_mem"  # ["disabled", "async", "async_with_pinned_mem"]

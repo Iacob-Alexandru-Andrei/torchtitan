@@ -15,11 +15,17 @@ import torch.distributed.distributed_c10d as c10d
 from torch.distributed.tensor import DTensor
 
 METRIC_COUNT_PREFIX = "__tt_metric_count__"
+METRIC_SQ_PREFIX = "__tt_metric_sq__"
 
 
 def metric_count_key(metric_name: str) -> str:
     """Return the auxiliary key used to store the replica count for ``metric_name``."""
     return f"{METRIC_COUNT_PREFIX}{metric_name}"
+
+
+def metric_sq_key(metric_name: str) -> str:
+    """Return the auxiliary key used to store squared values for std calculation."""
+    return f"{METRIC_SQ_PREFIX}{metric_name}"
 
 
 def _infer_default_device(metrics: dict[str, Any]) -> torch.device:
@@ -67,6 +73,16 @@ def prepare_metrics_for_reduction(optimizer_metrics: dict[str, torch.Tensor]) ->
         if metric_name.startswith("l2_norm"):
             optimizer_metrics[metric_name] = tensor_value.pow(2)
 
+        # Track squared values for basis_similarity to compute std across replicas
+        if metric_name == "mean/basis_similarity":
+            sq_key = metric_sq_key(metric_name)
+            # Skip NaN values from the std calculation
+            if not torch.isnan(tensor_value):
+                optimizer_metrics[sq_key] = tensor_value.pow(2)
+            else:
+                optimizer_metrics[sq_key] = torch.tensor(0.0, device=tensor_value.device, dtype=tensor_value.dtype)
+                optimizer_metrics[count_key] = torch.tensor(0.0, device=tensor_value.device, dtype=tensor_value.dtype)
+
     return optimizer_metrics
 
 
@@ -83,10 +99,14 @@ def reduce_metrics_across_ranks(optimizer_metrics: dict[str, torch.Tensor]) -> d
         for key_list in gathered_keys:
             if key_list is not None:
                 keys.update(key_list)
-        process_keys = sorted(k for k in keys if not k.startswith(METRIC_COUNT_PREFIX))
+        process_keys = sorted(
+            k for k in keys
+            if not k.startswith(METRIC_COUNT_PREFIX) and not k.startswith(METRIC_SQ_PREFIX)
+        )
     else:
         process_keys = [
-            key for key in optimizer_metrics.keys() if not key.startswith(METRIC_COUNT_PREFIX)
+            key for key in optimizer_metrics.keys()
+            if not key.startswith(METRIC_COUNT_PREFIX) and not key.startswith(METRIC_SQ_PREFIX)
         ]
 
     device = _infer_default_device(optimizer_metrics)
@@ -119,18 +139,34 @@ def reduce_metrics_across_ranks(optimizer_metrics: dict[str, torch.Tensor]) -> d
                 c10d.all_reduce(value, op=c10d.ReduceOp.SUM)
                 c10d.all_reduce(count, op=c10d.ReduceOp.SUM)
                 denom = torch.clamp(count, min=1.0)
-                optimizer_metrics[metric] = value / denom
+                mean_value = value / denom
+                optimizer_metrics[metric] = mean_value
+
+                # Compute std for basis_similarity metrics
+                if metric == "mean/basis_similarity":
+                    sq_key = metric_sq_key(metric)
+                    sq_value = _as_tensor(optimizer_metrics.get(sq_key, 0.0), device=device)
+                    c10d.all_reduce(sq_value, op=c10d.ReduceOp.SUM)
+                    mean_sq = sq_value / denom
+                    variance = torch.clamp(mean_sq - mean_value.pow(2), min=0.0)
+                    std_key = "mean/basis_similarity_std"
+                    optimizer_metrics[std_key] = torch.sqrt(variance)
         else:
             if metric.startswith("l2_norm"):
                 optimizer_metrics[metric] = torch.sqrt(value)
             else:
                 optimizer_metrics[metric] = value
 
+                # For single-replica case, std is 0 for basis_similarity
+                if metric == "mean/basis_similarity":
+                    std_key = "mean/basis_similarity_std"
+                    optimizer_metrics[std_key] = torch.tensor(0.0, device=value.device)
+
         optimizer_metrics.pop(count_key, None)
 
     # Remove any stray count keys that may remain (e.g., when no values were present).
     for key in list(optimizer_metrics.keys()):
-        if key.startswith(METRIC_COUNT_PREFIX):
+        if key.startswith(METRIC_COUNT_PREFIX) or key.startswith(METRIC_SQ_PREFIX):
             optimizer_metrics.pop(key)
 
     return optimizer_metrics

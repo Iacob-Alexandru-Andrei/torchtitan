@@ -102,10 +102,15 @@ class _OptimizerStateLoadShim(Stateful):
         drop_projector_state: bool = False,
         drop_projector_tokens: tuple[str, ...] | None = None,
         requires_projector_state: bool = False,
+        drop_param_group_keys: tuple[str, ...] | None = None,
+        drop_state_keys: tuple[str, ...] | None = None,
     ) -> None:
         self._optimizer = optimizer
         self._drop_tokens: tuple[str, ...] = drop_projector_tokens or tuple()
         self._requires_projector_state = requires_projector_state
+        self._drop_param_group_keys: tuple[str, ...] = drop_param_group_keys or tuple()
+        if drop_state_keys:
+            self._drop_tokens = self._drop_tokens + drop_state_keys
         if drop_projector_state:
             self._drop_tokens = self._drop_tokens + (
                 "projector_meta",
@@ -113,15 +118,51 @@ class _OptimizerStateLoadShim(Stateful):
                 "initial_projector",
             )
         self._cached_tokens: dict[str, Any] = {}
+        self._cached_param_group_values: list[dict[str, Any]] = []
 
     def state_dict(self) -> dict[str, Any]:
         state_dict = self._optimizer.state_dict()
-        if not isinstance(state_dict, dict) or not self._drop_tokens:
+        if not isinstance(state_dict, dict):
             return state_dict
+
+        # Strip optional GaLore-only param_group metadata so older checkpoints load.
+        if self._drop_param_group_keys and isinstance(
+            state_dict.get("param_groups"), list
+        ):
+            self._cached_param_group_values = []
+            param_groups: list[dict[str, Any]] = []
+            for group in state_dict["param_groups"]:
+                cached_values = {
+                    key: group[key]
+                    for key in self._drop_param_group_keys
+                    if key in group
+                }
+                self._cached_param_group_values.append(cached_values)
+                patched_group = dict(group)
+                for key in self._drop_param_group_keys:
+                    patched_group.pop(key, None)
+                param_groups.append(patched_group)
+
+            patched_state_dict = dict(state_dict)
+            patched_state_dict["param_groups"] = param_groups
+        else:
+            patched_state_dict = state_dict
+
+        # Also drop any flattened param_group entries that carry the same keys (e.g. DCP
+        # flattens param_groups.*.*.use_error_feedback).
+        if self._drop_param_group_keys:
+            patched_state_dict = {
+                key: value
+                for key, value in patched_state_dict.items()
+                if not any(f".{drop_key}" in key for drop_key in self._drop_param_group_keys)
+            }
+
+        if not self._drop_tokens:
+            return patched_state_dict
 
         filtered_state: dict[str, Any] = {}
         self._cached_tokens = {}
-        for key, value in state_dict.items():
+        for key, value in patched_state_dict.items():
             if any(token in key for token in self._drop_tokens):
                 self._cached_tokens[key] = value
                 continue
@@ -135,7 +176,65 @@ class _OptimizerStateLoadShim(Stateful):
                 patched_state_dict.setdefault(key, value)
             state_dict = patched_state_dict
             self._cached_tokens = {}
+
+        # Inject missing GaLore param_group metadata with safe defaults so unflattening succeeds
+        # even when older checkpoints do not carry these keys.
+        if self._drop_param_group_keys:
+            # Update list-style param_groups entries.
+            if isinstance(state_dict.get("param_groups"), list):
+                for group in state_dict["param_groups"]:
+                    for key in self._drop_param_group_keys:
+                        group.setdefault(key, False)
+
+            # Update flattened param_group entries.
+            extra_entries: dict[str, Any] = {}
+            for key in list(state_dict.keys()):
+                if not key.startswith("param_groups."):
+                    continue
+                base, _, attr = key.rpartition(".")
+                if not base:
+                    continue
+                if attr in self._drop_param_group_keys:
+                    continue
+                for drop_key in self._drop_param_group_keys:
+                    missing_key = f"{base}.{drop_key}"
+                    if missing_key not in state_dict:
+                        extra_entries[missing_key] = False
+            if extra_entries:
+                patched = dict(state_dict)
+                patched.update(extra_entries)
+                state_dict = patched
         self._optimizer.load_state_dict(state_dict)
+
+        if not self._drop_param_group_keys:
+            return
+
+        loaded_param_groups = []
+        try:
+            loaded_param_groups = state_dict.get("param_groups", [])  # type: ignore[attr-defined]
+        except Exception:
+            loaded_param_groups = []
+
+        for idx, group in enumerate(getattr(self._optimizer, "param_groups", [])):
+            cached_values = (
+                self._cached_param_group_values[idx]
+                if idx < len(self._cached_param_group_values)
+                else {}
+            )
+            loaded_values = (
+                loaded_param_groups[idx] if idx < len(loaded_param_groups) else {}
+            )
+            for key in self._drop_param_group_keys:
+                if key in group:
+                    continue
+                if key in loaded_values:
+                    group[key] = loaded_values[key]
+                elif key in cached_values:
+                    group[key] = cached_values[key]
+                else:
+                    group[key] = False
+
+        self._cached_param_group_values = []
 
     def maybe_warm_projector_state(self) -> None:
         if not self._requires_projector_state:
@@ -176,6 +275,32 @@ class _OptimizerStateLoadShim(Stateful):
                     "[GaLoreGlobal][checkpoint] projector bases present "
                     f"for {projector_ready}/{total_params} parameters after load"
                 )
+
+    def __getattr__(self, name: str) -> Any:  # pragma: no cover - simple delegation
+        return getattr(self._optimizer, name)
+
+
+class _OptimizerStateSaveShim(Stateful):
+    """Wrap optimizers to drop local-only optimizer state before saving."""
+
+    def __init__(self, optimizer: OptimizersContainer, drop_state_keys: tuple[str, ...]) -> None:
+        self._optimizer = optimizer
+        self._drop_state_keys = drop_state_keys
+
+    def state_dict(self) -> dict[str, Any]:
+        state_dict = self._optimizer.state_dict()
+        if not isinstance(state_dict, dict):
+            return state_dict
+
+        if not self._drop_state_keys:
+            return state_dict
+
+        filtered_state: dict[str, Any] = {}
+        for key, value in state_dict.items():
+            if any(token in key for token in self._drop_state_keys):
+                continue
+            filtered_state[key] = value
+        return filtered_state
 
     def __getattr__(self, name: str) -> Any:  # pragma: no cover - simple delegation
         return getattr(self._optimizer, name)
@@ -770,6 +895,9 @@ class CheckpointManager:
 
         for filename in os.listdir(folder):
             match = re.search(pattern, filename)
+        
+            # Drop local-only optimizer tensors (e.g., error_feedback) before saving so they are
+            # neither synchronized nor required when loading.
             if not match:
                 continue
             step_value = int(match.group(1))
@@ -844,7 +972,15 @@ class CheckpointManager:
         Note that other states, such as optimizer states, are not flattened.
         """
         states = state_dict if state_dict is not None else self.states
-        sd = {k: v for k, v in states.items() if k != MODEL}
+
+        sd: dict[str, Any] = {}
+        for key, value in states.items():
+            if key == MODEL:
+                continue
+            if key == OPTIMIZER and isinstance(value, OptimizersContainer):
+                sd[key] = _OptimizerStateSaveShim(value, ("error_feedback",))
+            else:
+                sd[key] = value
         if MODEL in states:
             sd.update(states[MODEL].state_dict())
         return sd
@@ -888,12 +1024,15 @@ class CheckpointManager:
         if isinstance(optimizer_state, OptimizersContainer):
             wrapped_states = dict(states)
             requires_projector_basis = _optimizer_requires_projector_basis(optimizer_state)
+            drop_param_group_keys: tuple[str, ...] = ("use_error_feedback",)
             drop_tokens = ("initial_projector", "initial_projector_mode") if not requires_projector_basis else tuple()
             wrapped_states[OPTIMIZER] = _OptimizerStateLoadShim(
                 optimizer_state,
                 drop_projector_state=not requires_projector_basis,
                 drop_projector_tokens=drop_tokens,
                 requires_projector_state=requires_projector_basis,
+                drop_param_group_keys=drop_param_group_keys,
+                drop_state_keys=("error_feedback",),
             )
             self._optimizer_state_shim = wrapped_states[OPTIMIZER]
             return wrapped_states

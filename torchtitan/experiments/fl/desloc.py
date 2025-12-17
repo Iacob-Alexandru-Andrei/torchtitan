@@ -86,6 +86,8 @@ class ParameterFragmentConfig:
     checkpoint_outer_optimizer: bool = True
     low_rank_server_update: bool = False
     outer_optimizer_low_rank: bool = False
+    low_rank_projector_error_feedback: bool = False
+    low_rank_projector_momentum_weight: float | None = None
 
 
 @dataclass(frozen=True)
@@ -139,6 +141,8 @@ class DesLocControllerConfig:
     disable_optimizer_state_sync: bool = False
     low_rank_server_update: bool = False
     outer_optimizer_low_rank: bool = False
+    low_rank_projector_error_feedback: bool = False
+    low_rank_projector_momentum_weight: float | None = None
 
 
 @dataclass(frozen=True)
@@ -156,6 +160,7 @@ class DesLocFTOptimizersConfig:
         DesLocOuterOptimizerConfig | Optimizer | list[Optimizer] | None
     ) = None
     streaming: "DesLocStreamingConfig | None" = None
+    low_rank_projector_momentum_weight: float | None = None
 
 
 def _extract_local_tensor(tensor: torch.Tensor) -> torch.Tensor:
@@ -519,6 +524,18 @@ class _ParameterFragment(_BaseFragment):
             config.outer_optimizer_low_rank
             and self._outer_optimizer is not None
         )
+        self._error_feedback_enabled = bool(
+            self._low_rank_enabled and config.low_rank_projector_error_feedback
+        )
+        if config.low_rank_projector_momentum_weight is not None:
+            weight = float(config.low_rank_projector_momentum_weight)
+            if weight < 0.0 or weight > 1.0:
+                msg = "low_rank_projector_momentum_weight must be within [0, 1]."
+                raise ValueError(msg)
+            self._projector_momentum_weight: float | None = weight
+        else:
+            self._projector_momentum_weight = None
+        self._projector_error_feedback: dict[str, torch.Tensor] = {}
         self._pre_sync_parameters: dict[str, torch.Tensor] = {}
 
         self._init_backup_storage()
@@ -697,6 +714,115 @@ class _ParameterFragment(_BaseFragment):
             return value
         return STD_PROJ
 
+    @staticmethod
+    def _canonicalize_projection_tensor(
+        tensor: torch.Tensor,
+    ) -> tuple[torch.Tensor | None, tuple[int, ...]]:
+        shape = tensor.shape
+        if tensor.ndim == 0:
+            return tensor.reshape(1, 1), shape
+        if tensor.ndim == 1:
+            return tensor.unsqueeze(0), shape
+        if tensor.ndim == 2:
+            return tensor, shape
+        return None, shape
+
+    def _compute_projector_reconstruction(
+        self,
+        tensor: torch.Tensor,
+        basis: torch.Tensor | list[torch.Tensor],
+        proj_type: str,
+    ) -> torch.Tensor | None:
+        canonical, original_shape = self._canonicalize_projection_tensor(tensor)
+        if canonical is None:
+            return None
+
+        device = tensor.device
+        dtype = tensor.dtype
+        if proj_type == FULL_PROJ:
+            if not isinstance(basis, list) or len(basis) != 2:
+                return None
+            left, right = basis
+            left = left.to(device=device, dtype=dtype)
+            right = right.to(device=device, dtype=dtype)
+            left_rank = left.shape[1]
+            right_rank = right.shape[0]
+            # Accept either a full-shape momentum or a low-rank (projected) momentum.
+            if canonical.shape[0] == left.shape[0] and canonical.shape[1] == right.shape[1]:
+                low_rank = left.transpose(-1, -2) @ canonical @ right.transpose(-1, -2)
+            elif canonical.shape[0] == left_rank and canonical.shape[1] == right_rank:
+                low_rank = canonical
+            else:
+                return None
+            reconstruction = left @ low_rank @ right
+        elif proj_type == LEFT_PROJ:
+            if not isinstance(basis, torch.Tensor):
+                return None
+            left = basis.to(device=device, dtype=dtype)
+            left_rank = left.shape[1]
+            if canonical.shape[0] == left.shape[0]:
+                low_rank = left.transpose(-1, -2) @ canonical
+            elif canonical.shape[0] == left_rank:
+                low_rank = canonical
+            else:
+                return None
+            reconstruction = left @ low_rank
+        else:  # RIGHT_PROJ and defaults
+            if not isinstance(basis, torch.Tensor):
+                return None
+            right = basis.to(device=device, dtype=dtype)
+            right_rank = right.shape[0]
+            if canonical.shape[1] == right.shape[1]:
+                low_rank = canonical @ right.transpose(-1, -2)
+            elif canonical.shape[1] == right_rank:
+                low_rank = canonical
+            else:
+                return None
+            reconstruction = low_rank @ right
+
+        reconstruction = reconstruction.to(device=device, dtype=dtype)
+        # If reconstruction matches the input element count, preserve the original shape;
+        # otherwise return the full reconstructed tensor (e.g., when input was low-rank).
+        if reconstruction.numel() == canonical.numel():
+            return reconstruction.reshape(original_shape)
+        return reconstruction
+
+    @staticmethod
+    def _compute_basis_similarity(
+        old_basis: torch.Tensor | list[torch.Tensor],
+        new_basis: torch.Tensor | list[torch.Tensor],
+        proj_type: str,
+    ) -> dict[str, float]:
+        """Return Frobenius-squared similarity of old/new bases using principal angles."""
+
+        def _similarity(a: torch.Tensor, b: torch.Tensor, left_space: bool) -> float:
+            with torch.no_grad():
+                # For left bases (m x r), use Q_new^T Q_old; for right bases (r x n), use Q_new Q_old^T.
+                if left_space:
+                    rmat = a.transpose(-2, -1) @ b
+                else:
+                    rmat = a @ b.transpose(-2, -1)
+                sigma = torch.linalg.svdvals(rmat)
+                return float((sigma.pow(2)).mean().item())
+
+        if proj_type == FULL_PROJ:
+            if not (isinstance(old_basis, list) and isinstance(new_basis, list)):
+                return {}
+            if len(old_basis) != 2 or len(new_basis) != 2:
+                return {}
+            new_left, new_right = new_basis
+            old_left, old_right = old_basis
+            return {
+                "left": _similarity(new_left, old_left, left_space=True),
+                "right": _similarity(new_right, old_right, left_space=False),
+            }
+
+        if isinstance(old_basis, torch.Tensor) and isinstance(new_basis, torch.Tensor):
+            is_left = proj_type == LEFT_PROJ
+            return {"single": _similarity(new_basis, old_basis, left_space=is_left)}
+
+        return {}
+
     def _build_projection_basis(
         self,
         pseudo_grad: torch.Tensor,
@@ -705,16 +831,20 @@ class _ParameterFragment(_BaseFragment):
     ) -> torch.Tensor | list[torch.Tensor] | None:
         if rank <= 0:
             return None
+
         matrix = pseudo_grad.detach()
         if matrix.ndim == 0:
             matrix = matrix.reshape(1, 1)
         elif matrix.ndim == 1:
             matrix = matrix.unsqueeze(0)
+
         if not torch.isfinite(matrix).all() or matrix.abs().max().item() == 0:
             matrix = torch.randn_like(matrix)
+
         reduced_rank = min(rank, min(matrix.shape))
         if reduced_rank <= 0:
             return None
+
         try:
             u, _s, v_h = torch.linalg.svd(matrix, full_matrices=False)
             u = u[:, :reduced_rank].contiguous()
@@ -737,6 +867,7 @@ class _ParameterFragment(_BaseFragment):
         if not self._low_rank_enabled or optimizer is None:
             return
 
+        active_feedback_names: set[str] = set()
         for name, avg_param in self._averaged_parameters:
             local_snapshot = self._pre_sync_parameters.get(name)
             if local_snapshot is None:
@@ -751,8 +882,55 @@ class _ParameterFragment(_BaseFragment):
             rank = int(meta.get("rank") or 0)
             if rank <= 0:
                 continue
-            pseudo_grad = local_snapshot - avg_param
-            basis = self._build_projection_basis(pseudo_grad, rank, meta)
+            if self._error_feedback_enabled:
+                active_feedback_names.add(name)
+            base_pseudo_grad = local_snapshot - avg_param
+            pseudo_grad = base_pseudo_grad
+            if self._projector_momentum_weight is not None:
+                print("Trying to add the momentum")
+                momentum = state.get("exp_avg")
+                momentum_t: torch.Tensor | None = None
+                if isinstance(momentum, torch.Tensor):
+                    if momentum.shape == base_pseudo_grad.shape:
+                        momentum_t = momentum.to(
+                            device=base_pseudo_grad.device,
+                            dtype=base_pseudo_grad.dtype,
+                        )
+                    else:
+                        print("Momentum shape mismatch; attempting reconstruction.")
+                        basis = state.get("projector_basis")
+                        proj_type = self._decode_projection_type(meta)
+                        reconstructed = self._compute_projector_reconstruction(
+                            momentum,
+                            basis,
+                            proj_type,
+                        )
+                        print("Reconstructed momentum is", reconstructed)
+                        if reconstructed is not None and reconstructed.shape == base_pseudo_grad.shape:
+                            momentum_t = reconstructed.to(
+                                device=base_pseudo_grad.device,
+                                dtype=base_pseudo_grad.dtype,
+                            )
+                if momentum_t is not None:
+                    print("Adding momentum to pseudo_grad")
+                    weight = self._projector_momentum_weight
+                    pseudo_grad = (1.0 - weight) * pseudo_grad + weight * momentum_t
+
+            if self._error_feedback_enabled:
+                feedback = self._projector_error_feedback.get(name)
+                if feedback is not None:
+                    if feedback.shape == base_pseudo_grad.shape:
+                        pseudo_grad = pseudo_grad + feedback.to(
+                            device=base_pseudo_grad.device,
+                            dtype=base_pseudo_grad.dtype,
+                        )
+                    else:
+                        self._projector_error_feedback.pop(name, None)
+            basis = self._build_projection_basis(
+                pseudo_grad,
+                rank,
+                meta,
+            )
             if basis is not None:
                 old_basis = state.get("projector_basis")
                 proj_type = self._decode_projection_type(meta)
@@ -767,15 +945,38 @@ class _ParameterFragment(_BaseFragment):
                         )
                     except Exception:  # pragma: no cover - diagnostics only
                         logger.exception("DES-LOC momentum rotation failed; continuing without rotation.")
+                if old_basis is not None and logger.isEnabledFor(logging.INFO):
+                    similarity = self._compute_basis_similarity(old_basis, basis, proj_type)
+                    if similarity:
+                        logger.info("DES-LOC basis similarity for %s (%s): %s", name, proj_type, similarity)
                 state["projector_basis"] = basis
                 state.pop("_placeholder_projector", None)
                 state.pop("_bootstrap_projector", None)
                 if self._outer_low_rank_enabled:
                     self._apply_outer_low_rank_basis(param, basis, meta)
 
+                if self._error_feedback_enabled:
+                    reconstruction = self._compute_projector_reconstruction(
+                        pseudo_grad,
+                        basis,
+                        proj_type,
+                    )
+                    if reconstruction is None or reconstruction.shape != base_pseudo_grad.shape:
+                        self._projector_error_feedback.pop(name, None)
+                    else:
+                        residual = (pseudo_grad - reconstruction).detach().clone()
+                        print("The residual is", residual)
+                        print(residual)
+                        self._projector_error_feedback[name] = residual
+
         finalize_placeholders = getattr(optimizer, "finalize_placeholder_projectors", None)
         if callable(finalize_placeholders):
             finalize_placeholders()
+
+        if self._error_feedback_enabled:
+            stale = set(self._projector_error_feedback.keys()) - active_feedback_names
+            for entry in stale:
+                self._projector_error_feedback.pop(entry, None)
 
     def _apply_outer_low_rank_basis(
         self,
@@ -1502,6 +1703,13 @@ class _StreamingFragmentSchedule:
 class DesLocController:
     """Attach DES-LOC synchronization hooks to a PyTorch optimizer."""
 
+    _EXCLUDED_STATE_KEYS: set[str] = {
+        # Local-only GaLore state; should not be synchronized across replicas.
+        "error_feedback",
+        # Projection tensors are provided out-of-band; syncing them risks clobbering server state.
+        "projector_basis",
+    }
+
     def __init__(self, config: DesLocControllerConfig) -> None:
         self._manager = config.manager
         self._model = config.model
@@ -1527,6 +1735,8 @@ class DesLocController:
             checkpoint_outer_optimizer=config.checkpoint_outer_optimizer,
             low_rank_server_update=config.low_rank_server_update,
             outer_optimizer_low_rank=config.outer_optimizer_low_rank,
+            low_rank_projector_error_feedback=config.low_rank_projector_error_feedback,
+            low_rank_projector_momentum_weight=config.low_rank_projector_momentum_weight,
         )
         fragment_cls = (
             _OuterOptimizingParameterFragment
@@ -1574,10 +1784,17 @@ class DesLocController:
         return [interval for _ in keys]
 
     def _expand_list_intervals(self, intervals: list[int], keys: list[str]) -> list[int]:
-        if len(intervals) != len(keys):
-            msg = "Length of optimizer_sync_every list does not match discovered optimizer states."
-            raise ValueError(msg)
-        normalized = [int(value) for value in intervals]
+        if not intervals:
+            return [self._param_fragment.sync_every for _ in keys]
+
+        # Allow under-specification by repeating the last provided interval, and allow
+        # over-specification by truncating extras. This keeps runs tolerant to optional
+        # optimizer states being added or removed (e.g., error_feedback filtered out).
+        if len(intervals) < len(keys):
+            pad = [intervals[-1] for _ in range(len(keys) - len(intervals))]
+            normalized = [int(value) for value in intervals + pad]
+        else:
+            normalized = [int(value) for value in intervals[: len(keys)]]
         for value in normalized:
             self._validate_positive_interval(value)
         return normalized
@@ -1605,6 +1822,8 @@ class DesLocController:
         state_sets = set()
         for state in self._optimizer.state.values():
             for key, value in state.items():
+                if key in self._EXCLUDED_STATE_KEYS:
+                    continue
                 if isinstance(value, torch.Tensor) and value.numel() > 1:
                     state_sets.add(str(key))
 
@@ -1695,6 +1914,13 @@ class DesLocController:
 
 class StreamingDesLocController:
     """Streaming DES-LOC controller which mirrors TorchFT's Streaming DiLoCo."""
+
+    _EXCLUDED_STATE_KEYS: set[str] = {
+        # Local-only GaLore state; should not be synchronized across replicas.
+        "error_feedback",
+        # Projection tensors are provided out-of-band; syncing them risks clobbering server state.
+        "projector_basis",
+    }
 
     def __init__(
         self,
@@ -2131,10 +2357,16 @@ class StreamingDesLocController:
         return [interval for _ in keys]
 
     def _expand_list_intervals(self, intervals: list[int], keys: list[str]) -> list[int]:
-        if len(intervals) != len(keys):
-            msg = "Length of optimizer_sync_every list does not match discovered optimizer states."
-            raise ValueError(msg)
-        normalized = [int(value) for value in intervals]
+        if not intervals:
+            return [self._fragment_stride for _ in keys]
+
+        # Tolerate optional optimizer states by padding with the last interval when under-specified
+        # and truncating extras when over-specified.
+        if len(intervals) < len(keys):
+            pad = [intervals[-1] for _ in range(len(keys) - len(intervals))]
+            normalized = [int(value) for value in intervals + pad]
+        else:
+            normalized = [int(value) for value in intervals[: len(keys)]]
         for value in normalized:
             self._validate_positive_interval(value)
         return normalized
@@ -2163,6 +2395,8 @@ class StreamingDesLocController:
         state_sets: set[str] = set()
         for state in self._optimizer.state.values():
             for key, value in state.items():
+                if key in self._EXCLUDED_STATE_KEYS:
+                    continue
                 if isinstance(value, torch.Tensor) and value.numel() > 1:
                     state_sets.add(str(key))
 
@@ -2346,6 +2580,8 @@ class DesLocFTOptimizersContainer(FTOptimizersContainer):
                 disable_optimizer_state_sync=desloc_config.disable_optimizer_state_sync,
                 low_rank_server_update=desloc_config.low_rank_server_update,
                 outer_optimizer_low_rank=desloc_config.low_rank_outer_optimizer,
+                low_rank_projector_error_feedback=desloc_config.low_rank_projector_error_feedback,
+                low_rank_projector_momentum_weight=desloc_config.low_rank_projector_momentum_weight,
             )
             if streaming_cfg is not None:
                 controller = StreamingDesLocController(controller_config, streaming_cfg)

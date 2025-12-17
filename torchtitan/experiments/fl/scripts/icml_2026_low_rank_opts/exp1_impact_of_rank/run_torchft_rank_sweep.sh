@@ -19,19 +19,38 @@ if [[ -z "${PYTHONPATH:-}" ]]; then
 else
   PYTHONPATH="${REPO_ROOT}:${PYTHONPATH}"
 fi
-RUN_PREFIX=${RUN_PREFIX:-"icml2026-exp1-local"}
+RUN_PREFIX=${RUN_PREFIX:-"icml2026-exp1-local-ef"}
 TIMESTAMP=$(date +"%Y%m%d-%H%M%S")
 
 # Chain definition (rank, lr, resume path per run).
-declare -a CHAIN_RANKS=(8 16 32 64 128 256)
-declare -a CHAIN_LRS=(0.016 0.008 0.008 0.008 0.016 0.008)
-declare -a CHAIN_RESUME_RUNS=(
-``	"icml2026-warmed-up-ddp-d99a5257-r8-lr0p016-rottrue-20251128-163213-idx0"
-	"icml2026-warmed-up-ddp-4dd9e45e-r16-lr0p008-rottrue-20251128-163510-idx0"
-	"icml2026-warmed-up-ddp-54f19506-r32-lr0p008-rottrue-20251128-163601-idx0"
-	"icml2026-warmed-up-ddp-ebf60169-r64-lr0p008-rottrue-20251201-155531-idx0"
-	"icml2026-warmed-up-ddp-a35e91e2-r128-lr0p016-rottrue-20251128-163708-idx0"
-	"icml2026-warmed-up-ddp-75a6984d-r256-lr0p008-rottrue-20251128-171759-idx0"
+# declare -a CHAIN_RANKS=(8 16 32 64 128 256)
+# declare -a CHAIN_LRS=(0.016 0.008 0.008 0.008 0.016 0.008)
+# declare -a CHAIN_RESUME_RUNS=( # THESE ARE THE DDP WARMED UP RUNS WITHOUT EF!
+# ``	"icml2026-warmed-up-ddp-d99a5257-r8-lr0p016-rottrue-20251128-163213-idx0"
+# 	"icml2026-warmed-up-ddp-4dd9e45e-r16-lr0p008-rottrue-20251128-163510-idx0"
+# 	"icml2026-warmed-up-ddp-54f19506-r32-lr0p008-rottrue-20251128-163601-idx0"
+# 	"icml2026-warmed-up-ddp-ebf60169-r64-lr0p008-rottrue-20251201-155531-idx0"
+# 	"icml2026-warmed-up-ddp-a35e91e2-r128-lr0p016-rottrue-20251128-163708-idx0"
+# 	"icml2026-warmed-up-ddp-75a6984d-r256-lr0p008-rottrue-20251128-171759-idx0"
+# )
+# declare -a CHAIN_RANKS=(8 16 32 64 128 256)
+# declare -a CHAIN_LRS=(0.016 0.008 0.008 0.008 0.016 0.008)
+# declare -a CHAIN_RESUME_RUNS=( # THESE ARE THE EF WARMED UP RUNS! 
+# 	"icml2026-galore-ef-d99a5257-r8-lr0p016-rottrue-20251217-102843-idx0" 
+# 	"icml2026-warmup-ef-4dd9e45e-r16-lr0p008-rottrue-20251217-144111-idx0"
+# 	"icml2026-warmup-ef-54f19506-r32-lr0p008-rottrue-20251217-150027-idx0"
+# 	"icml2026-warmup-ef-ebf60169-r64-lr0p008-rottrue-20251217-151755-idx0"
+# 	"icml2026-warmup-ef-a35e91e2-r128-lr0p016-rottrue-20251217-151833-idx0"
+# 	"icml2026-warmed-up-ddp-75a6984d-r256-lr0p008-rottrue-20251128-171759-idx0"
+# )
+
+declare -a CHAIN_RANKS=(16 32 64 128)
+declare -a CHAIN_LRS=(0.008 0.008 0.008 0.016)
+declare -a CHAIN_RESUME_RUNS=( # THESE ARE THE EF WARMED UP RUNS! 
+	"icml2026-warmup-ef-4dd9e45e-r16-lr0p008-rottrue-20251217-144111-idx0"
+	"icml2026-warmup-ef-54f19506-r32-lr0p008-rottrue-20251217-150027-idx0"
+	"icml2026-warmup-ef-ebf60169-r64-lr0p008-rottrue-20251217-151755-idx0"
+	"icml2026-warmup-ef-a35e91e2-r128-lr0p016-rottrue-20251217-151833-idx0"
 )
 CHAIN_LENGTH=${#CHAIN_RANKS[@]}
 
@@ -47,7 +66,9 @@ fi
 RESUME_STEP=${RESUME_STEP:-2048}
 TRAIN_STEPS=${TRAIN_STEPS:-6144}
 ROTATE_MOMENTS=${ROTATE_MOMENTS:-true}
+USE_ERROR_FEEDBACK=${USE_ERROR_FEEDBACK:-true}
 GALORE_REGEX_PATTERN=${GALORE_REGEX_PATTERN:-"attention\\.w[qkv]|attention\\.wo|feed_forward\\.w[12]"}
+FULL_RANK_THRESHOLD=${FULL_RANK_THRESHOLD:-256}
 GENERATED_CONFIG_DIR=${GENERATED_CONFIG_DIR:-"${SCRIPT_DIR}/generated_configs"}
 ARGS_DIR=${ARGS_DIR:-"${GENERATED_CONFIG_DIR}/args"}
 LOG_ROOT=${LOG_ROOT:-"${SCRIPT_DIR}/logs"}
@@ -72,6 +93,7 @@ run_python_config() {
 	local lr=$4
 	local resume_run=$5
 	local rotate_flag=$(normalize_bool "${ROTATE_MOMENTS}")
+	local error_feedback_flag=$(normalize_bool "${USE_ERROR_FEEDBACK}")
 	BASE_CONFIG_PATH="${base_cfg}" \
 	OUTPUT_CONFIG_PATH="${output_cfg}" \
 	TARGET_RANK="${rank}" \
@@ -81,6 +103,8 @@ run_python_config() {
 	RESUME_STEP="${RESUME_STEP}" \
 	SWEEP_REGEX_PATTERN="${GALORE_REGEX_PATTERN}" \
 	ROTATE_MOMENTS="${rotate_flag}" \
+	USE_ERROR_FEEDBACK="${error_feedback_flag}" \
+	FULL_RANK_THRESHOLD="${FULL_RANK_THRESHOLD}" \
 	uv run --no-sync python3 <<'PY'
 import os
 from pathlib import Path
@@ -101,32 +125,45 @@ train_steps = int(os.environ["TRAIN_STEPS"])
 resume_run = os.environ["RESUME_RUN"]
 resume_step = os.environ["RESUME_STEP"]
 rotate_flag = os.environ["ROTATE_MOMENTS"].strip().lower() in {"true", "1", "yes", "on"}
+use_error_feedback = os.environ["USE_ERROR_FEEDBACK"].strip().lower() in {"true", "1", "yes", "on"}
+full_rank_threshold = int(os.environ["FULL_RANK_THRESHOLD"])
 
 data = tomllib.loads(base.read_text(encoding="utf-8"))
 optimizer = data.setdefault("optimizer", {})
-optimizer["name"] = "GaLore"
 optimizer["lr"] = lr
-optimizer["galore_rotate_moments_on_refresh"] = rotate_flag
-param_sync = optimizer.get("desloc", {}).get("param_sync_every")
-if param_sync is None:
-		param_sync = optimizer.get("galore_update_proj_gap", 32)
-optimizer["galore_update_proj_gap"] = param_sync
-regex_entries = optimizer.get("galore_param_regexes")
-normalized = []
-if isinstance(regex_entries, list):
-		for entry in regex_entries:
-				if isinstance(entry, dict):
-						normalized.append(dict(entry))
-elif isinstance(regex_entries, dict):
-		normalized = [dict(regex_entries)]
-if not any(entry.get("param_str_match") == pattern for entry in normalized):
-		normalized.append({"param_str_match": pattern, "rank": rank})
+is_full_rank = rank >= full_rank_threshold
+if is_full_rank:
+		# Use AdamW for full-rank mode (no low-rank projections)
+		optimizer["name"] = "AdamW"
+		optimizer.pop("galore_param_regexes", None)
+		for key in list(optimizer.keys()):
+				if key.startswith("galore_"):
+						optimizer.pop(key, None)
 else:
-		for entry in normalized:
-				if entry.get("param_str_match") == pattern:
-						entry["rank"] = rank
-						break
-optimizer["galore_param_regexes"] = normalized
+		# Use GaLore for low-rank mode
+		optimizer["name"] = "GaLore"
+		optimizer["galore_rotate_moments_on_refresh"] = rotate_flag
+		optimizer["galore_use_error_feedback"] = use_error_feedback
+		param_sync = optimizer.get("desloc", {}).get("param_sync_every")
+		if param_sync is None:
+				param_sync = optimizer.get("galore_update_proj_gap", 32)
+		optimizer["galore_update_proj_gap"] = param_sync
+		regex_entries = optimizer.get("galore_param_regexes")
+		normalized = []
+		if isinstance(regex_entries, list):
+				for entry in regex_entries:
+						if isinstance(entry, dict):
+								normalized.append(dict(entry))
+		elif isinstance(regex_entries, dict):
+				normalized = [dict(regex_entries)]
+		if not any(entry.get("param_str_match") == pattern for entry in normalized):
+				normalized.append({"param_str_match": pattern, "rank": rank})
+		else:
+				for entry in normalized:
+						if entry.get("param_str_match") == pattern:
+								entry["rank"] = rank
+								break
+		optimizer["galore_param_regexes"] = normalized
 
 data.setdefault("training", {})["steps"] = train_steps
 s3_cfg = data.setdefault("s3_checkpoint", {})

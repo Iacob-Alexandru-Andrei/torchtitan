@@ -70,6 +70,30 @@ def _strip_optional_projector_metadata(state: Any) -> None:
             meta.pop(key, None)
 
 
+def _strip_all_projector_state(state: Any) -> None:
+    """Remove all projector-related state for checkpoint compatibility.
+
+    This enables GaLore checkpoints to be loaded by AdamW and vice versa.
+    The projector state will be rebuilt by ``_repair_projector_states``
+    after checkpoint loading.
+    """
+    if not isinstance(state, dict):
+        return
+
+    for entry in state.values():
+        if not isinstance(entry, dict):
+            continue
+        # Remove runtime projector keys
+        for key in _RUNTIME_PROJECTOR_STATE_KEYS:
+            entry.pop(key, None)
+        # Remove projector metadata entirely
+        entry.pop("projector_meta", None)
+        # Remove projector basis - will be recomputed on first step
+        entry.pop("projector_basis", None)
+        # Remove error feedback - not needed for checkpoint compatibility
+        entry.pop("error_feedback", None)
+
+
 class _RotationContext(NamedTuple):
     beta1: float
     beta2: float
@@ -181,6 +205,38 @@ def _orthogonal_matrix(weights: Tensor, rank: int, proj_type: str) -> Projection
     return result.to(device=original_device, dtype=original_dtype)
 
 
+def _basis_similarity(old_basis: ProjectionBasis, new_basis: ProjectionBasis, proj_type: str) -> dict[str, float]:
+    """Compute principal-angle similarity between projector bases.
+
+    Similarity is mean(sigma^2) where sigma are singular values of the rotation
+    between the two subspaces. Returns an empty dict if inputs are incompatible.
+    """
+
+    def _sim(a: Tensor, b: Tensor, left_space: bool) -> float:
+        # For left bases (m x r), use Q_new^T Q_old; for right bases (r x n), use Q_new Q_old^T.
+        rot = a.transpose(-2, -1) @ b if left_space else a @ b.transpose(-2, -1)
+        sigma = torch.linalg.svdvals(rot)
+        return float((sigma.pow(2)).mean().item())
+
+    if proj_type == FULL_PROJ:
+        if not (isinstance(old_basis, list) and isinstance(new_basis, list)):
+            return {}
+        if len(old_basis) != 2 or len(new_basis) != 2:
+            return {}
+        new_left, new_right = new_basis
+        old_left, old_right = old_basis
+        return {
+            "left": _sim(new_left, old_left, left_space=True),
+            "right": _sim(new_right, old_right, left_space=False),
+        }
+
+    if isinstance(old_basis, Tensor) and isinstance(new_basis, Tensor):
+        is_left = proj_type == LEFT_PROJ
+        return {"single": _sim(new_basis, old_basis, left_space=is_left)}
+
+    return {}
+
+
 def _resolve_proj_choice(proj_type: str, tensor: Tensor) -> str:
     if proj_type in {STD_PROJ, REV_STD_PROJ}:
         if tensor.shape[0] >= tensor.shape[1]:
@@ -239,6 +295,21 @@ def _maybe_refresh_projector(
         return
     print("Refreshing the new-basis")
     new_basis = _orthogonal_matrix(weights, rank, resolved_proj_type)
+    if orthogonal is not None:
+        similarity = _basis_similarity(orthogonal, new_basis, resolved_proj_type)
+        if similarity:
+            # Store similarity in state for metric logging
+            if "single" in similarity:
+                state["basis_similarity"] = torch.tensor(
+                    similarity["single"], device=weights.device, dtype=torch.float32
+                )
+            elif "left" in similarity and "right" in similarity:
+                # For FULL_PROJ, store average of left and right similarities
+                avg_sim = (similarity["left"] + similarity["right"]) / 2.0
+                state["basis_similarity"] = torch.tensor(
+                    avg_sim, device=weights.device, dtype=torch.float32
+                )
+            log.info("GaLore basis similarity (%s): %s", resolved_proj_type, similarity)
     if (
         rotation_context is not None
         and orthogonal is not None
@@ -358,6 +429,18 @@ class GaLore(AdamW):
                 param.grad,
             )
         ),
+        "l2_norm/error_feedback": (
+            lambda _param, optim_state, _step_tensor: torch.linalg.vector_norm(
+                optim_state["error_feedback"],
+            )
+            if "error_feedback" in optim_state
+            else torch.tensor(0.0, device=_param.device)
+        ),
+        "mean/basis_similarity": (
+            lambda _param, optim_state, _step_tensor: optim_state["basis_similarity"]
+            if "basis_similarity" in optim_state
+            else torch.tensor(float("nan"), device=_param.device)
+        ),
     }
 
     def __init__(
@@ -376,6 +459,7 @@ class GaLore(AdamW):
         dim: int = 2,
         rank_overrides: dict[Tensor | int, int] | None = None,
         rotate_moments_on_refresh: bool = False,
+        use_error_feedback: bool = False,
     ) -> None:
         if lr < 0.0:
             raise ValueError(f"Invalid learning rate: {lr}")
@@ -393,9 +477,9 @@ class GaLore(AdamW):
             )
         if not 0.0 <= v1 <= 1.0:
             raise ValueError(f"Invalid quasi-hyperbolic parameter v1={v1}")
-        print(f"The learning rate is {lr}")
         super().__init__(params=params, lr=lr, betas=betas, eps=eps, weight_decay=weight_decay)
         self.v1 = v1
+        self.use_error_feedback = use_error_feedback
         self._defaults = {
             "rank": rank,
             "update_proj_gap": update_proj_gap,
@@ -403,6 +487,7 @@ class GaLore(AdamW):
             "proj_type": proj_type,
             "dim": dim,
             "rotate_moments_on_refresh": rotate_moments_on_refresh,
+            "use_error_feedback": use_error_feedback,
         }
         overrides: dict[int, int] = {}
         if rank_overrides:
@@ -417,6 +502,7 @@ class GaLore(AdamW):
             group.setdefault("proj_type", proj_type)
             group.setdefault("dim", dim)
             group.setdefault("rotate_moments_on_refresh", rotate_moments_on_refresh)
+            group.setdefault("use_error_feedback", use_error_feedback)
             group["initial_lr"] = group["lr"]
 
         self.register_load_state_dict_post_hook(
@@ -425,7 +511,8 @@ class GaLore(AdamW):
 
     def state_dict(self) -> dict[str, Any]:  # type: ignore[override]
         serialized = super().state_dict()
-        _strip_optional_projector_metadata(serialized.get("state"))
+        # Strip all projector state for checkpoint compatibility with AdamW
+        _strip_all_projector_state(serialized.get("state"))
         return serialized
 
     @torch.no_grad()
@@ -454,11 +541,9 @@ class GaLore(AdamW):
                     raise RuntimeError("GaLore does not support sparse gradients.")
 
                 rank = self._resolve_rank_for_param(param, base_rank)
-                print(rank, "rank")
                 use_low_rank = rank is not None
                 if use_low_rank and dim > GALORE_MAX_SUPPORT_DIM:
                     raise NotImplementedError("GaLore supports tensors up to 2 dimensions.")
-                print(f"Low-rank GaLore is on: {use_low_rank}.")
                 state = self.state[param]
                 if "step" not in state:
                     state["step"] = torch.zeros((), dtype=torch.float32, device=param.device)
@@ -478,7 +563,27 @@ class GaLore(AdamW):
                     meta["update_proj_gap"] = group["update_proj_gap"]
                     meta["scale"] = group["scale"]
                     meta["proj_type"] = group["proj_type"]
-                    grad = _project(state, grad, state["step"], rotation_context)
+
+                    # PowerSGD-style error feedback: add accumulated error before projection
+                    use_ef = group.get("use_error_feedback", False)
+                    if use_ef:
+                        error_feedback = state.get("error_feedback")
+                        if error_feedback is not None:
+                            grad = grad + error_feedback
+
+                    # Project gradient to low-rank subspace
+                    low_rank_grad = _project(state, grad, state["step"], rotation_context)
+
+                    # Compute reconstruction error for error feedback
+                    if use_ef:
+                        reconstructed = _project_back(state, low_rank_grad)
+                        # Reshape reconstructed if needed to match grad shape
+                        if reconstructed.shape != grad.shape:
+                            reconstructed = reconstructed.reshape(grad.shape)
+                        new_error = grad - reconstructed
+                        state["error_feedback"] = new_error
+
+                    grad = low_rank_grad
 
                 if "exp_avg" not in state:
                     state["exp_avg"] = torch.zeros_like(

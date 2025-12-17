@@ -112,6 +112,12 @@ class DesLocConfig:
     low_rank_outer_optimizer: bool = False
     """When True, prepare DES-LOC outer optimizer for low-rank projector updates (stubbed)."""
 
+    low_rank_projector_error_feedback: bool = False
+    """Accumulate projector error feedback across rounds before refreshing the SVD basis."""
+
+    low_rank_projector_momentum_weight: float | None = None
+    """Optional blend factor for projector SVD inputs (None => use pseudo-grad only, 1.0 => use exp_avg only)."""
+
     streaming: Suppress[DesLocStreamingConfig | dict[str, Any] | None] = None
     """Optional configuration for streaming DES-LOC."""
 
@@ -283,6 +289,9 @@ class MosaicOptimizerConfig(BaseOptimizer):
 
     galore_rotate_moments_on_refresh: bool = False
     """Whether to rotate GaLore moment tensors into the refreshed projector basis."""
+
+    galore_use_error_feedback: bool = False
+    """Enable powerGSD-style error feedback for low-rank gradient projection."""
 
     param_groups: list[dict[str, Any]] | tuple[dict[str, Any], ...] | None = None
     """Optional explicit optimizer param groups (e.g., regex-based GaLore overrides)."""

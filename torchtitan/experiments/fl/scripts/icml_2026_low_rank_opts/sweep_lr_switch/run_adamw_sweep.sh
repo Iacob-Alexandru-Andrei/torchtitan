@@ -5,12 +5,12 @@ set -euo pipefail
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 CONFIG_FILE=${CONFIG_FILE:-"${SCRIPT_DIR}/base.toml"}
 TRAIN_MODULE=${TRAIN_MODULE:-"torchtitan.experiments.fl.train"}
-RUN_PREFIX=${RUN_PREFIX:-"icml2026-warmed-up-ddp"}
+RUN_PREFIX=${RUN_PREFIX:-"icml2026-galore-ef"}
 LOG_RANK=${LOG_RANK:-0}
 
 # PROJECTION_RANKS=${PROJECTION_RANKS:-"8 16 32 64 128 256"}
-PROJECTION_RANKS=${PROJECTION_RANKS:-"256"}
-LR_VALUES=${LR_VALUES:-"0.008"}
+PROJECTION_RANKS=${PROJECTION_RANKS:-"128"}
+LR_VALUES=${LR_VALUES:-"0.016"}
 # LR_VALUES=${LR_VALUES:-"0.0005 0.001 0.002 0.004 0.008 0.016"}
 # (16, 0.008, "icml2026-galore-5f8b3874-r16-lr0p008-rottrue-20251127-114042-idx3")
 # (32, 0.008, "icml2026-galore-5f8b3874-r32-lr0p008-rottrue-20251127-114042-idx5")
@@ -516,7 +516,7 @@ uv run --no-sync torchrun \
   --optimizer.lr "${lr_value}" \
   --training.global_batch_size 64 \
   --training.local_batch_size 16 \
-  --training.steps 2048 \
+  --training.steps 6144 \
   ${TRAINING_ARGS_ESCAPED}
 echo "JOB FINISHED: \$(date)"
 EOF
