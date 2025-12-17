@@ -5,7 +5,7 @@ set -euo pipefail
 
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
 REPO_ROOT=$(cd -- "${SCRIPT_DIR}/../../../../../../" && pwd -P)
-echo ${REPO_ROOT} 
+echo ${REPO_ROOT}
 CONFIG_FILE=${CONFIG_FILE:-"${SCRIPT_DIR}/base_torchft.toml"}
 TRAIN_MODULE=${TRAIN_MODULE:-"torchtitan.experiments.fl.train"}
 NGPU=${NGPU:-4}
@@ -35,8 +35,8 @@ TIMESTAMP=$(date +"%Y%m%d-%H%M%S")
 # )
 # declare -a CHAIN_RANKS=(8 16 32 64 128 256)
 # declare -a CHAIN_LRS=(0.016 0.008 0.008 0.008 0.016 0.008)
-# declare -a CHAIN_RESUME_RUNS=( # THESE ARE THE EF WARMED UP RUNS! 
-# 	"icml2026-galore-ef-d99a5257-r8-lr0p016-rottrue-20251217-102843-idx0" 
+# declare -a CHAIN_RESUME_RUNS=( # THESE ARE THE EF WARMED UP RUNS!
+# 	"icml2026-galore-ef-d99a5257-r8-lr0p016-rottrue-20251217-102843-idx0"
 # 	"icml2026-warmup-ef-4dd9e45e-r16-lr0p008-rottrue-20251217-144111-idx0"
 # 	"icml2026-warmup-ef-54f19506-r32-lr0p008-rottrue-20251217-150027-idx0"
 # 	"icml2026-warmup-ef-ebf60169-r64-lr0p008-rottrue-20251217-151755-idx0"
@@ -46,7 +46,7 @@ TIMESTAMP=$(date +"%Y%m%d-%H%M%S")
 
 declare -a CHAIN_RANKS=(16 32 64 128)
 declare -a CHAIN_LRS=(0.008 0.008 0.008 0.016)
-declare -a CHAIN_RESUME_RUNS=( # THESE ARE THE EF WARMED UP RUNS! 
+declare -a CHAIN_RESUME_RUNS=( # THESE ARE THE EF WARMED UP RUNS!
 	"icml2026-warmup-ef-4dd9e45e-r16-lr0p008-rottrue-20251217-144111-idx0"
 	"icml2026-warmup-ef-54f19506-r32-lr0p008-rottrue-20251217-150027-idx0"
 	"icml2026-warmup-ef-ebf60169-r64-lr0p008-rottrue-20251217-151755-idx0"

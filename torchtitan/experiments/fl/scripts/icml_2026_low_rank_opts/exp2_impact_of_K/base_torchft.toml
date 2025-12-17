@@ -1117,8 +1117,3 @@ streams = ["stream_40", "stream_41", "stream_42", "stream_43", "stream_44", "str
 
 [mosaic_dataloader.dataset.val.sampling_groups.group_3]
 streams = ["stream_60", "stream_61", "stream_62", "stream_63", "stream_64", "stream_65", "stream_66", "stream_67", "stream_68", "stream_69", "stream_70", "stream_71", "stream_72", "stream_73", "stream_74", "stream_75", "stream_76", "stream_77", "stream_78", "stream_79"]
-
-
-
-
-

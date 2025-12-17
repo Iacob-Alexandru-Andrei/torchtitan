@@ -517,7 +517,7 @@ class GaLore(AdamW):
 
     @torch.no_grad()
     def step(self, closure: Callable[[], Tensor] | None = None) -> Tensor | None:
-        loss = None 
+        loss = None
         if closure is not None:
             with torch.enable_grad():
                 loss = closure()

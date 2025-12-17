@@ -5,7 +5,7 @@ set -euo pipefail
 
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
 REPO_ROOT=$(cd -- "${SCRIPT_DIR}/../../../../../../" && pwd -P)
-echo ${REPO_ROOT} 
+echo ${REPO_ROOT}
 CONFIG_FILE=${CONFIG_FILE:-"${SCRIPT_DIR}/base_torchft_global.toml"}
 TRAIN_MODULE=${TRAIN_MODULE:-"torchtitan.experiments.fl.train"}
 NGPU=${NGPU:-4}

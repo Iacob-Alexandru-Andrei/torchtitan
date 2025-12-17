@@ -895,7 +895,7 @@ class CheckpointManager:
 
         for filename in os.listdir(folder):
             match = re.search(pattern, filename)
-        
+
             # Drop local-only optimizer tensors (e.g., error_feedback) before saving so they are
             # neither synchronized nor required when loading.
             if not match:
