@@ -5,7 +5,7 @@ set -euo pipefail
 
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
 REPO_ROOT=$(cd -- "${SCRIPT_DIR}/../../../../../../" && pwd -P)
-echo ${REPO_ROOT} 
+echo ${REPO_ROOT}
 CONFIG_FILE=${CONFIG_FILE:-"${SCRIPT_DIR}/base_torchft.toml"}
 TRAIN_MODULE=${TRAIN_MODULE:-"torchtitan.experiments.fl.train"}
 NGPU=${NGPU:-4}
@@ -21,10 +21,6 @@ else
 fi
 RUN_PREFIX=${RUN_PREFIX:-"icml2026-exp2-local"}
 TIMESTAMP=$(date +"%Y%m%d-%H%M%S")
-
-# Chain definition (rank, lr, resume path per run).
-declare -a CHAIN_RANKS=(8 16 32 64 128 256)
-declare -a CHAIN_LRS=(0.016 0.008 0.008 0.008 0.016 0.008)
 declare -a CHAIN_RESUME_RUNS=(
 ``	"icml2026-warmed-up-ddp-d99a5257-r8-lr0p016-rottrue-20251128-163213-idx0"
 	"icml2026-warmed-up-ddp-4dd9e45e-r16-lr0p008-rottrue-20251128-163510-idx0"
@@ -34,6 +30,10 @@ declare -a CHAIN_RESUME_RUNS=(
 	"icml2026-warmed-up-ddp-75a6984d-r256-lr0p008-rottrue-20251128-171759-idx0"
 )
 CHAIN_LENGTH=${#CHAIN_RANKS[@]}
+
+# Parameter-sync ablation values. For each (rank,lr,resume) triple we will
+# sweep these sync intervals and keep rotation freq in sync as before.
+declare -a PARAM_SYNC_VALUES=(64 128 256 512 1024)
 
 if (( CHAIN_LENGTH == 0 )); then
 	echo "No GaLore runs specified." >&2
@@ -73,6 +73,7 @@ run_python_config() {
 	local rank=$3
 	local lr=$4
 	local resume_run=$5
+	local param_sync=${6:-32}
 	local rotate_flag=$(normalize_bool "${ROTATE_MOMENTS}")
 	local error_feedback_flag=$(normalize_bool "${USE_ERROR_FEEDBACK}")
 	BASE_CONFIG_PATH="${base_cfg}" \
@@ -86,6 +87,7 @@ run_python_config() {
 	ROTATE_MOMENTS="${rotate_flag}" \
 	USE_ERROR_FEEDBACK="${error_feedback_flag}" \
 	FULL_RANK_THRESHOLD="${FULL_RANK_THRESHOLD}" \
+	PARAM_SYNC="${param_sync}" \
 	uv run --no-sync python3 <<'PY'
 import os
 from pathlib import Path
@@ -101,6 +103,7 @@ output = Path(os.environ["OUTPUT_CONFIG_PATH"])
 pattern = os.environ["SWEEP_REGEX_PATTERN"]
 rank = int(os.environ["TARGET_RANK"])
 lr = float(os.environ["TARGET_LR"])
+param_sync = int(os.environ.get("PARAM_SYNC", "32"))
 
 train_steps = int(os.environ["TRAIN_STEPS"])
 resume_run = os.environ["RESUME_RUN"]
@@ -125,10 +128,11 @@ else:
 		optimizer["name"] = "GaLore"
 		optimizer["galore_rotate_moments_on_refresh"] = rotate_flag
 		optimizer["galore_use_error_feedback"] = use_error_feedback
-		param_sync = optimizer.get("desloc", {}).get("param_sync_every")
-		if param_sync is None:
-				param_sync = optimizer.get("galore_update_proj_gap", 32)
+		# Use the PARAM_SYNC passed from the sweep script (or fall back to config)
+		param_sync = param_sync if 'param_sync' in locals() else optimizer.get("galore_update_proj_gap", 32)
 		optimizer["galore_update_proj_gap"] = param_sync
+		desloc_cfg = optimizer.setdefault("desloc", {})
+		desloc_cfg["param_sync_every"] = param_sync
 		regex_entries = optimizer.get("galore_param_regexes")
 		normalized = []
 		if isinstance(regex_entries, list):
@@ -204,9 +208,12 @@ COMMON_SBATCH_ARGS=(
 [[ -n "${SBATCH_QOS}" ]] && COMMON_SBATCH_ARGS+=(--qos="${SBATCH_QOS}")
 COMMON_SBATCH_ARGS+=("${SBATCH_EXTRA_ARRAY[@]}")
 
-echo "Planned GaLore chain (${CHAIN_LENGTH} runs):"
+echo "Planned GaLore chain (${CHAIN_LENGTH} triples) and ${#PARAM_SYNC_VALUES[@]} sync-values each:"
 for ((idx=0; idx<CHAIN_LENGTH; idx++)); do
 	printf '  [%d] rank=%-4d lr=%-6s resume=%s\n' "${idx}" "${CHAIN_RANKS[$idx]}" "${CHAIN_LRS[$idx]}" "${CHAIN_RESUME_RUNS[$idx]}"
+	for param_sync in "${PARAM_SYNC_VALUES[@]}"; do
+		printf '      - sync=%-4d\n' "${param_sync}"
+	done
 done
 echo ""
 
@@ -218,44 +225,45 @@ for ((idx=0; idx<CHAIN_LENGTH; idx++)); do
 	lr=${CHAIN_LRS[$idx]}
 	resume_run=${CHAIN_RESUME_RUNS[$idx]}
 	lr_tag=${lr/./p}
-	run_suffix=$(printf "idx%02d-r%d-lr%s" $((idx + 1)) "${rank}" "${lr_tag}")
-	run_uuid="${RUN_PREFIX}-${TIMESTAMP}-${run_suffix}"
-	config_path="${GENERATED_CONFIG_DIR}/${run_uuid}.toml"
-	args_file="${ARGS_DIR}/${run_uuid}.args"
-	log_dir="${LOG_ROOT}/${run_uuid}"
-	mkdir -p "${log_dir}"
+	for param_sync in "${PARAM_SYNC_VALUES[@]}"; do
+		run_suffix=$(printf "idx%02d-r%d-lr%s-sync%d" $((idx + 1)) "${rank}" "${lr_tag}" "${param_sync}")
+		run_uuid="${RUN_PREFIX}-${TIMESTAMP}-${run_suffix}"
+		config_path="${GENERATED_CONFIG_DIR}/${run_uuid}.toml"
+		args_file="${ARGS_DIR}/${run_uuid}.args"
+		log_dir="${LOG_ROOT}/${run_uuid}"
+		mkdir -p "${log_dir}"
 
-	run_python_config "${CONFIG_FILE}" "${config_path}" "${rank}" "${lr}" "${resume_run}"
-	write_args_file "${args_file}" "${TRAINING_ARGS[@]}"
+		run_python_config "${CONFIG_FILE}" "${config_path}" "${rank}" "${lr}" "${resume_run}" "${param_sync}"
+		write_args_file "${args_file}" "${TRAINING_ARGS[@]}"
 
-	job_name="galore_chain_r${rank}_lr${lr_tag}"
-	sbatch_args=("${COMMON_SBATCH_ARGS[@]}" --job-name="${job_name}" --output="${SLURM_LOG_DIR}/slurm-${run_uuid}-%j.out")
-	if [[ -n "${previous_job_id}" ]]; then
-		sbatch_args+=(--dependency="afterok:${previous_job_id}")
-	fi
+		job_name="galore_chain_r${rank}_lr${lr_tag}_sync${param_sync}"
+		sbatch_args=("${COMMON_SBATCH_ARGS[@]}" --job-name="${job_name}" --output="${SLURM_LOG_DIR}/slurm-${run_uuid}-%j.out")
+		if [[ -n "${previous_job_id}" ]]; then
+			sbatch_args+=(--dependency="afterok:${previous_job_id}")
+		fi
 
-	# Export run-specific values directly to the sbatch job so we can use a
-	# single-quoted heredoc without triggering premature shell expansion.
-	sbatch_export_arg="ALL"
-	for kv in \
-		"RUN_UUID=${run_uuid}" \
-		"CONFIG_PATH=${config_path}" \
-		"LOG_DIR=${log_dir}" \
-		"ARGS_FILE=${args_file}" \
-		"REPO_ROOT=${REPO_ROOT}" \
-		"TRAIN_MODULE=${TRAIN_MODULE}" \
-		"NGPU=${NGPU}" \
-		"MIN_REPLICAS=${MIN_REPLICAS}" \
-		"QUORUM_TICK_MS=${QUORUM_TICK_MS}" \
-		"LIGHTHOUSE_HOST=${LIGHTHOUSE_HOST}" \
-		"LIGHTHOUSE_PORT=${LIGHTHOUSE_PORT}" \
-		"S3_ENDPOINT_URL=${S3_ENDPOINT_URL}" \
-		"PYTHONPATH=${PYTHONPATH}"; do
-		sbatch_export_arg+="${kv:+,${kv}}"
-	done
-	sbatch_args+=("--export=${sbatch_export_arg}")
+		# Export run-specific values directly to the sbatch job so we can use a
+		# single-quoted heredoc without triggering premature shell expansion.
+		sbatch_export_arg="ALL"
+		for kv in \
+			"RUN_UUID=${run_uuid}" \
+			"CONFIG_PATH=${config_path}" \
+			"LOG_DIR=${log_dir}" \
+			"ARGS_FILE=${args_file}" \
+			"REPO_ROOT=${REPO_ROOT}" \
+			"TRAIN_MODULE=${TRAIN_MODULE}" \
+			"NGPU=${NGPU}" \
+			"MIN_REPLICAS=${MIN_REPLICAS}" \
+			"QUORUM_TICK_MS=${QUORUM_TICK_MS}" \
+			"LIGHTHOUSE_HOST=${LIGHTHOUSE_HOST}" \
+			"LIGHTHOUSE_PORT=${LIGHTHOUSE_PORT}" \
+			"S3_ENDPOINT_URL=${S3_ENDPOINT_URL}" \
+			"PYTHONPATH=${PYTHONPATH}"; do
+			sbatch_export_arg+="${kv:+,${kv}}"
+		done
+		sbatch_args+=("--export=${sbatch_export_arg}")
 
-	sbatch_output=$(sbatch "${sbatch_args[@]}" <<'EOF'
+		sbatch_output=$(sbatch "${sbatch_args[@]}" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
 
@@ -392,3 +400,4 @@ done
 echo ""
 echo "Submitted jobs in chain order: ${SUBMITTED_JOB_IDS[*]}"
 echo "Use 'squeue -u ${USER}' to monitor progress."
+
