@@ -197,6 +197,7 @@ def _build_optimizer_kwargs(config: MosaicOptimizerConfig, extra_kwargs: dict[st
             "dim": config.galore_dim,
             "rotate_moments_on_refresh": config.galore_rotate_moments_on_refresh,
             "use_error_feedback": config.galore_use_error_feedback,
+            "qhm_outside_projection": config.galore_qhm_outside_projection,
         }
         kwargs.update(extra_kwargs)
         return kwargs
