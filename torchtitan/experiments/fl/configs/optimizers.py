@@ -115,9 +115,6 @@ class DesLocConfig:
     low_rank_projector_error_feedback: bool = False
     """Accumulate projector error feedback across rounds before refreshing the SVD basis."""
 
-    low_rank_projector_momentum_weight: float | None = None
-    """Optional blend factor for projector SVD inputs (None => use pseudo-grad only, 1.0 => use exp_avg only)."""
-
     streaming: Suppress[DesLocStreamingConfig | dict[str, Any] | None] = None
     """Optional configuration for streaming DES-LOC."""
 
@@ -284,7 +281,7 @@ class MosaicOptimizerConfig(BaseOptimizer):
     galore_dim: int = 2
     """Expected tensor dimensionality for GaLore projections."""
 
-    galore_v1: float = 0.0
+    galore_vs: tuple[float, ...] = (0.0,)
     """Quasi-hyperbolic coefficient for GaLore first momentum."""
 
     galore_rotate_moments_on_refresh: bool = False
@@ -332,8 +329,8 @@ class MosaicOptimizerConfig(BaseOptimizer):
         if isinstance(self.norm_kwargs, dict):
             self.norm_kwargs = dict(self.norm_kwargs)
 
-        if not 0.0 <= self.galore_v1 <= 1.0:
-            msg = "optimizer.galore_v1 must be in [0, 1]"
+        if not all(0.0 <= v <= 1.0 for v in self.galore_vs):
+            msg = "optimizer.galore_vs must be in [0, 1]"
             raise ValueError(msg)
         if self.galore_rank is not None and self.galore_rank <= 0:
             msg = "optimizer.galore_rank must be positive when set."

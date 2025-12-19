@@ -87,7 +87,6 @@ class ParameterFragmentConfig:
     low_rank_server_update: bool = False
     outer_optimizer_low_rank: bool = False
     low_rank_projector_error_feedback: bool = False
-    low_rank_projector_momentum_weight: float | None = None
 
 
 @dataclass(frozen=True)
@@ -142,7 +141,6 @@ class DesLocControllerConfig:
     low_rank_server_update: bool = False
     outer_optimizer_low_rank: bool = False
     low_rank_projector_error_feedback: bool = False
-    low_rank_projector_momentum_weight: float | None = None
 
 
 @dataclass(frozen=True)
@@ -160,7 +158,6 @@ class DesLocFTOptimizersConfig:
         DesLocOuterOptimizerConfig | Optimizer | list[Optimizer] | None
     ) = None
     streaming: "DesLocStreamingConfig | None" = None
-    low_rank_projector_momentum_weight: float | None = None
 
 
 def _extract_local_tensor(tensor: torch.Tensor) -> torch.Tensor:
@@ -527,14 +524,6 @@ class _ParameterFragment(_BaseFragment):
         self._error_feedback_enabled = bool(
             self._low_rank_enabled and config.low_rank_projector_error_feedback
         )
-        if config.low_rank_projector_momentum_weight is not None:
-            weight = float(config.low_rank_projector_momentum_weight)
-            if weight < 0.0 or weight > 1.0:
-                msg = "low_rank_projector_momentum_weight must be within [0, 1]."
-                raise ValueError(msg)
-            self._projector_momentum_weight: float | None = weight
-        else:
-            self._projector_momentum_weight = None
         self._projector_error_feedback: dict[str, torch.Tensor] = {}
         self._pre_sync_parameters: dict[str, torch.Tensor] = {}
 
@@ -745,83 +734,28 @@ class _ParameterFragment(_BaseFragment):
             left, right = basis
             left = left.to(device=device, dtype=dtype)
             right = right.to(device=device, dtype=dtype)
-            left_rank = left.shape[1]
-            right_rank = right.shape[0]
-            # Accept either a full-shape momentum or a low-rank (projected) momentum.
-            if canonical.shape[0] == left.shape[0] and canonical.shape[1] == right.shape[1]:
-                low_rank = left.transpose(-1, -2) @ canonical @ right.transpose(-1, -2)
-            elif canonical.shape[0] == left_rank and canonical.shape[1] == right_rank:
-                low_rank = canonical
-            else:
+            if canonical.shape[0] != left.shape[0] or canonical.shape[1] != right.shape[1]:
                 return None
+            low_rank = left.transpose(-1, -2) @ canonical @ right.transpose(-1, -2)
             reconstruction = left @ low_rank @ right
         elif proj_type == LEFT_PROJ:
             if not isinstance(basis, torch.Tensor):
                 return None
             left = basis.to(device=device, dtype=dtype)
-            left_rank = left.shape[1]
-            if canonical.shape[0] == left.shape[0]:
-                low_rank = left.transpose(-1, -2) @ canonical
-            elif canonical.shape[0] == left_rank:
-                low_rank = canonical
-            else:
+            if canonical.shape[0] != left.shape[0]:
                 return None
+            low_rank = left.transpose(-1, -2) @ canonical
             reconstruction = left @ low_rank
         else:  # RIGHT_PROJ and defaults
             if not isinstance(basis, torch.Tensor):
                 return None
             right = basis.to(device=device, dtype=dtype)
-            right_rank = right.shape[0]
-            if canonical.shape[1] == right.shape[1]:
-                low_rank = canonical @ right.transpose(-1, -2)
-            elif canonical.shape[1] == right_rank:
-                low_rank = canonical
-            else:
+            if canonical.shape[1] != right.shape[1]:
                 return None
+            low_rank = canonical @ right.transpose(-1, -2)
             reconstruction = low_rank @ right
 
-        reconstruction = reconstruction.to(device=device, dtype=dtype)
-        # If reconstruction matches the input element count, preserve the original shape;
-        # otherwise return the full reconstructed tensor (e.g., when input was low-rank).
-        if reconstruction.numel() == canonical.numel():
-            return reconstruction.reshape(original_shape)
-        return reconstruction
-
-    @staticmethod
-    def _compute_basis_similarity(
-        old_basis: torch.Tensor | list[torch.Tensor],
-        new_basis: torch.Tensor | list[torch.Tensor],
-        proj_type: str,
-    ) -> dict[str, float]:
-        """Return Frobenius-squared similarity of old/new bases using principal angles."""
-
-        def _similarity(a: torch.Tensor, b: torch.Tensor, left_space: bool) -> float:
-            with torch.no_grad():
-                # For left bases (m x r), use Q_new^T Q_old; for right bases (r x n), use Q_new Q_old^T.
-                if left_space:
-                    rmat = a.transpose(-2, -1) @ b
-                else:
-                    rmat = a @ b.transpose(-2, -1)
-                sigma = torch.linalg.svdvals(rmat)
-                return float((sigma.pow(2)).mean().item())
-
-        if proj_type == FULL_PROJ:
-            if not (isinstance(old_basis, list) and isinstance(new_basis, list)):
-                return {}
-            if len(old_basis) != 2 or len(new_basis) != 2:
-                return {}
-            new_left, new_right = new_basis
-            old_left, old_right = old_basis
-            return {
-                "left": _similarity(new_left, old_left, left_space=True),
-                "right": _similarity(new_right, old_right, left_space=False),
-            }
-
-        if isinstance(old_basis, torch.Tensor) and isinstance(new_basis, torch.Tensor):
-            is_left = proj_type == LEFT_PROJ
-            return {"single": _similarity(new_basis, old_basis, left_space=is_left)}
-
-        return {}
+        return reconstruction.reshape(original_shape).to(device=device, dtype=dtype)
 
     def _build_projection_basis(
         self,
@@ -886,36 +820,6 @@ class _ParameterFragment(_BaseFragment):
                 active_feedback_names.add(name)
             base_pseudo_grad = local_snapshot - avg_param
             pseudo_grad = base_pseudo_grad
-            if self._projector_momentum_weight is not None:
-                print("Trying to add the momentum")
-                momentum = state.get("exp_avg")
-                momentum_t: torch.Tensor | None = None
-                if isinstance(momentum, torch.Tensor):
-                    if momentum.shape == base_pseudo_grad.shape:
-                        momentum_t = momentum.to(
-                            device=base_pseudo_grad.device,
-                            dtype=base_pseudo_grad.dtype,
-                        )
-                    else:
-                        print("Momentum shape mismatch; attempting reconstruction.")
-                        basis = state.get("projector_basis")
-                        proj_type = self._decode_projection_type(meta)
-                        reconstructed = self._compute_projector_reconstruction(
-                            momentum,
-                            basis,
-                            proj_type,
-                        )
-                        print("Reconstructed momentum is", reconstructed)
-                        if reconstructed is not None and reconstructed.shape == base_pseudo_grad.shape:
-                            momentum_t = reconstructed.to(
-                                device=base_pseudo_grad.device,
-                                dtype=base_pseudo_grad.dtype,
-                            )
-                if momentum_t is not None:
-                    print("Adding momentum to pseudo_grad")
-                    weight = self._projector_momentum_weight
-                    pseudo_grad = (1.0 - weight) * pseudo_grad + weight * momentum_t
-
             if self._error_feedback_enabled:
                 feedback = self._projector_error_feedback.get(name)
                 if feedback is not None:
@@ -945,10 +849,6 @@ class _ParameterFragment(_BaseFragment):
                         )
                     except Exception:  # pragma: no cover - diagnostics only
                         logger.exception("DES-LOC momentum rotation failed; continuing without rotation.")
-                if old_basis is not None and logger.isEnabledFor(logging.INFO):
-                    similarity = self._compute_basis_similarity(old_basis, basis, proj_type)
-                    if similarity:
-                        logger.info("DES-LOC basis similarity for %s (%s): %s", name, proj_type, similarity)
                 state["projector_basis"] = basis
                 state.pop("_placeholder_projector", None)
                 state.pop("_bootstrap_projector", None)
@@ -1736,7 +1636,6 @@ class DesLocController:
             low_rank_server_update=config.low_rank_server_update,
             outer_optimizer_low_rank=config.outer_optimizer_low_rank,
             low_rank_projector_error_feedback=config.low_rank_projector_error_feedback,
-            low_rank_projector_momentum_weight=config.low_rank_projector_momentum_weight,
         )
         fragment_cls = (
             _OuterOptimizingParameterFragment
@@ -2581,7 +2480,6 @@ class DesLocFTOptimizersContainer(FTOptimizersContainer):
                 low_rank_server_update=desloc_config.low_rank_server_update,
                 outer_optimizer_low_rank=desloc_config.low_rank_outer_optimizer,
                 low_rank_projector_error_feedback=desloc_config.low_rank_projector_error_feedback,
-                low_rank_projector_momentum_weight=desloc_config.low_rank_projector_momentum_weight,
             )
             if streaming_cfg is not None:
                 controller = StreamingDesLocController(controller_config, streaming_cfg)

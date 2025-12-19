@@ -1676,7 +1676,13 @@ class HyperparameterSwitchCallback(Callback):
             elif isinstance(current_value, Sequence) and not isinstance(current_value, (str, bytes)):
                 group[key] = tuple(values)
             elif isinstance(current_value, (float, int)):
-                group[key] = float(values[0])
+                # Preserve tuple semantics for optimizer hyperparams that expect sequences
+                # (e.g., GaLore `vs` and many optimizers' `betas`). For scalar keys
+                # where a single float is appropriate, fall back to a numeric value.
+                if key in ("vs", "betas"):
+                    group[key] = tuple(values)
+                else:
+                    group[key] = float(values[0])
             else:
                 group[key] = tuple(values)
 

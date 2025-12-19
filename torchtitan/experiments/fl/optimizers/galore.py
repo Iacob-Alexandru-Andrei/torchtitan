@@ -7,12 +7,10 @@
 
 from __future__ import annotations
 
-import inspect
 import logging
 import math
 import re
-from collections.abc import Callable, Iterable
-from typing import Any, NamedTuple
+from typing import Any, NamedTuple, TYPE_CHECKING, cast
 
 import torch
 from torch import Tensor
@@ -20,6 +18,9 @@ from torch.optim import AdamW
 
 from ._decoupled_decay import _compute_decay_factor
 from ._metric_utils import prepare_metrics_for_reduction, reduce_metrics_across_ranks
+
+if TYPE_CHECKING:
+    from collections.abc import Callable, Iterable
 
 log = logging.getLogger(__name__)
 
@@ -451,7 +452,7 @@ class GaLore(AdamW):
         eps: float = 1e-8,
         weight_decay: float = 1e-5,
         *,
-        v1: float = 0.0,
+        vs: tuple[float, ...] = (0.0,),
         rank: int | None = None,
         update_proj_gap: int = 200,
         scale: float = 1.0,
@@ -460,6 +461,7 @@ class GaLore(AdamW):
         rank_overrides: dict[Tensor | int, int] | None = None,
         rotate_moments_on_refresh: bool = False,
         use_error_feedback: bool = False,
+        qhm_outside_projection: bool = False,
     ) -> None:
         if lr < 0.0:
             raise ValueError(f"Invalid learning rate: {lr}")
@@ -475,19 +477,25 @@ class GaLore(AdamW):
                 weight_decay,
                 1.0 - weight_decay,
             )
-        if not 0.0 <= v1 <= 1.0:
-            raise ValueError(f"Invalid quasi-hyperbolic parameter v1={v1}")
+        # Validate vs parameters (match QHAdamW style)
+        if not vs or len(vs) < 1:
+            raise ValueError("vs must be a non-empty tuple with at least one element")
+        for i, v in enumerate(vs):
+            if not 0.0 <= v <= 1.0:
+                raise ValueError(f"Invalid vs parameter at index {i}: {v}")
         super().__init__(params=params, lr=lr, betas=betas, eps=eps, weight_decay=weight_decay)
-        self.v1 = v1
+        self.vs = vs
         self.use_error_feedback = use_error_feedback
         self._defaults = {
             "rank": rank,
             "update_proj_gap": update_proj_gap,
             "scale": scale,
+            "vs": vs,
             "proj_type": proj_type,
             "dim": dim,
             "rotate_moments_on_refresh": rotate_moments_on_refresh,
             "use_error_feedback": use_error_feedback,
+            "qhm_outside_projection": qhm_outside_projection,
         }
         overrides: dict[int, int] = {}
         if rank_overrides:
@@ -499,10 +507,12 @@ class GaLore(AdamW):
             group.setdefault("rank", rank)
             group.setdefault("update_proj_gap", update_proj_gap)
             group.setdefault("scale", scale)
+            group.setdefault("vs", vs)
             group.setdefault("proj_type", proj_type)
             group.setdefault("dim", dim)
             group.setdefault("rotate_moments_on_refresh", rotate_moments_on_refresh)
             group.setdefault("use_error_feedback", use_error_feedback)
+            group.setdefault("qhm_outside_projection", qhm_outside_projection)
             group["initial_lr"] = group["lr"]
 
         self.register_load_state_dict_post_hook(
@@ -524,11 +534,15 @@ class GaLore(AdamW):
 
         for group in self.param_groups:
             beta1, beta2 = group["betas"]
+            print(group.get("vs"))
+            print(group.get("qhm_outside_projection", False))
+            v1, *_ = cast("tuple[float,...]", group.get("vs", (0.0,)))
             eps = group["eps"]
             lr = group["lr"]
             weight_decay = group["weight_decay"]
             base_rank = group.get("rank")
             dim = group.get("dim", GALORE_MAX_SUPPORT_DIM)
+            qhm_outside = group.get("qhm_outside_projection", False)
             rotation_context = None
             if group.get("rotate_moments_on_refresh", False):
                 rotation_context = _RotationContext(beta1=beta1, beta2=beta2)
@@ -547,7 +561,11 @@ class GaLore(AdamW):
                 state = self.state[param]
                 if "step" not in state:
                     state["step"] = torch.zeros((), dtype=torch.float32, device=param.device)
-
+                # If we want to mix QHM outside projection, we must keep a reference
+                # to the full rank gradient before overwriting 'grad' with the low-rank version.
+                full_rank_grad = None
+                if use_low_rank and qhm_outside:
+                    full_rank_grad = grad
                 if use_low_rank:
                     state.setdefault(
                         "projector_meta",
@@ -609,13 +627,40 @@ class GaLore(AdamW):
                 bias_correction2 = 1 - torch.pow(beta2_t, step_count)
                 denom = exp_avg_sq.sqrt() / bias_correction2.sqrt() + eps
 
-                if self.v1 == 0.0:
-                    step_tensor = (exp_avg / bias_correction1) / denom
-                else:
-                    blended = (1 - self.v1) * grad + self.v1 * (exp_avg / bias_correction1)
-                    step_tensor = blended / denom
+                # Calculate the adaptive step in low-rank space (Term 2)
+                # This corresponds to: (exp_avg / bias_correction1) / denom
+                adaptive_step_low_rank = (exp_avg / bias_correction1) / denom
+                step_tensor = adaptive_step_low_rank
+                has_been_projected_back = False
 
-                if use_low_rank:
+                if v1 > 0.0:
+                    if use_low_rank and qhm_outside and full_rank_grad is not None:
+                        # Variant: Apply QHM mixing AFTER up-projection.
+                        log.debug("Using scalar-normalized QHM outside projection.")
+                        # 1. Project the adaptive step back to full rank
+                        step_tensor = _project_back(state, step_tensor)
+                        # 2. Normalize the full rank gradient using scalar statistics from the low-rank denom.
+                        # We cannot use the tensor 'denom' directly because it is low-rank.
+                        # We cannot up-project 'denom' because it would be zero in the null space (div by zero).
+                        # We use the mean of the low-rank curvature as a proxy for global curvature.
+                        denom_scalar = denom.mean().item()
+                        # Precondition the full rank gradient (approximate)
+                        # This ensures the units of the gradient term match the adaptive term.
+                        normalized_full_grad = full_rank_grad / (denom_scalar + eps)
+                        # 3. Mix
+                        step_tensor = (1.0 - v1) * normalized_full_grad + v1 * step_tensor
+                        has_been_projected_back = True
+                        print("we should be here")
+                    else:
+                        # Standard Variant: Apply QHM mixing INSIDE the (potentially low-rank) space.
+                        # Here dimensions match, so we can use the exact tensor 'denom'.
+                        print("Using standard QHM inside projection.")
+                        print("v1 =", v1)
+                        print("beta1 =", beta1)
+                        blended = (1 - v1) * grad + v1 * (exp_avg / bias_correction1)
+                        step_tensor = blended / denom
+
+                if use_low_rank and not has_been_projected_back:
                     step_tensor = _project_back(state, step_tensor)
 
                 param.add_(step_tensor, alpha=-lr)
@@ -665,8 +710,9 @@ class GaLore(AdamW):
         eps = self.param_groups[0]["eps"]
         weight_decay = self.param_groups[0]["weight_decay"]
         initial_lr = self.param_groups[0]["initial_lr"]
-
+        qhm_outside = self.param_groups[0].get("qhm_outside_projection", False)
         beta1, beta2 = self.param_groups[0]["betas"]
+        v1, *_ = cast("tuple[float,...]", self.param_groups[0].get("vs", (0.0,)))
         if param in self.state:
             param_optim_state = self.state[param]
             step_state = param_optim_state["step"]
@@ -683,20 +729,45 @@ class GaLore(AdamW):
             grad = param.grad
             meta = param_optim_state.get("projector_meta")
             use_low_rank = meta is not None and meta.get("rank") is not None
+            # Hold reference to full rank grad for outside projection logic
+            full_rank_grad = grad
+            # Project grad to low rank for standard calculations
             if grad is not None and use_low_rank:
                 grad = _project(param_optim_state, grad, param_optim_state["step"])
 
             bias_correction1 = 1 - beta1**step
             bias_correction2 = 1 - beta2**step
+            # --- Common Components ---
             denom = param_optim_state["exp_avg_sq"].sqrt() / math.sqrt(bias_correction2) + eps
-            step_size = lr
-            step_tensor = param_optim_state["exp_avg"] / bias_correction1
-            if self.v1 > 0.0 and grad is not None:
-                step_tensor = (1.0 - self.v1) * grad + self.v1 * step_tensor
-            step_tensor = step_tensor / denom
-            if use_low_rank:
+            m_hat = param_optim_state["exp_avg"] / bias_correction1
+            # The adaptive term (preconditioned momentum)
+            adaptive_step = m_hat / denom
+            step_tensor = adaptive_step
+            has_been_projected_back = False
+
+            # --- Mixing Logic ---
+            if v1 > 0.0 and grad is not None:
+                if use_low_rank and qhm_outside and full_rank_grad is not None:
+                    # Logic A: QHM Outside Projection (Full Rank Mixing)
+                    # 1. Project adaptive term back to full rank
+                    adaptive_step_full = _project_back(param_optim_state, adaptive_step)
+                    # 2. Scalar normalize the full rank gradient
+                    # (approximating the preconditioner with the mean of the low-rank subspace)
+                    denom_scalar = denom.mean().item()
+                    grad_norm = full_rank_grad / (denom_scalar + eps)
+                    # 3. Mix
+                    step_tensor = (1.0 - v1) * grad_norm + v1 * adaptive_step_full
+                    has_been_projected_back = True
+                else:
+                    # Logic B: Standard QHM (Low Rank Mixing)
+                    blended = (1.0 - v1) * grad + v1 * m_hat
+                    step_tensor = blended / denom
+
+            # --- Final Projection ---
+            if use_low_rank and not has_been_projected_back:
                 step_tensor = _project_back(param_optim_state, step_tensor)
-            step_tensor = step_tensor.mul(step_size)
+            # --- Apply LR & Decay ---
+            step_tensor = step_tensor.mul(lr)
 
             if weight_decay != 0:
                 decay_factor = _compute_decay_factor(lr, initial_lr)
