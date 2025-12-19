@@ -10,7 +10,7 @@ from __future__ import annotations
 import logging
 import math
 import re
-from typing import Any, TYPE_CHECKING
+from typing import Any, cast, TYPE_CHECKING
 
 import torch
 from torch import Tensor
@@ -55,7 +55,6 @@ _RUNTIME_PROJECTOR_STATE_KEYS: tuple[str, ...] = (
 
 def _strip_optional_projector_metadata(state: Any) -> None:
     """Remove optional projector metadata fields from serialized state."""
-
     if not isinstance(state, dict):
         return
 
@@ -163,8 +162,9 @@ def _rotate_moments_to_new_basis(
     state["exp_avg_sq"] = v_hat_rot * beta2_corr
 
 
-
-def _basis_similarity(old_basis: ProjectionBasis, new_basis: ProjectionBasis, proj_type: str) -> dict[str, float]:
+def _basis_similarity(
+    old_basis: ProjectionBasis, new_basis: ProjectionBasis, proj_type: str
+) -> dict[str, float]:
     """Compute principal-angle similarity between projector bases.
 
     Similarity is mean(sigma^2) where sigma are singular values of the rotation
@@ -231,14 +231,11 @@ def _proj_name_from_value(value: Any, default: str = STD_PROJ) -> str:
 
 def _canonicalize_projection_tensor(tensor: Tensor) -> Tensor:
     """Ensure tensors have at least 2 dims when building projectors."""
-
     if tensor.ndim >= 2:
         return tensor
     if tensor.ndim == 1:
         return tensor.reshape(-1, 1)
     return tensor.reshape(1, 1)
-
-
 
 
 def _project(
@@ -317,7 +314,11 @@ def _project(
     if proj_type == FULL_PROJ:
         assert isinstance(orthogonal, list)
         a_matrix, b_matrix = orthogonal
-        return a_matrix.T.to(full_rank_grad.device) @ full_rank_grad @ b_matrix.T.to(full_rank_grad.device)
+        return (
+            a_matrix.T.to(full_rank_grad.device)
+            @ full_rank_grad
+            @ b_matrix.T.to(full_rank_grad.device)
+        )
     msg = f"Unsupported projection type {proj_type!r}"
     raise ValueError(msg)
 
@@ -331,13 +332,18 @@ def _project_back(state: dict[str, Any], low_rank_grad: Tensor) -> Tensor:
 
     if isinstance(orthogonal, Tensor):
         matrix = orthogonal.to(low_rank_grad.device)
-        if matrix.shape[0] == low_rank_grad.shape[-1]:
-            restored = low_rank_grad @ matrix
-        else:
-            restored = matrix @ low_rank_grad
+        restored = (
+            low_rank_grad @ matrix
+            if matrix.shape[0] == low_rank_grad.shape[-1]
+            else matrix @ low_rank_grad
+        )
     else:
         a_matrix, b_matrix = orthogonal
-        restored = a_matrix.to(low_rank_grad.device) @ low_rank_grad @ b_matrix.to(low_rank_grad.device)
+        restored = (
+            a_matrix.to(low_rank_grad.device)
+            @ low_rank_grad
+            @ b_matrix.to(low_rank_grad.device)
+        )
 
     restored = restored * scale
     shape_tensor = meta.get("full_rank_shape")
@@ -405,7 +411,7 @@ class GaLoreGlobal(AdamW):
         eps: float = 1e-8,
         weight_decay: float = 1e-5,
         *,
-        v1: float = 0.0,
+        vs: tuple[float, ...] | None = None,
         rank: int | None = None,
         update_proj_gap: int = 200,
         scale: float = 1.0,
@@ -433,11 +439,19 @@ class GaLoreGlobal(AdamW):
                 weight_decay,
                 1.0 - weight_decay,
             )
-        if not 0.0 <= v1 <= 1.0:
-            msg = f"Invalid quasi-hyperbolic parameter v1={v1}"
+        if vs is None:
+            vs = (0.0,)
+        if not vs or len(vs) < 1:
+            msg = "vs must be a non-empty tuple with at least one element"
             raise ValueError(msg)
-        super().__init__(params=params, lr=lr, betas=betas, eps=eps, weight_decay=weight_decay)
-        self.v1 = v1
+        for idx, value in enumerate(vs):
+            if not 0.0 <= value <= 1.0:
+                msg = f"Invalid vs parameter at index {idx}: {value}"
+                raise ValueError(msg)
+        super().__init__(
+            params=params, lr=lr, betas=betas, eps=eps, weight_decay=weight_decay
+        )
+        self.vs = tuple(float(v) for v in vs)
         self.use_error_feedback = use_error_feedback
         self._defaults = {
             "rank": rank,
@@ -447,6 +461,7 @@ class GaLoreGlobal(AdamW):
             "dim": dim,
             "rotate_moments_on_refresh": rotate_moments_on_refresh,
             "use_error_feedback": use_error_feedback,
+            "vs": self.vs,
         }
         overrides: dict[int, int] = {}
         if rank_overrides:
@@ -463,6 +478,7 @@ class GaLoreGlobal(AdamW):
             group.setdefault("rotate_moments_on_refresh", rotate_moments_on_refresh)
             # Use setdefault for backward compatibility with old checkpoints
             group.setdefault("use_error_feedback", use_error_feedback)
+            group.setdefault("vs", self.vs)
             group["initial_lr"] = group["lr"]
 
         self._placeholder_projectors_enabled = False
@@ -479,14 +495,15 @@ class GaLoreGlobal(AdamW):
 
     def load_state_dict(self, state_dict: dict[str, Any]) -> None:  # type: ignore[override]
         """Load optimizer state while preserving configured error-feedback defaults."""
-
         # Backward compatibility: older checkpoints may omit "use_error_feedback" from param groups.
         # Default to the configured runtime flag instead of False so resumed runs keep error feedback on.
         if "param_groups" in state_dict:
             fallback_use_ef = getattr(self, "use_error_feedback", False)
+            fallback_vs = getattr(self, "vs", (0.0,))
             for group in state_dict["param_groups"]:
                 if isinstance(group, dict):
                     group.setdefault("use_error_feedback", fallback_use_ef)
+                    group.setdefault("vs", fallback_vs)
 
         super().load_state_dict(state_dict)
 
@@ -504,6 +521,7 @@ class GaLoreGlobal(AdamW):
             weight_decay = group["weight_decay"]
             base_rank = group.get("rank")
             dim = group.get("dim", GALORE_MAX_SUPPORT_DIM)
+            v1, *_ = cast("tuple[float,...]", group.get("vs", self.vs))
             for param in group["params"]:
                 grad = param.grad
                 if grad is None:
@@ -514,19 +532,25 @@ class GaLoreGlobal(AdamW):
 
                 rank = self._resolve_rank_for_param(param, base_rank)
                 use_low_rank = rank is not None
-                use_error_feedback = group.get("use_error_feedback", False) and use_low_rank
+                use_error_feedback = (
+                    group.get("use_error_feedback", False) and use_low_rank
+                )
                 if use_low_rank and dim > GALORE_MAX_SUPPORT_DIM:
                     msg = "GaLoreGlobal supports tensors up to 2 dimensions."
                     raise NotImplementedError(msg)
 
                 state = self.state[param]
                 if "step" not in state:
-                    state["step"] = torch.zeros((), dtype=torch.float32, device=param.device)
+                    state["step"] = torch.zeros(
+                        (), dtype=torch.float32, device=param.device
+                    )
 
                 # PowerGSD error feedback: Add previous error to gradient
                 if use_error_feedback:
                     if "error_feedback" not in state:
-                        state["error_feedback"] = torch.zeros_like(grad, memory_format=torch.preserve_format)
+                        state["error_feedback"] = torch.zeros_like(
+                            grad, memory_format=torch.preserve_format
+                        )
                     # v = g + e_prev
                     grad = grad + state["error_feedback"]
 
@@ -582,10 +606,10 @@ class GaLoreGlobal(AdamW):
                 bias_correction2 = 1 - torch.pow(beta2_t, step_count)
                 denom = exp_avg_sq.sqrt() / bias_correction2.sqrt() + eps
 
-                if self.v1 == 0.0:
+                if v1 == 0.0:
                     step_tensor = (exp_avg / bias_correction1) / denom
                 else:
-                    blended = (1 - self.v1) * grad + self.v1 * (exp_avg / bias_correction1)
+                    blended = (1 - v1) * grad + v1 * (exp_avg / bias_correction1)
                     step_tensor = blended / denom
 
                 if use_low_rank:
@@ -597,12 +621,16 @@ class GaLoreGlobal(AdamW):
         return loss
 
     @staticmethod
-    def pre_reduce_metrics(optimizer_metrics: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
+    def pre_reduce_metrics(
+        optimizer_metrics: dict[str, torch.Tensor]
+    ) -> dict[str, torch.Tensor]:
         """Prepare metrics for distributed reduction."""
         return prepare_metrics_for_reduction(optimizer_metrics)
 
     @staticmethod
-    def dist_reduce_metrics(optimizer_metrics: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
+    def dist_reduce_metrics(
+        optimizer_metrics: dict[str, torch.Tensor]
+    ) -> dict[str, torch.Tensor]:
         """Reduce metrics across ranks."""
         return reduce_metrics_across_ranks(optimizer_metrics)
 
@@ -640,6 +668,7 @@ class GaLoreGlobal(AdamW):
         initial_lr = self.param_groups[0]["initial_lr"]
 
         beta1, beta2 = self.param_groups[0]["betas"]
+        v1, *_ = cast("tuple[float,...]", self.param_groups[0].get("vs", self.vs))
         if param in self.state:
             param_optim_state = self.state[param]
             step_state = param_optim_state["step"]
@@ -661,11 +690,14 @@ class GaLoreGlobal(AdamW):
 
             bias_correction1 = 1 - beta1**step
             bias_correction2 = 1 - beta2**step
-            denom = param_optim_state["exp_avg_sq"].sqrt() / math.sqrt(bias_correction2) + eps
+            denom = (
+                param_optim_state["exp_avg_sq"].sqrt() / math.sqrt(bias_correction2)
+                + eps
+            )
             step_size = lr
             step_tensor = param_optim_state["exp_avg"] / bias_correction1
-            if self.v1 > 0.0 and grad is not None:
-                step_tensor = (1.0 - self.v1) * grad + self.v1 * step_tensor
+            if v1 > 0.0 and grad is not None:
+                step_tensor = (1.0 - v1) * grad + v1 * step_tensor
             step_tensor = step_tensor / denom
             if use_low_rank:
                 step_tensor = _project_back(param_optim_state, step_tensor)
@@ -673,7 +705,9 @@ class GaLoreGlobal(AdamW):
 
             if weight_decay != 0:
                 decay_factor = _compute_decay_factor(lr, initial_lr)
-                scaling_factor = (decay_factor * weight_decay) / (1 - decay_factor * weight_decay)
+                scaling_factor = (decay_factor * weight_decay) / (
+                    1 - decay_factor * weight_decay
+                )
                 step_tensor.mul_(1 + scaling_factor).add_(param, alpha=scaling_factor)
 
             for metric in self.metric_functions:
@@ -684,12 +718,18 @@ class GaLoreGlobal(AdamW):
                 )
 
             if use_low_rank:
-                eigenvalues, eig_product = self._projector_eigenvalues(param_optim_state, param.device)
+                eigenvalues, eig_product = self._projector_eigenvalues(
+                    param_optim_state, param.device
+                )
                 if eigenvalues is not None:
                     for idx, eig in enumerate(eigenvalues):
-                        optimizer_metrics[f"mean/projection_eigenvalue_{idx}/{name}"] = eig
+                        optimizer_metrics[
+                            f"mean/projection_eigenvalue_{idx}/{name}"
+                        ] = eig
                 if eig_product is not None:
-                    optimizer_metrics[f"mean/projection_eigenvalue_product/{name}"] = eig_product
+                    optimizer_metrics[
+                        f"mean/projection_eigenvalue_product/{name}"
+                    ] = eig_product
 
         return optimizer_metrics
 
@@ -720,7 +760,9 @@ class GaLoreGlobal(AdamW):
                 meta["rank"] = desired_rank
                 meta["update_proj_gap"] = update_proj_gap
                 meta["scale"] = scale
-                meta_proj_type = _proj_name_from_value(meta.get("proj_type", proj_type_name))
+                meta_proj_type = _proj_name_from_value(
+                    meta.get("proj_type", proj_type_name)
+                )
                 meta["proj_type"] = PROJ_TO_CODE[meta_proj_type]
                 resolved_proj_type = _resolve_proj_choice(meta_proj_type, param)
                 meta["resolved_proj_type"] = PROJ_TO_CODE[resolved_proj_type]
@@ -743,13 +785,10 @@ class GaLoreGlobal(AdamW):
                             getattr(param, "_base_name", "<unnamed_param>"),
                         )
                     )
-                    raise RuntimeError(
-                        msg
-                    )
+                    raise RuntimeError(msg)
 
     def enable_placeholder_projectors(self) -> None:
         """Seed identity projectors so optimizer state can initialize safely."""
-
         if self._placeholder_projectors_enabled:
             return
 
@@ -819,7 +858,6 @@ class GaLoreGlobal(AdamW):
 
     def finalize_placeholder_projectors(self) -> None:
         """Mark placeholder projectors safe to remove and perform cleanup."""
-
         self._placeholder_cleanup_ready = True
         self.disable_placeholder_projectors()
 
@@ -841,16 +879,14 @@ class GaLoreGlobal(AdamW):
             effective_rank = min(rank, dim)
             if effective_rank <= 0 or dim <= 0:
                 return None
-            identity = torch.eye(dim, device=device, dtype=dtype)[:effective_rank]
-            return identity
+            return torch.eye(dim, device=device, dtype=dtype)[:effective_rank]
 
         if resolved_proj_type == LEFT_PROJ:
             dim = rows
             effective_rank = min(rank, dim)
             if effective_rank <= 0 or dim <= 0:
                 return None
-            identity = torch.eye(dim, device=device, dtype=dtype)[:, :effective_rank]
-            return identity
+            return torch.eye(dim, device=device, dtype=dtype)[:, :effective_rank]
 
         if resolved_proj_type == FULL_PROJ:
             row_rank = min(rank, rows)
@@ -863,7 +899,9 @@ class GaLoreGlobal(AdamW):
 
         return None
 
-    def _resolve_rank_for_param(self, param: Tensor, fallback: int | None) -> int | None:
+    def _resolve_rank_for_param(
+        self, param: Tensor, fallback: int | None
+    ) -> int | None:
         override = self._param_rank_overrides.get(id(param))
         if override is not None:
             return override
@@ -922,6 +960,7 @@ class GaLoreGlobal(AdamW):
                 beta1=beta1,
                 beta2=beta2,
             )
+
 
 def classify_low_rank_parameters(
     parameter_names: list[str],

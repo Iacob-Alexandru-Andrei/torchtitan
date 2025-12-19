@@ -16,9 +16,15 @@ from torch import nn
 from torchtitan.components.optimizer import OptimizersContainer
 from torchtitan.distributed import ParallelDims
 from torchtitan.experiments.fl.configs.optimizers import MosaicOptimizerConfig
-from torchtitan.experiments.fl.optimizers.galore import GaLore, _project as _project_galore
-from torchtitan.experiments.fl.optimizers.galore_global import GaLoreGlobal, _project as _project_galore_global
 from torchtitan.experiments.fl.optimizer_builder import build_mosaic_optimizers
+from torchtitan.experiments.fl.optimizers.galore import (
+    _project as _project_galore,
+    GaLore,
+)
+from torchtitan.experiments.fl.optimizers.galore_global import (
+    _project as _project_galore_global,
+    GaLoreGlobal,
+)
 
 
 class _TinyModule(nn.Module):
@@ -152,7 +158,9 @@ def test_scion_builder_accepts_custom_zeropower_coefficients() -> None:
 def test_galore_low_rank_states_follow_projected_grad_shape() -> None:
     """GaLore moments should match the projected gradient shape, not parameter shape."""
     module = _TinyModule()
-    optimizer = GaLore(module.parameters(), lr=0.01, betas=(0.9, 0.95), rank=1, update_proj_gap=1)
+    optimizer = GaLore(
+        module.parameters(), lr=0.01, betas=(0.9, 0.95), rank=1, update_proj_gap=1
+    )
 
     module.weight.grad = torch.ones_like(module.weight)
     optimizer.step()
@@ -168,7 +176,9 @@ def test_galore_low_rank_states_follow_projected_grad_shape() -> None:
 def test_galore_state_dict_omits_full_rank_shape_metadata() -> None:
     """GaLore.state_dict() should drop optional projector shape metadata for compatibility."""
     module = _TinyModule()
-    optimizer = GaLore(module.parameters(), lr=0.01, betas=(0.9, 0.95), rank=1, update_proj_gap=1)
+    optimizer = GaLore(
+        module.parameters(), lr=0.01, betas=(0.9, 0.95), rank=1, update_proj_gap=1
+    )
 
     module.weight.grad = torch.ones_like(module.weight)
     optimizer.step()
@@ -189,7 +199,9 @@ def test_galore_state_dict_omits_full_rank_shape_metadata() -> None:
 def test_galore_global_low_rank_states_follow_projected_grad_shape() -> None:
     """GaLoreGlobal should preserve low-rank optimizer state shapes during initialization."""
     param = nn.Parameter(torch.ones(2, 2))
-    optimizer = GaLoreGlobal([param], lr=0.01, betas=(0.9, 0.95), rank=1, update_proj_gap=4)
+    optimizer = GaLoreGlobal(
+        [param], lr=0.01, betas=(0.9, 0.95), rank=1, update_proj_gap=4
+    )
 
     param.grad = torch.ones_like(param)
     optimizer.step()
@@ -209,6 +221,24 @@ def test_galore_global_low_rank_states_follow_projected_grad_shape() -> None:
     assert state["exp_avg"].shape == state["exp_avg_sq"].shape
     assert state["exp_avg"].shape == projected_grad.shape
     assert state["exp_avg"].shape != param.shape
+
+
+def test_galore_global_uses_vs_tuple() -> None:
+    """GaLoreGlobal should expose vs and avoid the legacy v1 attribute."""
+    param = nn.Parameter(torch.ones(2, 2))
+    optimizer = GaLoreGlobal(
+        [param],
+        lr=0.01,
+        betas=(0.9, 0.95),
+        rank=1,
+        update_proj_gap=4,
+        vs=(0.35,),
+    )
+
+    group = optimizer.param_groups[0]
+    assert tuple(group["vs"]) == (pytest.approx(0.35),)
+    with pytest.raises(AttributeError):
+        _ = optimizer.v1
 
 
 def test_galore_global_identity_fallback_matches_eye() -> None:
@@ -421,7 +451,13 @@ def test_galore_regex_param_groups_builds_expected_ranks() -> None:
         builder="mosaic",
         galore_rank=8,
         param_groups=[
-            {"param_str_match": "attn", "rank": 4, "update_proj_gap": 5, "scale": 0.5, "proj_type": "left"},
+            {
+                "param_str_match": "attn",
+                "rank": 4,
+                "update_proj_gap": 5,
+                "scale": 0.5,
+                "proj_type": "left",
+            },
             {"param_str_match": "ffn", "weight_decay": 0.0},
         ],
     )
@@ -435,9 +471,15 @@ def test_galore_regex_param_groups_builds_expected_ranks() -> None:
     ffn_ids = {id(p) for p in module.ffn.parameters()}
     other_ids = {id(p) for p in module.other.parameters()}
 
-    attn_group = next(g for g in optimizer.param_groups if _group_params_ids(g) == attn_ids)
-    ffn_group = next(g for g in optimizer.param_groups if _group_params_ids(g) == ffn_ids)
-    other_group = next(g for g in optimizer.param_groups if _group_params_ids(g) == other_ids)
+    attn_group = next(
+        g for g in optimizer.param_groups if _group_params_ids(g) == attn_ids
+    )
+    ffn_group = next(
+        g for g in optimizer.param_groups if _group_params_ids(g) == ffn_ids
+    )
+    other_group = next(
+        g for g in optimizer.param_groups if _group_params_ids(g) == other_ids
+    )
 
     assert attn_group["rank"] == 4
     assert attn_group["update_proj_gap"] == 5
@@ -478,7 +520,13 @@ def test_galore_rank_regex_overrides_existing_param_groups() -> None:
         ],
     )
 
-    optimizer = next(iter(build_mosaic_optimizers([module], config, _dims(), param_groups=[base_group])))
+    optimizer = next(
+        iter(
+            build_mosaic_optimizers(
+                [module], config, _dims(), param_groups=[base_group]
+            )
+        )
+    )
 
     def _group_params_ids(group: dict) -> set[int]:
         return {id(p) for p in group["params"]}
