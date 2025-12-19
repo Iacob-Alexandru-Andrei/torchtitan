@@ -36,7 +36,7 @@ betas = [0.9, 0.999]
 galore_update_proj_gap = 32 # make this the same to the number of param sync steps!
 galore_scale = 1.0
 galore_dim = 2
-galore_v1 = 0.0
+galore_vs = [0.0]
 galore_rotate_moments_on_refresh = false
 galore_use_error_feedback = true
 # Keep regex-based rank selection identical to the checkpoint.

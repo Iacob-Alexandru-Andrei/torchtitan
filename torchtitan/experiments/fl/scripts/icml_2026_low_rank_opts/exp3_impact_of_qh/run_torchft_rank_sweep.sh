@@ -66,7 +66,7 @@ ROTATE_MOMENTS=${ROTATE_MOMENTS:-true}
 USE_ERROR_FEEDBACK=${USE_ERROR_FEEDBACK:-true}
 GALORE_REGEX_PATTERN=${GALORE_REGEX_PATTERN:-"attention\\.w[qkv]|attention\\.wo|feed_forward\\.w[12]"}
 FULL_RANK_THRESHOLD=${FULL_RANK_THRESHOLD:-256}
-GALORE_V1=${GALORE_V1:-0.5}
+GALORE_VS=${GALORE_VS:-"0.5"}
 GALORE_QHM_OUTSIDE=${GALORE_QHM_OUTSIDE:-true}
 # Hyperparameter switch overrides (comma-separated lists for arrays)
 HP_SWITCH_ENABLED=${HP_SWITCH_ENABLED:-true}
@@ -111,7 +111,7 @@ run_python_config() {
 	ROTATE_MOMENTS="${rotate_flag}" \
 	USE_ERROR_FEEDBACK="${error_feedback_flag}" \
 	FULL_RANK_THRESHOLD="${FULL_RANK_THRESHOLD}" \
-	GALORE_V1="${GALORE_V1}" \
+	GALORE_VS="${GALORE_VS}" \
 	GALORE_QHM_OUTSIDE="${GALORE_QHM_OUTSIDE}" \
 	HP_SWITCH_ENABLED="${HP_SWITCH_ENABLED}" \
 	HP_SWITCH_STEPS="${HP_SWITCH_STEPS}" \
@@ -140,7 +140,6 @@ resume_step = os.environ["RESUME_STEP"]
 rotate_flag = os.environ["ROTATE_MOMENTS"].strip().lower() in {"true", "1", "yes", "on"}
 use_error_feedback = os.environ["USE_ERROR_FEEDBACK"].strip().lower() in {"true", "1", "yes", "on"}
 full_rank_threshold = int(os.environ["FULL_RANK_THRESHOLD"])
-galore_v1 = float(os.environ.get("GALORE_V1", "0.95"))
 # Respect the base config unless the env var is explicitly provided.
 galore_qhm_env = os.environ.get("GALORE_QHM_OUTSIDE")
 if galore_qhm_env is None or galore_qhm_env.strip() == "":
@@ -200,12 +199,12 @@ else:
 								break
 		optimizer["galore_param_regexes"] = normalized
 
-# determine galore vs list from env (GALORE_VS) or fallback to GALORE_V1
+# determine galore vs list from env (GALORE_VS) or fallback to base config/defaults
 galore_vs_env = os.environ.get("GALORE_VS", "").strip()
 if galore_vs_env:
 	galore_vs = [float(x) for x in galore_vs_env.split(",") if x.strip()]
 else:
-	galore_vs = [galore_v1]
+	galore_vs = optimizer.get("galore_vs", [0.0])
 
 # sanitize and assign into optimizer config (primary key expected: galore_vs)
 optimizer["galore_vs"] = galore_vs

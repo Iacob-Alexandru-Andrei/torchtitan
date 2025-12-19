@@ -93,7 +93,7 @@ class SaveDone:
 
 
 class _OptimizerStateLoadShim(Stateful):
-    """Wrap optimizers to strip selected GaLore metadata when loading state."""
+    """Wrap optimizers to normalize state for backward-compatible loading."""
 
     def __init__(
         self,
@@ -119,6 +119,26 @@ class _OptimizerStateLoadShim(Stateful):
             )
         self._cached_tokens: dict[str, Any] = {}
         self._cached_param_group_values: list[dict[str, Any]] = []
+        self._param_group_fallbacks: list[dict[str, Any]] = []
+        self._optimizer_defaults: dict[str, Any] = getattr(optimizer, "defaults", {})
+        if self._drop_param_group_keys:
+            for group in getattr(optimizer, "param_groups", []):
+                fallback: dict[str, Any] = {}
+                for key in self._drop_param_group_keys:
+                    if key in group:
+                        fallback[key] = group[key]
+                    elif key in self._optimizer_defaults:
+                        fallback[key] = self._optimizer_defaults[key]
+                self._param_group_fallbacks.append(fallback)
+
+    def _resolve_param_group_fallback(self, group_idx: int, key: str) -> Any:
+        if group_idx < len(self._param_group_fallbacks):
+            fallback = self._param_group_fallbacks[group_idx]
+            if key in fallback:
+                return fallback[key]
+        if key in self._optimizer_defaults:
+            return self._optimizer_defaults[key]
+        return False
 
     def state_dict(self) -> dict[str, Any]:
         state_dict = self._optimizer.state_dict()
@@ -154,7 +174,9 @@ class _OptimizerStateLoadShim(Stateful):
             patched_state_dict = {
                 key: value
                 for key, value in patched_state_dict.items()
-                if not any(f".{drop_key}" in key for drop_key in self._drop_param_group_keys)
+                if not any(
+                    f".{drop_key}" in key for drop_key in self._drop_param_group_keys
+                )
             }
 
         if not self._drop_tokens:
@@ -182,24 +204,45 @@ class _OptimizerStateLoadShim(Stateful):
         if self._drop_param_group_keys:
             # Update list-style param_groups entries.
             if isinstance(state_dict.get("param_groups"), list):
-                for group in state_dict["param_groups"]:
+                for idx, group in enumerate(state_dict["param_groups"]):
                     for key in self._drop_param_group_keys:
-                        group.setdefault(key, False)
+                        group.setdefault(
+                            key, self._resolve_param_group_fallback(idx, key)
+                        )
 
             # Update flattened param_group entries.
             extra_entries: dict[str, Any] = {}
+            group_indices = set()
             for key in list(state_dict.keys()):
                 if not key.startswith("param_groups."):
                     continue
                 base, _, attr = key.rpartition(".")
                 if not base:
                     continue
+                index_str = base.split(".")[1] if "." in base else ""
+                if index_str.isdigit():
+                    group_indices.add(int(index_str))
                 if attr in self._drop_param_group_keys:
                     continue
                 for drop_key in self._drop_param_group_keys:
                     missing_key = f"{base}.{drop_key}"
                     if missing_key not in state_dict:
-                        extra_entries[missing_key] = False
+                        group_idx = int(index_str) if index_str.isdigit() else 0
+                        extra_entries[missing_key] = self._resolve_param_group_fallback(
+                            group_idx,
+                            drop_key,
+                        )
+            if not group_indices and isinstance(state_dict.get("param_groups"), list):
+                group_indices = set(range(len(state_dict["param_groups"])))
+            for idx in sorted(group_indices):
+                base_key = f"param_groups.{idx}"
+                for drop_key in self._drop_param_group_keys:
+                    missing_key = f"{base_key}.{drop_key}"
+                    if missing_key not in state_dict:
+                        extra_entries[missing_key] = self._resolve_param_group_fallback(
+                            idx,
+                            drop_key,
+                        )
             if extra_entries:
                 patched = dict(state_dict)
                 patched.update(extra_entries)
@@ -225,14 +268,15 @@ class _OptimizerStateLoadShim(Stateful):
                 loaded_param_groups[idx] if idx < len(loaded_param_groups) else {}
             )
             for key in self._drop_param_group_keys:
-                if key in group:
-                    continue
                 if key in loaded_values:
                     group[key] = loaded_values[key]
-                elif key in cached_values:
+                    continue
+                if key in group:
+                    continue
+                if key in cached_values:
                     group[key] = cached_values[key]
-                else:
-                    group[key] = False
+                    continue
+                group[key] = self._resolve_param_group_fallback(idx, key)
 
         self._cached_param_group_values = []
 
@@ -266,8 +310,13 @@ class _OptimizerStateLoadShim(Stateful):
                             continue
                         total_params += 1
                         param_state = inner.state.get(param)
-                        if param_state and param_state.get("projector_basis") is not None:
-                            print("[GaLoreGlobal][checkpoint] parameter has projector basis:")
+                        if (
+                            param_state
+                            and param_state.get("projector_basis") is not None
+                        ):
+                            print(
+                                "[GaLoreGlobal][checkpoint] parameter has projector basis:"
+                            )
                             print(param_state.get("projector_basis"))
                             projector_ready += 1
 
@@ -283,7 +332,9 @@ class _OptimizerStateLoadShim(Stateful):
 class _OptimizerStateSaveShim(Stateful):
     """Wrap optimizers to drop local-only optimizer state before saving."""
 
-    def __init__(self, optimizer: OptimizersContainer, drop_state_keys: tuple[str, ...]) -> None:
+    def __init__(
+        self, optimizer: OptimizersContainer, drop_state_keys: tuple[str, ...]
+    ) -> None:
         self._optimizer = optimizer
         self._drop_state_keys = drop_state_keys
 
@@ -936,9 +987,7 @@ class CheckpointManager:
         if target_step is None:
             step = self._find_load_step(folder=self._ft_folder())
         else:
-            step = self._find_load_step(
-                folder=self._ft_folder(), max_step=target_step
-            )
+            step = self._find_load_step(folder=self._ft_folder(), max_step=target_step)
             if step == -1:
                 logger.warning(
                     "FT checkpoint matching step %s not found; falling back to latest available.",
@@ -1023,9 +1072,24 @@ class CheckpointManager:
         self._optimizer_state_shim = None
         if isinstance(optimizer_state, OptimizersContainer):
             wrapped_states = dict(states)
-            requires_projector_basis = _optimizer_requires_projector_basis(optimizer_state)
-            drop_param_group_keys: tuple[str, ...] = ("use_error_feedback",)
-            drop_tokens = ("initial_projector", "initial_projector_mode") if not requires_projector_basis else tuple()
+            requires_projector_basis = _optimizer_requires_projector_basis(
+                optimizer_state
+            )
+            drop_keys = {"use_error_feedback"}
+            optimizers = getattr(optimizer_state, "optimizers", [])
+            if any(
+                opt.__class__.__name__ in {"GaLore", "GaLoreGlobal"}
+                for opt in optimizers
+            ):
+                drop_keys.add("vs")
+            if any(opt.__class__.__name__ == "GaLore" for opt in optimizers):
+                drop_keys.add("qhm_outside_projection")
+            drop_param_group_keys = tuple(sorted(drop_keys))
+            drop_tokens = (
+                ("initial_projector", "initial_projector_mode")
+                if not requires_projector_basis
+                else tuple()
+            )
             wrapped_states[OPTIMIZER] = _OptimizerStateLoadShim(
                 optimizer_state,
                 drop_projector_state=not requires_projector_basis,
