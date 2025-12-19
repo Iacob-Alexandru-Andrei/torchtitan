@@ -1014,11 +1014,19 @@ class CheckpointManager:
         )
 
     def _flattened_model_states_sd(
-        self, state_dict: dict[str, Any] | None = None
+        self,
+        state_dict: dict[str, Any] | None = None,
+        *,
+        wrap_optimizer_for_save: bool = True,
     ) -> dict[str, Any]:
         """Flatten the model states into a single dictionary.
 
         Note that other states, such as optimizer states, are not flattened.
+
+        Args:
+            state_dict (dict[str, Any] | None): Optional state dictionary to flatten.
+            wrap_optimizer_for_save (bool): Whether to wrap optimizer state to drop
+                save-only keys.
         """
         states = state_dict if state_dict is not None else self.states
 
@@ -1026,7 +1034,11 @@ class CheckpointManager:
         for key, value in states.items():
             if key == MODEL:
                 continue
-            if key == OPTIMIZER and isinstance(value, OptimizersContainer):
+            if (
+                key == OPTIMIZER
+                and isinstance(value, OptimizersContainer)
+                and wrap_optimizer_for_save
+            ):
                 sd[key] = _OptimizerStateSaveShim(value, ("error_feedback",))
             else:
                 sd[key] = value
@@ -1058,7 +1070,10 @@ class CheckpointManager:
             k: v for k, v in self.states.items() if k not in self.exclude_from_loading
         }
 
-        states_to_load = self._flattened_model_states_sd(states_to_load)
+        states_to_load = self._flattened_model_states_sd(
+            states_to_load,
+            wrap_optimizer_for_save=False,
+        )
 
         if self.ft_manager and self.ft_dataloader_loaded:
             states_to_load.pop(DATALOADER, None)
