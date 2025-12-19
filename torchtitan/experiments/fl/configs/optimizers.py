@@ -290,6 +290,11 @@ class MosaicOptimizerConfig(BaseOptimizer):
     galore_use_error_feedback: bool = False
     """Enable powerGSD-style error feedback for low-rank gradient projection."""
 
+    galore_qhm_outside_projection: bool = False
+    """If True, apply QHM / quasi-hyperbolic momentum outside the low-rank projection step.
+    This toggles whether momentum accumulation happens before or after GaLore projection.
+    """
+
     param_groups: list[dict[str, Any]] | tuple[dict[str, Any], ...] | None = None
     """Optional explicit optimizer param groups (e.g., regex-based GaLore overrides)."""
 
