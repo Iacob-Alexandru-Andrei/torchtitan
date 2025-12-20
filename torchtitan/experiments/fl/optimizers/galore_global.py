@@ -420,6 +420,7 @@ class GaLoreGlobal(AdamW):
         rank_overrides: dict[Tensor | int, int] | None = None,
         rotate_moments_on_refresh: bool = False,
         use_error_feedback: bool = False,
+        qhm_outside_projection: bool = False,
     ) -> None:
         if lr < 0.0:
             msg = f"Invalid learning rate: {lr}"
@@ -462,6 +463,7 @@ class GaLoreGlobal(AdamW):
             "rotate_moments_on_refresh": rotate_moments_on_refresh,
             "use_error_feedback": use_error_feedback,
             "vs": self.vs,
+            "qhm_outside_projection": qhm_outside_projection,
         }
         overrides: dict[int, int] = {}
         if rank_overrides:
@@ -476,6 +478,7 @@ class GaLoreGlobal(AdamW):
             group.setdefault("proj_type", proj_type)
             group.setdefault("dim", dim)
             group.setdefault("rotate_moments_on_refresh", rotate_moments_on_refresh)
+            group.setdefault("qhm_outside_projection", qhm_outside_projection)
             # Use setdefault for backward compatibility with old checkpoints
             group.setdefault("use_error_feedback", use_error_feedback)
             group.setdefault("vs", self.vs)
@@ -487,23 +490,27 @@ class GaLoreGlobal(AdamW):
             lambda optimizer: optimizer._repair_projector_states()  # type: ignore[attr-defined]
         )
 
-    def state_dict(self) -> dict[str, Any]:  # type: ignore[override]
-        serialized = super().state_dict()
-        # Strip all projector state for checkpoint compatibility with AdamW
-        _strip_all_projector_state(serialized.get("state"))
-        return serialized
-
     def load_state_dict(self, state_dict: dict[str, Any]) -> None:  # type: ignore[override]
-        """Load optimizer state while preserving configured error-feedback defaults."""
-        # Backward compatibility: older checkpoints may omit "use_error_feedback" from param groups.
-        # Default to the configured runtime flag instead of False so resumed runs keep error feedback on.
+        """Load optimizer state while preserving configured defaults.
+
+        Older checkpoints may omit newer param-group keys (for example
+        `qhm_outside_projection`). When resuming, prefer the runtime
+        configuration present on this optimizer instance rather than
+        silently defaulting to False. This mirrors behavior already used
+        elsewhere (e.g. `GaLore`) and ensures resumed runs keep the
+        intended optimizer semantics.
+        """
         if "param_groups" in state_dict:
+            # Fallbacks from the current runtime instance
             fallback_use_ef = getattr(self, "use_error_feedback", False)
             fallback_vs = getattr(self, "vs", (0.0,))
+            fallback_qhm_outside = self._defaults.get("qhm_outside_projection", False)
             for group in state_dict["param_groups"]:
                 if isinstance(group, dict):
+                    # Preserve runtime flag if checkpoint omits it
                     group.setdefault("use_error_feedback", fallback_use_ef)
                     group.setdefault("vs", fallback_vs)
+                    group.setdefault("qhm_outside_projection", fallback_qhm_outside)
 
         super().load_state_dict(state_dict)
 
@@ -522,6 +529,12 @@ class GaLoreGlobal(AdamW):
             base_rank = group.get("rank")
             dim = group.get("dim", GALORE_MAX_SUPPORT_DIM)
             v1, *_ = cast("tuple[float,...]", group.get("vs", self.vs))
+            qhm_outside = group.get("qhm_outside_projection", False)
+            print(f"GaLoreGlobal step with v1={v1}, qhm_outside_projection={qhm_outside}")
+            rotation_context = None
+            if group.get("rotate_moments_on_refresh", False):
+                # GaLoreGlobal uses explicit beta values when rotating moments
+                rotation_context = (beta1, beta2)
             for param in group["params"]:
                 grad = param.grad
                 if grad is None:
@@ -553,6 +566,11 @@ class GaLoreGlobal(AdamW):
                         )
                     # v = g + e_prev
                     grad = grad + state["error_feedback"]
+
+                # If mixing QHM outside projection is enabled, keep full-rank grad
+                full_rank_grad = None
+                if use_low_rank and qhm_outside:
+                    full_rank_grad = grad
 
                 if use_low_rank:
                     state.setdefault(
@@ -606,13 +624,26 @@ class GaLoreGlobal(AdamW):
                 bias_correction2 = 1 - torch.pow(beta2_t, step_count)
                 denom = exp_avg_sq.sqrt() / bias_correction2.sqrt() + eps
 
-                if v1 == 0.0:
-                    step_tensor = (exp_avg / bias_correction1) / denom
-                else:
-                    blended = (1 - v1) * grad + v1 * (exp_avg / bias_correction1)
-                    step_tensor = blended / denom
+                # Prepare adaptive term (m_hat / denom)
+                adaptive = (exp_avg / bias_correction1)
+                step_tensor = adaptive / denom
+                has_been_projected_back = False
 
-                if use_low_rank:
+                if v1 > 0.0:
+                    if use_low_rank and qhm_outside and full_rank_grad is not None:
+                        # QHM outside projection: mix in full-rank space
+                        adaptive_full = _project_back(state, adaptive)
+                        denom_scalar = denom.mean().item()
+                        normalized_full_grad = full_rank_grad / (denom_scalar + eps)
+                        step_tensor = (1.0 - v1) * normalized_full_grad + v1 * adaptive_full
+                        has_been_projected_back = True
+                        print("Using QHM outside projection mixing.")
+                    else:
+                        blended = (1 - v1) * grad + v1 * adaptive
+                        step_tensor = blended / denom
+                        print("Using QHM inside projection mixing.")
+
+                if use_low_rank and not has_been_projected_back:
                     step_tensor = _project_back(state, step_tensor)
 
                 param.add_(step_tensor, alpha=-lr)
@@ -667,6 +698,8 @@ class GaLoreGlobal(AdamW):
         weight_decay = self.param_groups[0]["weight_decay"]
         initial_lr = self.param_groups[0]["initial_lr"]
 
+        qhm_outside = self.param_groups[0].get("qhm_outside_projection", False)
+
         beta1, beta2 = self.param_groups[0]["betas"]
         v1, *_ = cast("tuple[float,...]", self.param_groups[0].get("vs", self.vs))
         if param in self.state:
@@ -685,23 +718,40 @@ class GaLoreGlobal(AdamW):
             grad = param.grad
             meta = param_optim_state.get("projector_meta")
             use_low_rank = meta is not None and meta.get("rank") is not None
+            # Keep full-rank grad if needed for outside-projection mixing
+            full_rank_grad = grad
             if grad is not None and use_low_rank:
                 grad = _project(param_optim_state, grad)
 
             bias_correction1 = 1 - beta1**step
             bias_correction2 = 1 - beta2**step
+            # --- Common Components ---
             denom = (
                 param_optim_state["exp_avg_sq"].sqrt() / math.sqrt(bias_correction2)
                 + eps
             )
-            step_size = lr
-            step_tensor = param_optim_state["exp_avg"] / bias_correction1
+            m_hat = param_optim_state["exp_avg"] / bias_correction1
+            adaptive_step = m_hat / denom
+            step_tensor = adaptive_step
+            has_been_projected_back = False
+
+            # --- Mixing Logic ---
             if v1 > 0.0 and grad is not None:
-                step_tensor = (1.0 - v1) * grad + v1 * step_tensor
-            step_tensor = step_tensor / denom
-            if use_low_rank:
+                if use_low_rank and qhm_outside and full_rank_grad is not None:
+                    # QHM outside projection: project adaptive term back and mix in full rank
+                    adaptive_step_full = _project_back(param_optim_state, adaptive_step)
+                    denom_scalar = denom.mean().item()
+                    grad_norm = full_rank_grad / (denom_scalar + eps)
+                    step_tensor = (1.0 - v1) * grad_norm + v1 * adaptive_step_full
+                    has_been_projected_back = True
+                else:
+                    blended = (1.0 - v1) * grad + v1 * m_hat
+                    step_tensor = blended / denom
+
+            # --- Final Projection & Scaling ---
+            if use_low_rank and not has_been_projected_back:
                 step_tensor = _project_back(param_optim_state, step_tensor)
-            step_tensor = step_tensor.mul(step_size)
+            step_tensor = step_tensor.mul(lr)
 
             if weight_decay != 0:
                 decay_factor = _compute_decay_factor(lr, initial_lr)
@@ -766,7 +816,6 @@ class GaLoreGlobal(AdamW):
                 meta["proj_type"] = PROJ_TO_CODE[meta_proj_type]
                 resolved_proj_type = _resolve_proj_choice(meta_proj_type, param)
                 meta["resolved_proj_type"] = PROJ_TO_CODE[resolved_proj_type]
-
                 current_rank = _infer_projector_rank(
                     state.get("projector_basis"), resolved_proj_type
                 )

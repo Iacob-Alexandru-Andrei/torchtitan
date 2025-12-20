@@ -1097,7 +1097,6 @@ class CheckpointManager:
                 for opt in optimizers
             ):
                 drop_keys.add("vs")
-            if any(opt.__class__.__name__ == "GaLore" for opt in optimizers):
                 drop_keys.add("qhm_outside_projection")
             drop_param_group_keys = tuple(sorted(drop_keys))
             drop_tokens = (
