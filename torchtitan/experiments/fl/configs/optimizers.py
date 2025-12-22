@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import importlib
 from dataclasses import dataclass, field
-from typing import Any, cast, Literal, TYPE_CHECKING
+from typing import Any, cast, Literal
 
 import torch
 
@@ -17,8 +17,7 @@ from torch.optim import Optimizer
 
 from torchtitan.config import Optimizer as BaseOptimizer
 
-if TYPE_CHECKING:
-    from tyro.conf import Suppress
+from tyro.conf import Suppress
 
 MUON_ZEROpower_COEFFS = (3.4445, -4.7750, 2.0315)
 

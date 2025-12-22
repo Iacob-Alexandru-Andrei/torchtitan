@@ -12,8 +12,8 @@ NGPU=${NGPU:-4}
 MIN_REPLICAS=${MIN_REPLICAS:-${NGPU}}
 QUORUM_TICK_MS=${QUORUM_TICK_MS:-100}
 LIGHTHOUSE_HOST=${LIGHTHOUSE_HOST:-"localhost"}
-LIGHTHOUSE_PORT_BASE=${LIGHTHOUSE_PORT_BASE:-29410}
-RDZV_PORT_BASE=${RDZV_PORT_BASE:-30000}
+LIGHTHOUSE_PORT_BASE=${LIGHTHOUSE_PORT_BASE:-29510}
+RDZV_PORT_BASE=${RDZV_PORT_BASE:-40000}
 # PORT_OFFSET allows running multiple experiments simultaneously without port conflicts.
 # Set PORT_OFFSET=100 for a second experiment, PORT_OFFSET=200 for a third, etc.
 PORT_OFFSET=${PORT_OFFSET:-100}
@@ -23,7 +23,7 @@ if [[ -z "${PYTHONPATH:-}" ]]; then
 else
   PYTHONPATH="${REPO_ROOT}:${PYTHONPATH}"
 fi
-RUN_PREFIX=${RUN_PREFIX:-"icml2026-exp3-global-pg-test"}
+RUN_PREFIX=${RUN_PREFIX:-"icml2026-exp3-global-full-rank-grad"}
 TIMESTAMP=$(date +"%Y%m%d-%H%M%S")
 
 # Chain definition (rank, lr, resume path per run).
@@ -103,13 +103,14 @@ RESUME_STEP=${RESUME_STEP:-2048}
 TRAIN_STEPS=${TRAIN_STEPS:-6144}
 ROTATE_MOMENTS=${ROTATE_MOMENTS:-true}
 LOW_RANK_SERVER_UPDATE=${LOW_RANK_SERVER_UPDATE:-true}
-LOW_RANK_PROJECTOR_ERROR_FEEDBACK=${LOW_RANK_PROJECTOR_ERROR_FEEDBACK:-true}
+LOW_RANK_PROJECTOR_ERROR_FEEDBACK=${LOW_RANK_PROJECTOR_ERROR_FEEDBACK:-false}
 GALORE_USE_ERROR_FEEDBACK=${GALORE_USE_ERROR_FEEDBACK:-true}
+LOW_RANK_PROJECTOR_SOURCE=${LOW_RANK_PROJECTOR_SOURCE:-"full_rank_grad"}
 GALORE_REGEX_PATTERN=${GALORE_REGEX_PATTERN:-"attention\\.w[qkv]|attention\\.wo|feed_forward\\.w[12]"}
 FULL_RANK_THRESHOLD=${FULL_RANK_THRESHOLD:-256}
 GALORE_QHM_OUTSIDE=${GALORE_QHM_OUTSIDE:-true}
 # Hyperparameter switch overrides (comma-separated lists for arrays)
-HP_SWITCH_ENABLED=${HP_SWITCH_ENABLED:-true}
+HP_SWITCH_ENABLED=${HP_SWITCH_ENABLED:-false}
 HP_SWITCH_STEPS=${HP_SWITCH_STEPS:-2048}
 HP_SWITCH_NEW_VS=${HP_SWITCH_NEW_VS:-"0.98,"}
 HP_SWITCH_NEW_BETAS=${HP_SWITCH_NEW_BETAS:-"0.999,0.999"}
@@ -142,6 +143,7 @@ run_python_config() {
 	local error_feedback_flag=$(normalize_bool "${LOW_RANK_PROJECTOR_ERROR_FEEDBACK}")
 	local galore_error_feedback_flag=$(normalize_bool "${GALORE_USE_ERROR_FEEDBACK}")
 	local galore_qhm_outside_flag=$(normalize_bool "${GALORE_QHM_OUTSIDE}")
+	local low_rank_projector_source_val="${LOW_RANK_PROJECTOR_SOURCE}"
 	local hp_switch_enabled_flag=$(normalize_bool "${HP_SWITCH_ENABLED}")
 	local hp_switch_steps_val="${HP_SWITCH_STEPS}"
 	local hp_switch_new_vs_val="${HP_SWITCH_NEW_VS}"
@@ -160,6 +162,7 @@ run_python_config() {
 	DESLOC_PROJECTOR_ERROR_FEEDBACK="${error_feedback_flag}" \
 	GALORE_USE_ERROR_FEEDBACK="${galore_error_feedback_flag}" \
 	GALORE_QHM_OUTSIDE="${galore_qhm_outside_flag}" \
+	DESLOC_PROJECTOR_SOURCE="${low_rank_projector_source_val}" \
 	HP_SWITCH_ENABLED="${hp_switch_enabled_flag}" \
 	HP_SWITCH_STEPS="${hp_switch_steps_val}" \
 	HP_SWITCH_NEW_VS="${hp_switch_new_vs_val}" \
@@ -190,6 +193,19 @@ low_rank_update = os.environ["DESLOC_LOW_RANK_UPDATE"].strip().lower() in {"true
 error_feedback = os.environ["DESLOC_PROJECTOR_ERROR_FEEDBACK"].strip().lower() in {"true", "1", "yes", "on"}
 galore_error_feedback = os.environ["GALORE_USE_ERROR_FEEDBACK"].strip().lower() in {"true", "1", "yes", "on"}
 full_rank_threshold = int(os.environ["FULL_RANK_THRESHOLD"])
+# Read optional DES-LOC projector source override. Accepts e.g. "pseudo_grad" or "full_rank_grad".
+proj_source_env = os.environ.get("DESLOC_PROJECTOR_SOURCE", "").strip()
+if proj_source_env == "":
+	low_rank_projector_source = None
+else:
+	v = proj_source_env.lower()
+	if v in {"full", "full_rank", "full_rank_grad"}:
+		low_rank_projector_source = "full_rank_grad"
+	elif v in {"pseudo", "pseudo_grad"}:
+		low_rank_projector_source = "pseudo_grad"
+	else:
+		# accept literal passthrough for any other value
+		low_rank_projector_source = v
 # Respect the base config unless the env var is explicitly provided.
 galore_qhm_env = os.environ.get("GALORE_QHM_OUTSIDE")
 if galore_qhm_env is None or galore_qhm_env.strip() == "":
@@ -232,6 +248,10 @@ else:
 	optimizer["galore_rotate_moments_on_refresh"] = rotate_flag
 	optimizer["galore_use_error_feedback"] = galore_error_feedback
 	optimizer["galore_update_proj_gap"] = param_sync
+
+# Apply explicit projector source when requested (and only for low-rank mode).
+if not is_full_rank and low_rank_projector_source is not None:
+    desloc_cfg["low_rank_projector_source"] = low_rank_projector_source
 	# Only set/override galore_qhm_outside_projection when the env var was
 	# explicitly provided; otherwise preserve any value present in the base
 	# config (or default to False if not present).
