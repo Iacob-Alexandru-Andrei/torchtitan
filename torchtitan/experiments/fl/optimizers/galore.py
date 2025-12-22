@@ -44,56 +44,6 @@ PROJ_TO_CODE: dict[str, int] = {
 CODE_TO_PROJ: dict[int, str] = {code: name for name, code in PROJ_TO_CODE.items()}
 
 ProjectionBasis = Tensor | list[Tensor]
-_OPTIONAL_PROJECTOR_META_KEYS: tuple[str, ...] = ("full_rank_shape",)
-_RUNTIME_PROJECTOR_STATE_KEYS: tuple[str, ...] = (
-    "_bootstrap_projector",
-    "_placeholder_projector",
-    "_bootstrap_identity_logged",
-    "_placeholder_identity_logged",
-)
-
-
-def _strip_optional_projector_metadata(state: Any) -> None:
-    """Remove optional projector metadata fields from serialized state."""
-
-    if not isinstance(state, dict):
-        return
-
-    for entry in state.values():
-        if not isinstance(entry, dict):
-            continue
-        for key in _RUNTIME_PROJECTOR_STATE_KEYS:
-            entry.pop(key, None)
-        meta = entry.get("projector_meta")
-        if not isinstance(meta, dict):
-            continue
-        for key in _OPTIONAL_PROJECTOR_META_KEYS:
-            meta.pop(key, None)
-
-
-def _strip_all_projector_state(state: Any) -> None:
-    """Remove all projector-related state for checkpoint compatibility.
-
-    This enables GaLore checkpoints to be loaded by AdamW and vice versa.
-    The projector state will be rebuilt by ``_repair_projector_states``
-    after checkpoint loading.
-    """
-    if not isinstance(state, dict):
-        return
-
-    for entry in state.values():
-        if not isinstance(entry, dict):
-            continue
-        # Remove runtime projector keys
-        for key in _RUNTIME_PROJECTOR_STATE_KEYS:
-            entry.pop(key, None)
-        # Remove projector metadata entirely
-        entry.pop("projector_meta", None)
-        # Remove projector basis - will be recomputed on first step
-        entry.pop("projector_basis", None)
-        # Remove error feedback - not needed for checkpoint compatibility
-        entry.pop("error_feedback", None)
-
 
 class _RotationContext(NamedTuple):
     beta1: float
@@ -111,7 +61,8 @@ def _apply_axis_transform(tensor: Tensor, matrix: Tensor, axis: int) -> Tensor:
         reshaped = tensor.reshape(original_shape[0], -1)
         rotated = matrix @ reshaped
         return rotated.reshape(original_shape)
-    raise ValueError(f"Unsupported axis {axis} for GaLore moment rotation.")
+    msg = f"Unsupported axis {axis} for GaLore moment rotation."
+    raise ValueError(msg)
 
 
 def _rotate_moments_to_new_basis(
@@ -164,7 +115,6 @@ def _rotate_moments_to_new_basis(
 
     state["exp_avg"] = rotated_exp_avg
     state["exp_avg_sq"] = v_hat_rot * beta2_corr
-    print("Finished rortating GaLore moment tensors to new basis.")
 
 
 def _infer_projector_rank(
@@ -201,7 +151,8 @@ def _orthogonal_matrix(weights: Tensor, rank: int, proj_type: str) -> Projection
             vh_matrix[:rank, :].to(device=original_device, dtype=original_dtype),
         ]
     else:
-        raise ValueError(f"Unknown projection type {proj_type!r}.")
+        msg = f"Unknown projection type {proj_type!r}."
+        raise ValueError(msg)
 
     return result.to(device=original_device, dtype=original_dtype)
 
@@ -213,7 +164,7 @@ def _basis_similarity(old_basis: ProjectionBasis, new_basis: ProjectionBasis, pr
     between the two subspaces. Returns an empty dict if inputs are incompatible.
     """
 
-    def _sim(a: Tensor, b: Tensor, left_space: bool) -> float:
+    def _sim(a: Tensor, b: Tensor, *, left_space: bool) -> float:
         # For left bases (m x r), use Q_new^T Q_old; for right bases (r x n), use Q_new Q_old^T.
         rot = a.transpose(-2, -1) @ b if left_space else a @ b.transpose(-2, -1)
         sigma = torch.linalg.svdvals(rot)
@@ -222,7 +173,7 @@ def _basis_similarity(old_basis: ProjectionBasis, new_basis: ProjectionBasis, pr
     if proj_type == FULL_PROJ:
         if not (isinstance(old_basis, list) and isinstance(new_basis, list)):
             return {}
-        if len(old_basis) != 2 or len(new_basis) != 2:
+        if len(old_basis) != GALORE_MAX_SUPPORT_DIM or len(new_basis) != GALORE_MAX_SUPPORT_DIM:
             return {}
         new_left, new_right = new_basis
         old_left, old_right = old_basis
@@ -256,8 +207,7 @@ def _proj_name_from_value(value: Any, default: str = STD_PROJ) -> str:
 
 def _canonicalize_projection_tensor(tensor: Tensor) -> Tensor:
     """Ensure tensors have at least 2 dims when building projectors."""
-
-    if tensor.ndim >= 2:
+    if tensor.ndim >= GALORE_MAX_SUPPORT_DIM:
         return tensor
     if tensor.ndim == 1:
         return tensor.reshape(-1, 1)
@@ -294,7 +244,6 @@ def _maybe_refresh_projector(
     should_refresh = orthogonal is None or (iteration % update_proj_gap).item() == 0
     if not should_refresh:
         return
-    print("Refreshing the new-basis")
     new_basis = _orthogonal_matrix(weights, rank, resolved_proj_type)
     if orthogonal is not None:
         similarity = _basis_similarity(orthogonal, new_basis, resolved_proj_type)
@@ -317,7 +266,6 @@ def _maybe_refresh_projector(
         and isinstance(orthogonal, Tensor)
         and isinstance(new_basis, Tensor)
     ):
-        print("Rotating GaLore moment tensors to new basis.")
         _rotate_moments_to_new_basis(
             state,
             old_basis=orthogonal,
@@ -335,7 +283,8 @@ def _project(
     rotation_context: _RotationContext | None = None,
 ) -> Tensor:
     if full_rank_grad.ndim > GALORE_MAX_SUPPORT_DIM:
-        raise NotImplementedError("GaLore currently supports tensors up to rank 2.")
+        msg = "GaLore currently supports tensors up to rank 2."
+        raise NotImplementedError(msg)
 
     original_shape = tuple(full_rank_grad.shape)
     full_rank_grad = _canonicalize_projection_tensor(full_rank_grad)
@@ -354,7 +303,8 @@ def _project(
     _maybe_refresh_projector(state, full_rank_grad, iteration, rotation_context)
     orthogonal = state.get("projector_basis")
     if orthogonal is None:
-        raise RuntimeError("Projection matrix not initialised.")
+        msg = "Projection matrix not initialised."
+        raise RuntimeError(msg)
 
     if proj_type == RIGHT_PROJ:
         assert isinstance(orthogonal, Tensor)
@@ -366,7 +316,8 @@ def _project(
         assert isinstance(orthogonal, list)
         a_matrix, b_matrix = orthogonal
         return a_matrix.T.to(full_rank_grad.device) @ full_rank_grad @ b_matrix.T.to(full_rank_grad.device)
-    raise ValueError(f"Unsupported projection type {proj_type!r}")
+    msg = f"Unsupported projection type {proj_type!r}"
+    raise ValueError(msg)
 
 
 def _project_back(state: dict[str, Any], low_rank_grad: Tensor) -> Tensor:
@@ -378,10 +329,7 @@ def _project_back(state: dict[str, Any], low_rank_grad: Tensor) -> Tensor:
 
     if isinstance(orthogonal, Tensor):
         matrix = orthogonal.to(low_rank_grad.device)
-        if matrix.shape[0] == low_rank_grad.shape[-1]:
-            restored = low_rank_grad @ matrix
-        else:
-            restored = matrix @ low_rank_grad
+        restored = low_rank_grad @ matrix if matrix.shape[0] == low_rank_grad.shape[-1] else matrix @ low_rank_grad
     else:
         a_matrix, b_matrix = orthogonal
         restored = a_matrix.to(low_rank_grad.device) @ low_rank_grad @ b_matrix.to(low_rank_grad.device)
@@ -444,7 +392,7 @@ class GaLore(AdamW):
         ),
     }
 
-    def __init__(
+    def __init__(  # noqa: C901, PLR0913
         self,
         params: Iterable[Tensor] | Iterable[dict],
         lr: float = 1e-3,
@@ -464,13 +412,17 @@ class GaLore(AdamW):
         qhm_outside_projection: bool = False,
     ) -> None:
         if lr < 0.0:
-            raise ValueError(f"Invalid learning rate: {lr}")
+            msg = f"Invalid learning rate: {lr}"
+            raise ValueError(msg)
         if not 0.0 <= betas[0] < 1.0 or not 0.0 <= betas[1] < 1.0:
-            raise ValueError(f"Invalid betas: {betas}")
+            msg = f"Invalid betas: {betas}"
+            raise ValueError(msg)
         if eps < 0.0:
-            raise ValueError(f"Invalid epsilon value: {eps}")
+            msg = f"Invalid epsilon value: {eps}"
+            raise ValueError(msg)
         if weight_decay < 0.0:
-            raise ValueError(f"Invalid weight_decay value: {weight_decay}")
+            msg = f"Invalid weight_decay value: {weight_decay}"
+            raise ValueError(msg)
         if weight_decay >= _HIGH_WEIGHT_DECAY_WARNING:
             log.warning(
                 "High weight_decay=%s for GaLore. Model weights are multiplied by %.6f every step.",
@@ -479,10 +431,12 @@ class GaLore(AdamW):
             )
         # Validate vs parameters (match QHAdamW style)
         if not vs or len(vs) < 1:
-            raise ValueError("vs must be a non-empty tuple with at least one element")
+            msg = "vs must be a non-empty tuple with at least one element"
+            raise ValueError(msg)
         for i, v in enumerate(vs):
             if not 0.0 <= v <= 1.0:
-                raise ValueError(f"Invalid vs parameter at index {i}: {v}")
+                msg = f"Invalid vs parameter at index {i}: {v}"
+                raise ValueError(msg)
         super().__init__(params=params, lr=lr, betas=betas, eps=eps, weight_decay=weight_decay)
         self.vs = vs
         self.use_error_feedback = use_error_feedback
@@ -519,14 +473,9 @@ class GaLore(AdamW):
             lambda optimizer: optimizer._repair_projector_states()  # type: ignore[attr-defined]
         )
 
-    def state_dict(self) -> dict[str, Any]:  # type: ignore[override]
-        serialized = super().state_dict()
-        # Strip all projector state for checkpoint compatibility with AdamW
-        _strip_all_projector_state(serialized.get("state"))
-        return serialized
 
     @torch.no_grad()
-    def step(self, closure: Callable[[], Tensor] | None = None) -> Tensor | None:
+    def step(self, closure: Callable[[], Tensor] | None = None) -> Tensor | None:  # noqa: C901, D102, PLR0912, PLR0915
         loss = None
         if closure is not None:
             with torch.enable_grad():
@@ -534,8 +483,6 @@ class GaLore(AdamW):
 
         for group in self.param_groups:
             beta1, beta2 = group["betas"]
-            print(group.get("vs"))
-            print(group.get("qhm_outside_projection", False))
             v1, *_ = cast("tuple[float,...]", group.get("vs", (0.0,)))
             eps = group["eps"]
             lr = group["lr"]
@@ -552,12 +499,14 @@ class GaLore(AdamW):
                 if grad is None:
                     continue
                 if grad.is_sparse:
-                    raise RuntimeError("GaLore does not support sparse gradients.")
+                    msg = "GaLore does not support sparse gradients."
+                    raise RuntimeError(msg)
 
                 rank = self._resolve_rank_for_param(param, base_rank)
                 use_low_rank = rank is not None
                 if use_low_rank and dim > GALORE_MAX_SUPPORT_DIM:
-                    raise NotImplementedError("GaLore supports tensors up to 2 dimensions.")
+                    msg = "GaLore supports tensors up to 2 dimensions."
+                    raise NotImplementedError(msg)
                 state = self.state[param]
                 if "step" not in state:
                     state["step"] = torch.zeros((), dtype=torch.float32, device=param.device)
@@ -636,7 +585,6 @@ class GaLore(AdamW):
                 if v1 > 0.0:
                     if use_low_rank and qhm_outside and full_rank_grad is not None:
                         # Variant: Apply QHM mixing AFTER up-projection.
-                        log.debug("Using scalar-normalized QHM outside projection.")
                         # 1. Project the adaptive step back to full rank
                         step_tensor = _project_back(state, step_tensor)
                         # 2. Normalize the full rank gradient using scalar statistics from the low-rank denom.
@@ -650,13 +598,10 @@ class GaLore(AdamW):
                         # 3. Mix
                         step_tensor = (1.0 - v1) * normalized_full_grad + v1 * step_tensor
                         has_been_projected_back = True
-                        print("we should be here")
                     else:
                         # Standard Variant: Apply QHM mixing INSIDE the (potentially low-rank) space.
                         # Here dimensions match, so we can use the exact tensor 'denom'.
-                        print("Using standard QHM inside projection.")
-                        print("v1 =", v1)
-                        print("beta1 =", beta1)
+                        log.debug("Using standard QHM inside projection.")
                         blended = (1 - v1) * grad + v1 * (exp_avg / bias_correction1)
                         step_tensor = blended / denom
 
@@ -699,7 +644,7 @@ class GaLore(AdamW):
         eigenvalues = torch.linalg.eigvalsh(proj_matrix).real
         return eigenvalues, torch.prod(eigenvalues)
 
-    def report_per_parameter_metrics(
+    def report_per_parameter_metrics(  # noqa: C901, PLR0912, PLR0915
         self,
         param: torch.Tensor,
         name: str,
@@ -793,7 +738,6 @@ class GaLore(AdamW):
 
     def _repair_projector_states(self) -> None:
         """Ensure projector metadata matches the configured rank after load."""
-
         for group in self.param_groups:
             base_rank = group.get("rank")
             update_proj_gap = group.get("update_proj_gap")
@@ -845,12 +789,11 @@ class GaLore(AdamW):
         return fallback
 
 
-def classify_low_rank_parameters(
+def classify_low_rank_parameters(  # noqa: C901
     parameter_names: list[str],
     optimizer_config: dict | None = None,
 ) -> dict[str, int]:
     """Classify parameter names as low-rank based on config patterns."""
-
     if not optimizer_config:
         return {}
     param_groups = optimizer_config.get("param_groups")

@@ -53,7 +53,7 @@ _RUNTIME_PROJECTOR_STATE_KEYS: tuple[str, ...] = (
 )
 
 
-def _strip_optional_projector_metadata(state: Any) -> None:
+def _strip_projector_metadata(state: Any) -> None:
     """Remove optional projector metadata fields from serialized state."""
     if not isinstance(state, dict):
         return
@@ -68,30 +68,6 @@ def _strip_optional_projector_metadata(state: Any) -> None:
             continue
         for key in _OPTIONAL_PROJECTOR_META_KEYS:
             meta.pop(key, None)
-
-
-def _strip_all_projector_state(state: Any) -> None:
-    """Remove all projector-related state for checkpoint compatibility.
-
-    This enables GaLore checkpoints to be loaded by AdamW and vice versa.
-    The projector state will be rebuilt by ``_repair_projector_states``
-    after checkpoint loading.
-    """
-    if not isinstance(state, dict):
-        return
-
-    for entry in state.values():
-        if not isinstance(entry, dict):
-            continue
-        # Remove runtime projector keys
-        for key in _RUNTIME_PROJECTOR_STATE_KEYS:
-            entry.pop(key, None)
-        # Remove projector metadata entirely
-        entry.pop("projector_meta", None)
-        # Remove projector basis - will be recomputed on first step
-        entry.pop("projector_basis", None)
-        # Remove error feedback - not needed for checkpoint compatibility
-        entry.pop("error_feedback", None)
 
 
 def _apply_axis_transform(tensor: Tensor, matrix: Tensor, axis: int) -> Tensor:
@@ -109,7 +85,7 @@ def _apply_axis_transform(tensor: Tensor, matrix: Tensor, axis: int) -> Tensor:
     raise ValueError(msg)
 
 
-def _rotate_moments_to_new_basis(
+def _rotate_moments_to_new_basis(  # noqa: PLR0913
     state: dict[str, Any],
     *,
     old_basis: Tensor,
@@ -231,14 +207,14 @@ def _proj_name_from_value(value: Any, default: str = STD_PROJ) -> str:
 
 def _canonicalize_projection_tensor(tensor: Tensor) -> Tensor:
     """Ensure tensors have at least 2 dims when building projectors."""
-    if tensor.ndim >= 2:
+    if tensor.ndim >= GALORE_MAX_SUPPORT_DIM:
         return tensor
     if tensor.ndim == 1:
         return tensor.reshape(-1, 1)
     return tensor.reshape(1, 1)
 
 
-def _project(
+def _project(  # noqa: C901
     state: dict[str, Any],
     full_rank_grad: Tensor,
 ) -> Tensor:
@@ -489,6 +465,11 @@ class GaLoreGlobal(AdamW):
         self.register_load_state_dict_post_hook(
             lambda optimizer: optimizer._repair_projector_states()  # type: ignore[attr-defined]
         )
+    def state_dict(self) -> dict[str, Any]:  # type: ignore[override]
+        """Return the optimizer state while preserving projector basis/meta."""
+        serialized = super().state_dict()
+        _strip_projector_metadata(serialized.get("state"))
+        return serialized
 
     def load_state_dict(self, state_dict: dict[str, Any]) -> None:  # type: ignore[override]
         """Load optimizer state while preserving configured defaults.
@@ -515,7 +496,7 @@ class GaLoreGlobal(AdamW):
         super().load_state_dict(state_dict)
 
     @torch.no_grad()
-    def step(self, closure: Callable[[], Tensor] | None = None) -> Tensor | None:
+    def step(self, closure: Callable[[], Tensor] | None = None) -> Tensor | None:  # noqa: C901, D102, PLR0912, PLR0915
         loss = None
         if closure is not None:
             with torch.enable_grad():
@@ -530,11 +511,7 @@ class GaLoreGlobal(AdamW):
             dim = group.get("dim", GALORE_MAX_SUPPORT_DIM)
             v1, *_ = cast("tuple[float,...]", group.get("vs", self.vs))
             qhm_outside = group.get("qhm_outside_projection", False)
-            print(f"GaLoreGlobal step with v1={v1}, qhm_outside_projection={qhm_outside}")
-            rotation_context = None
-            if group.get("rotate_moments_on_refresh", False):
-                # GaLoreGlobal uses explicit beta values when rotating moments
-                rotation_context = (beta1, beta2)
+            log.debug(f"GaLoreGlobal step with v1={v1}, qhm_outside_projection={qhm_outside}")  # noqa: G004
             for param in group["params"]:
                 grad = param.grad
                 if grad is None:
@@ -564,7 +541,6 @@ class GaLoreGlobal(AdamW):
                         state["error_feedback"] = torch.zeros_like(
                             grad, memory_format=torch.preserve_format
                         )
-                    # v = g + e_prev
                     grad = grad + state["error_feedback"]
 
                 # If mixing QHM outside projection is enabled, keep full-rank grad
@@ -637,11 +613,11 @@ class GaLoreGlobal(AdamW):
                         normalized_full_grad = full_rank_grad / (denom_scalar + eps)
                         step_tensor = (1.0 - v1) * normalized_full_grad + v1 * adaptive_full
                         has_been_projected_back = True
-                        print("Using QHM outside projection mixing.")
+                        log.debug("Using QHM outside projection mixing.")
                     else:
                         blended = (1 - v1) * grad + v1 * adaptive
                         step_tensor = blended / denom
-                        print("Using QHM inside projection mixing.")
+                        log.debug("Using QHM inside projection mixing.")
 
                 if use_low_rank and not has_been_projected_back:
                     step_tensor = _project_back(state, step_tensor)
@@ -686,7 +662,7 @@ class GaLoreGlobal(AdamW):
         eigenvalues = torch.linalg.eigvalsh(proj_matrix).real
         return eigenvalues, torch.prod(eigenvalues)
 
-    def report_per_parameter_metrics(
+    def report_per_parameter_metrics(  # noqa: C901, PLR0912, PLR0915
         self,
         param: torch.Tensor,
         name: str,
@@ -884,7 +860,7 @@ class GaLoreGlobal(AdamW):
                 state["projector_basis"] = basis
                 state["_placeholder_projector"] = True
 
-    def disable_placeholder_projectors(self, force: bool = False) -> None:
+    def disable_placeholder_projectors(self, *, force: bool = False) -> None:
         """Remove placeholder projectors once real server projectors are ready."""
         if not self._placeholder_projectors_enabled:
             return
@@ -911,7 +887,7 @@ class GaLoreGlobal(AdamW):
         self.disable_placeholder_projectors()
 
     @staticmethod
-    def _build_identity_projector(
+    def _build_identity_projector(  # noqa: PLR0911
         canonical_tensor: Tensor,
         rank: int,
         resolved_proj_type: str,
@@ -956,7 +932,7 @@ class GaLoreGlobal(AdamW):
             return override
         return fallback
 
-    def rotate_momenta(
+    def rotate_momenta(  # noqa: C901
         self,
         param: Tensor,
         *,
@@ -1011,7 +987,7 @@ class GaLoreGlobal(AdamW):
             )
 
 
-def classify_low_rank_parameters(
+def classify_low_rank_parameters(  # noqa: C901
     parameter_names: list[str],
     optimizer_config: dict | None = None,
 ) -> dict[str, int]:

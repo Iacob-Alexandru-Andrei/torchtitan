@@ -66,10 +66,10 @@ ROTATE_MOMENTS=${ROTATE_MOMENTS:-true}
 USE_ERROR_FEEDBACK=${USE_ERROR_FEEDBACK:-true}
 GALORE_REGEX_PATTERN=${GALORE_REGEX_PATTERN:-"attention\\.w[qkv]|attention\\.wo|feed_forward\\.w[12]"}
 FULL_RANK_THRESHOLD=${FULL_RANK_THRESHOLD:-256}
-GALORE_VS=${GALORE_VS:-"0.5"}
-GALORE_QHM_OUTSIDE=${GALORE_QHM_OUTSIDE:-true}
+GALORE_VS=${GALORE_VS:-"0.0"}
+GALORE_QHM_OUTSIDE=${GALORE_QHM_OUTSIDE:-false}
 # Hyperparameter switch overrides (comma-separated lists for arrays)
-HP_SWITCH_ENABLED=${HP_SWITCH_ENABLED:-true}
+HP_SWITCH_ENABLED=${HP_SWITCH_ENABLED:-false}
 HP_SWITCH_STEPS=${HP_SWITCH_STEPS:-2048}
 HP_SWITCH_NEW_VS=${HP_SWITCH_NEW_VS:-"0.95,"}
 HP_SWITCH_NEW_BETAS=${HP_SWITCH_NEW_BETAS:-"0.999,0.999"}
@@ -423,7 +423,7 @@ for ((replica_id=0; replica_id<NGPU; replica_id++)); do
 		cd "${REPO_ROOT}"
 		export CUDA_VISIBLE_DEVICES="${gpu_id}"
 		export PYTORCH_ALLOC_CONF="expandable_segments:True"
-		rdzv_port=$((30000 + replica_id))
+		rdzv_port=$((40000 + replica_id))
 		uv run --no-sync torchrun \
 			--nproc_per_node=1 \
 			--rdzv_backend=c10d \
