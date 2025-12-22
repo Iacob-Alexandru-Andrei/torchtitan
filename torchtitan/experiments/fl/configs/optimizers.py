@@ -9,15 +9,16 @@ from __future__ import annotations
 
 import importlib
 from dataclasses import dataclass, field
-from typing import Any, cast, Literal
-
-from tyro.conf import Suppress
+from typing import Any, cast, Literal, TYPE_CHECKING
 
 import torch
 
 from torch.optim import Optimizer
 
 from torchtitan.config import Optimizer as BaseOptimizer
+
+if TYPE_CHECKING:
+    from tyro.conf import Suppress
 
 MUON_ZEROpower_COEFFS = (3.4445, -4.7750, 2.0315)
 
@@ -53,7 +54,9 @@ class DesLocStreamingConfig:
     fragment_sync_offsets: tuple[int, ...] | list[int] | None = None
     """Optional explicit fragment sync offsets within the DES-LOC window."""
 
-    fragment_strategy: Literal["strided", "sequential", "balanced", "custom"] = "strided"
+    fragment_strategy: Literal[
+        "strided", "sequential", "balanced", "custom"
+    ] = "strided"
     """Strategy used to group parameters into fragments."""
 
     custom_fragments: tuple[tuple[str, ...], ...] | list[list[str]] | None = None
@@ -114,6 +117,9 @@ class DesLocConfig:
 
     low_rank_projector_error_feedback: bool = False
     """Accumulate projector error feedback across rounds before refreshing the SVD basis."""
+
+    low_rank_projector_source: Literal["pseudo_grad", "full_rank_grad"] = "pseudo_grad"
+    """Select which tensor to aggregate for DES-LOC GaLore projector refreshes."""
 
     streaming: Suppress[DesLocStreamingConfig | dict[str, Any] | None] = None
     """Optional configuration for streaming DES-LOC."""
@@ -298,7 +304,9 @@ class MosaicOptimizerConfig(BaseOptimizer):
     param_groups: list[dict[str, Any]] | tuple[dict[str, Any], ...] | None = None
     """Optional explicit optimizer param groups (e.g., regex-based GaLore overrides)."""
 
-    galore_param_regexes: list[dict[str, Any]] | tuple[dict[str, Any], ...] | None = None
+    galore_param_regexes: list[dict[str, Any]] | tuple[
+        dict[str, Any], ...
+    ] | None = None
     """Optional lightweight GaLore rank overrides specified as regex patterns."""
 
     def __post_init__(self) -> None:

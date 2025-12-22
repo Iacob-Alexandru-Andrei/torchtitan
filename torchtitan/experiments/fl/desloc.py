@@ -15,14 +15,12 @@ from collections import defaultdict
 from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass
 from datetime import timedelta
-from types import ModuleType
-from typing import Any, TYPE_CHECKING, Sequence
 from fnmatch import fnmatch
+from types import ModuleType
+from typing import Any, Literal, TYPE_CHECKING
 
 import torch
 from torch import nn
-from torch.distributed.distributed_c10d import Work
-from torch.utils.hooks import RemovableHandle
 from torch.optim import Optimizer
 
 try:  # pragma: no cover - optional dependency in some environments
@@ -56,7 +54,10 @@ if _MODULE_PROXY is None:
 _MODULE_PROXY.__dict__.update(globals())
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterable, Iterator
+    from collections.abc import Callable, Iterable, Iterator, Sequence
+
+    from torch.distributed.distributed_c10d import Work
+    from torch.utils.hooks import RemovableHandle
 
     from torchtitan.components.ft.manager import FTManager
 from torchtitan.experiments.fl.configs.optimizers import (
@@ -79,7 +80,9 @@ class ParameterFragmentConfig:
     backup_device: torch.device | None
     pin_memory: bool
     name_prefix: str
-    outer_optimizer: DesLocOuterOptimizerConfig | Optimizer | list[Optimizer] | None = None
+    outer_optimizer: DesLocOuterOptimizerConfig | Optimizer | list[
+        Optimizer
+    ] | None = None
     local_optimizer: Optimizer | None = None
     log_outer_metrics: bool = False
     metrics_logger: Callable[[dict[str, float]], None] | None = None
@@ -87,6 +90,7 @@ class ParameterFragmentConfig:
     low_rank_server_update: bool = False
     outer_optimizer_low_rank: bool = False
     low_rank_projector_error_feedback: bool = False
+    low_rank_projector_source: Literal["pseudo_grad", "full_rank_grad"] = "pseudo_grad"
 
 
 @dataclass(frozen=True)
@@ -141,6 +145,7 @@ class DesLocControllerConfig:
     low_rank_server_update: bool = False
     outer_optimizer_low_rank: bool = False
     low_rank_projector_error_feedback: bool = False
+    low_rank_projector_source: Literal["pseudo_grad", "full_rank_grad"] = "pseudo_grad"
 
 
 @dataclass(frozen=True)
@@ -157,12 +162,16 @@ class DesLocFTOptimizersConfig:
     outer_optimizer: (
         DesLocOuterOptimizerConfig | Optimizer | list[Optimizer] | None
     ) = None
-    streaming: "DesLocStreamingConfig | None" = None
+    streaming: DesLocStreamingConfig | None = None
 
 
 def _extract_local_tensor(tensor: torch.Tensor) -> torch.Tensor:
     """Return a detached clone of ``tensor`` on its local device."""
-    local = tensor.to_local() if DTensor is not None and isinstance(tensor, DTensor) else tensor
+    local = (
+        tensor.to_local()
+        if DTensor is not None and isinstance(tensor, DTensor)
+        else tensor
+    )
     return local.detach().clone()
 
 
@@ -278,9 +287,7 @@ def _partition_balanced(
     buckets: list[list[tuple[int, str, nn.Parameter]]] = [[] for _ in range(fragments)]
     bucket_sizes = [0 for _ in range(fragments)]
 
-    indexed = [
-        (idx, name, param) for idx, (name, param) in enumerate(named_params)
-    ]
+    indexed = [(idx, name, param) for idx, (name, param) in enumerate(named_params)]
     indexed.sort(key=lambda item: item[2].numel(), reverse=True)
 
     for original_idx, name, param in indexed:
@@ -318,9 +325,7 @@ def _partition_from_custom_spec(
     for bucket_idx, selectors in enumerate(buckets_spec):
         bucket: list[tuple[str, nn.Parameter]] = []
         for selector in selectors:
-            matches = [
-                name for name in list(remaining) if fnmatch(name, selector)
-            ]
+            matches = [name for name in list(remaining) if fnmatch(name, selector)]
             if not matches:
                 msg = (
                     f"DES-LOC custom fragment {bucket_idx} selector '{selector}' "
@@ -334,7 +339,7 @@ def _partition_from_custom_spec(
             partitions.append(bucket)
 
     if remaining:
-        unused = ", ".join(list(sorted(remaining))[:3])
+        unused = ", ".join(sorted(remaining)[:3])
         msg = (
             "DES-LOC custom fragments must cover every parameter; "
             f"remaining parameters include: {unused}..."
@@ -504,7 +509,9 @@ class _ParameterFragment(_BaseFragment):
             optimizer_cls = outer_spec.resolve_optimizer_cls()
             params = [p for p in self._model.parameters() if p.requires_grad]
             if not params:
-                msg = "DES-LOC outer optimizer requires at least one trainable parameter."
+                msg = (
+                    "DES-LOC outer optimizer requires at least one trainable parameter."
+                )
                 raise ValueError(msg)
             self._outer_optimizer = optimizer_cls(params, **outer_spec.kwargs)
         elif outer_spec is not None:
@@ -518,36 +525,55 @@ class _ParameterFragment(_BaseFragment):
             and isinstance(self._local_optimizer, GaLoreGlobal)
         )
         self._outer_low_rank_enabled = bool(
-            config.outer_optimizer_low_rank
-            and self._outer_optimizer is not None
+            config.outer_optimizer_low_rank and self._outer_optimizer is not None
         )
         self._error_feedback_enabled = bool(
             self._low_rank_enabled and config.low_rank_projector_error_feedback
         )
+        self._low_rank_projector_source = config.low_rank_projector_source
+        if self._low_rank_projector_source not in ("pseudo_grad", "full_rank_grad"):
+            msg = (
+                "desloc.low_rank_projector_source must be 'pseudo_grad' or "
+                f"'full_rank_grad'; received {self._low_rank_projector_source!r}."
+            )
+            raise ValueError(msg)
         self._projector_error_feedback: dict[str, torch.Tensor] = {}
         self._pre_sync_parameters: dict[str, torch.Tensor] = {}
+        self._averaged_gradients: dict[str, torch.Tensor] = {}
 
         self._init_backup_storage()
         self.save_state()
         if self._outer_optimizer is not None:
             self._reference_synced = True
 
-    def set_metrics_logger(self, logger_fn: Callable[[dict[str, float]], None] | None) -> None:
+    def set_metrics_logger(
+        self, logger_fn: Callable[[dict[str, float]], None] | None
+    ) -> None:
         self._metrics_logger = logger_fn
 
     def _init_backup_storage(self) -> None:
         for name, param in self._model.named_parameters():
             local_tensor = _extract_local_tensor(param.data)
-            device = self._backup_device if self._backup_device is not None else local_tensor.device
+            device = (
+                self._backup_device
+                if self._backup_device is not None
+                else local_tensor.device
+            )
             backup = torch.empty_like(local_tensor, device=device)
-            if self._pin_memory and backup.device.type == "cpu" and torch.cuda.is_available():
+            if (
+                self._pin_memory
+                and backup.device.type == "cpu"
+                and torch.cuda.is_available()
+            ):
                 backup = backup.pin_memory()
             self._original_parameters[name] = backup
 
     def save_state(self) -> None:
         with torch.no_grad():
             for name, param in self._model.named_parameters():
-                self._original_parameters[name].copy_(_extract_local_tensor(param.data), non_blocking=True)
+                self._original_parameters[name].copy_(
+                    _extract_local_tensor(param.data), non_blocking=True
+                )
 
     def restore_state(self) -> None:
         with torch.no_grad():
@@ -562,10 +588,21 @@ class _ParameterFragment(_BaseFragment):
         work_items: list[Any] = []
         if self._low_rank_enabled:
             self._pre_sync_parameters.clear()
+            if self._low_rank_projector_source == "full_rank_grad":
+                self._averaged_gradients.clear()
         for name, param in self._model.named_parameters():
             avg_param = _extract_local_tensor(param.data)
             if self._low_rank_enabled:
                 self._pre_sync_parameters[name] = avg_param.clone()
+                if self._low_rank_projector_source == "full_rank_grad":
+                    grad = param.grad
+                    grad_tensor = (
+                        torch.zeros_like(avg_param)
+                        if grad is None
+                        else _extract_local_tensor(grad)
+                    )
+                    self._averaged_gradients[name] = grad_tensor
+                    work_items.append(self._manager.allreduce(grad_tensor))
             work_items.append(self._manager.allreduce(avg_param))
             self._averaged_parameters.append((name, avg_param))
 
@@ -601,6 +638,7 @@ class _ParameterFragment(_BaseFragment):
             if self._low_rank_enabled:
                 self._update_low_rank_projectors()
                 self._pre_sync_parameters.clear()
+                self._averaged_gradients.clear()
             return
 
         pseudo_norm_sq = 0.0
@@ -634,13 +672,16 @@ class _ParameterFragment(_BaseFragment):
             if self._low_rank_enabled:
                 self._update_low_rank_projectors()
                 self._pre_sync_parameters.clear()
+                self._averaged_gradients.clear()
             return
 
         self._outer_optimizer.step()
         _zero_optimizer_grads(self._outer_optimizer)
 
         if self._log_outer_metrics and self._metrics_logger is not None:
-            metrics: dict[str, float] = {"desloc_outer/pseudo_grad_l2": math.sqrt(max(pseudo_norm_sq, 0.0))}
+            metrics: dict[str, float] = {
+                "desloc_outer/pseudo_grad_l2": math.sqrt(max(pseudo_norm_sq, 0.0))
+            }
             momentum_norm_sq = 0.0
             has_momentum = False
             if isinstance(self._outer_optimizer, torch.optim.SGD):
@@ -650,15 +691,20 @@ class _ParameterFragment(_BaseFragment):
                         has_momentum = True
                         momentum_norm_sq += buffer.pow(2).sum().item()
             if has_momentum:
-                metrics["desloc_outer/momentum_l2"] = math.sqrt(max(momentum_norm_sq, 0.0))
+                metrics["desloc_outer/momentum_l2"] = math.sqrt(
+                    max(momentum_norm_sq, 0.0)
+                )
             try:
                 self._metrics_logger(metrics)
             except Exception:  # pragma: no cover - diagnostics only
-                logger.exception("DES-LOC failed to log outer optimizer metrics; continuing.")
+                logger.exception(
+                    "DES-LOC failed to log outer optimizer metrics; continuing."
+                )
 
         if self._low_rank_enabled:
             self._update_low_rank_projectors()
             self._pre_sync_parameters.clear()
+            self._averaged_gradients.clear()
 
     def register_state_dict_fn(self) -> None:
         def load_fn(state_dict: dict[str, torch.Tensor]) -> None:
@@ -734,7 +780,10 @@ class _ParameterFragment(_BaseFragment):
             left, right = basis
             left = left.to(device=device, dtype=dtype)
             right = right.to(device=device, dtype=dtype)
-            if canonical.shape[0] != left.shape[0] or canonical.shape[1] != right.shape[1]:
+            if (
+                canonical.shape[0] != left.shape[0]
+                or canonical.shape[1] != right.shape[1]
+            ):
                 return None
             low_rank = left.transpose(-1, -2) @ canonical @ right.transpose(-1, -2)
             reconstruction = left @ low_rank @ right
@@ -757,6 +806,38 @@ class _ParameterFragment(_BaseFragment):
 
         return reconstruction.reshape(original_shape).to(device=device, dtype=dtype)
 
+    def _select_projector_signal(
+        self,
+        *,
+        name: str,
+        base_pseudo_grad: torch.Tensor | None,
+    ) -> torch.Tensor | None:
+        """Return the tensor used to refresh GaLore projector bases.
+
+        Parameters:
+            name: Parameter name for lookup in the cached gradients.
+            base_pseudo_grad: Pseudo-gradient computed from synced parameters.
+
+        Returns:
+            The tensor to feed into the projector SVD update.
+        """
+        if self._low_rank_projector_source == "full_rank_grad":
+            full_rank_grad = self._averaged_gradients.get(name)
+            if full_rank_grad is None:
+                logger.debug(
+                    "DES-LOC projector refresh missing full-rank grad for %s.",
+                    name,
+                )
+                return base_pseudo_grad
+            if base_pseudo_grad is not None and full_rank_grad.shape != base_pseudo_grad.shape:
+                logger.warning(
+                    "DES-LOC projector refresh gradient shape mismatch for %s.",
+                    name,
+                )
+                return base_pseudo_grad
+            return full_rank_grad
+        return base_pseudo_grad
+
     def _build_projection_basis(
         self,
         pseudo_grad: torch.Tensor,
@@ -775,7 +856,7 @@ class _ParameterFragment(_BaseFragment):
         if not torch.isfinite(matrix).all() or matrix.abs().max().item() == 0:
             matrix = torch.randn_like(matrix)
 
-        reduced_rank = min(rank, min(matrix.shape))
+        reduced_rank = min(rank, *matrix.shape)
         if reduced_rank <= 0:
             return None
 
@@ -785,9 +866,13 @@ class _ParameterFragment(_BaseFragment):
             v_h = v_h[:reduced_rank, :].contiguous()
         except RuntimeError:
             # Fall back to random orthogonal bases when SVD fails.
-            u_rand = torch.randn(matrix.shape[0], reduced_rank, device=matrix.device, dtype=matrix.dtype)
+            u_rand = torch.randn(
+                matrix.shape[0], reduced_rank, device=matrix.device, dtype=matrix.dtype
+            )
             u, _ = torch.linalg.qr(u_rand, mode="reduced")
-            v_h = torch.randn(reduced_rank, matrix.shape[1], device=matrix.device, dtype=matrix.dtype)
+            v_h = torch.randn(
+                reduced_rank, matrix.shape[1], device=matrix.device, dtype=matrix.dtype
+            )
 
         proj_type = self._decode_projection_type(meta)
         if proj_type == FULL_PROJ:
@@ -819,19 +904,24 @@ class _ParameterFragment(_BaseFragment):
             if self._error_feedback_enabled:
                 active_feedback_names.add(name)
             base_pseudo_grad = local_snapshot - avg_param
-            pseudo_grad = base_pseudo_grad
+            projector_signal = self._select_projector_signal(
+                name=name,
+                base_pseudo_grad=base_pseudo_grad,
+            )
+            if projector_signal is None:
+                continue
             if self._error_feedback_enabled:
                 feedback = self._projector_error_feedback.get(name)
                 if feedback is not None:
-                    if feedback.shape == base_pseudo_grad.shape:
-                        pseudo_grad = pseudo_grad + feedback.to(
-                            device=base_pseudo_grad.device,
-                            dtype=base_pseudo_grad.dtype,
+                    if feedback.shape == projector_signal.shape:
+                        projector_signal = projector_signal + feedback.to(
+                            device=projector_signal.device,
+                            dtype=projector_signal.dtype,
                         )
                     else:
                         self._projector_error_feedback.pop(name, None)
             basis = self._build_projection_basis(
-                pseudo_grad,
+                projector_signal,
                 rank,
                 meta,
             )
@@ -848,7 +938,9 @@ class _ParameterFragment(_BaseFragment):
                             proj_type=proj_type,
                         )
                     except Exception:  # pragma: no cover - diagnostics only
-                        logger.exception("DES-LOC momentum rotation failed; continuing without rotation.")
+                        logger.exception(
+                            "DES-LOC momentum rotation failed; continuing without rotation."
+                        )
                 state["projector_basis"] = basis
                 state.pop("_placeholder_projector", None)
                 state.pop("_bootstrap_projector", None)
@@ -857,19 +949,19 @@ class _ParameterFragment(_BaseFragment):
 
                 if self._error_feedback_enabled:
                     reconstruction = self._compute_projector_reconstruction(
-                        pseudo_grad,
+                        projector_signal,
                         basis,
                         proj_type,
                     )
-                    if reconstruction is None or reconstruction.shape != base_pseudo_grad.shape:
+                    if reconstruction is None or reconstruction.shape != projector_signal.shape:
                         self._projector_error_feedback.pop(name, None)
                     else:
-                        residual = (pseudo_grad - reconstruction).detach().clone()
-                        print("The residual is", residual)
-                        print(residual)
+                        residual = (projector_signal - reconstruction).detach().clone()
                         self._projector_error_feedback[name] = residual
 
-        finalize_placeholders = getattr(optimizer, "finalize_placeholder_projectors", None)
+        finalize_placeholders = getattr(
+            optimizer, "finalize_placeholder_projectors", None
+        )
         if callable(finalize_placeholders):
             finalize_placeholders()
 
@@ -893,8 +985,6 @@ class _ParameterFragment(_BaseFragment):
 
 class _OuterOptimizingParameterFragment(_ParameterFragment):
     """Marker subclass instantiated when an outer optimizer is configured."""
-
-    pass
 
 
 class _OptimizerStateFragment(_BaseFragment):
@@ -921,8 +1011,14 @@ class _OptimizerStateFragment(_BaseFragment):
             state = self._optimizer.state.get(param, {})
             tensor = state.get(self.state_key)
             if isinstance(tensor, torch.Tensor):
-                device = self._backup_device if self._backup_device is not None else tensor.device
-                self._original_state_tensors[name] = torch.empty_like(tensor, device=device)
+                device = (
+                    self._backup_device
+                    if self._backup_device is not None
+                    else tensor.device
+                )
+                self._original_state_tensors[name] = torch.empty_like(
+                    tensor, device=device
+                )
 
     def save_state(self) -> None:
         with torch.no_grad():
@@ -935,7 +1031,10 @@ class _OptimizerStateFragment(_BaseFragment):
         with torch.no_grad():
             for name, backup in self._original_state_tensors.items():
                 param = self._param_map[name]
-                if param in self._optimizer.state and self.state_key in self._optimizer.state[param]:
+                if (
+                    param in self._optimizer.state
+                    and self.state_key in self._optimizer.state[param]
+                ):
                     self._optimizer.state[param][self.state_key].copy_(backup)
 
     def prepare_sync(self) -> list[Any]:
@@ -987,7 +1086,7 @@ class _StreamingOptimizerStateFragment(_BaseFragment):
         self._fragment_id = config.fragment_id
         self._name_prefix = config.name_prefix
         self._param_entries = config.param_entries
-        self._param_map = {name: param for name, param in self._param_entries}
+        self._param_map = dict(self._param_entries)
         self._optimizer = config.optimizer
         self.state_key = config.state_key
         self._backup_device = config.backup_device
@@ -1028,7 +1127,11 @@ class _StreamingOptimizerStateFragment(_BaseFragment):
             state = self._optimizer.state.get(param, {})
             tensor = state.get(self.state_key)
             if isinstance(tensor, torch.Tensor):
-                device = self._backup_device if self._backup_device is not None else tensor.device
+                device = (
+                    self._backup_device
+                    if self._backup_device is not None
+                    else tensor.device
+                )
                 backup = torch.empty_like(tensor, device=device)
                 if (
                     self._pin_memory
@@ -1050,7 +1153,10 @@ class _StreamingOptimizerStateFragment(_BaseFragment):
         with torch.no_grad():
             for name, backup in self._original_state_tensors.items():
                 param = self._param_map[name]
-                if param in self._optimizer.state and self.state_key in self._optimizer.state[param]:
+                if (
+                    param in self._optimizer.state
+                    and self.state_key in self._optimizer.state[param]
+                ):
                     self._optimizer.state[param][self.state_key].copy_(backup)
 
     def prepare_sync(self) -> None:
@@ -1064,11 +1170,17 @@ class _StreamingOptimizerStateFragment(_BaseFragment):
             "DES-LOC streaming optimizer state '%s' fragment=%s sync starting (step=%s, manager_step=%s)",
             self.state_key,
             self._fragment_id,
-            self._current_sync_step if self._current_sync_step is not None else "unknown",
+            self._current_sync_step
+            if self._current_sync_step is not None
+            else "unknown",
             self._manager.current_step(),
         )
 
-        context = torch.cuda.stream(self._stream) if self._stream is not None else nullcontext()
+        context = (
+            torch.cuda.stream(self._stream)
+            if self._stream is not None
+            else nullcontext()
+        )
         with context:
             self._capture_states()
             self._allreduce_states()
@@ -1107,7 +1219,9 @@ class _StreamingOptimizerStateFragment(_BaseFragment):
         device = tensors[0].device
 
         while offset < total_elems:
-            chunk_elems = min(bucket_size_bytes // tensors[0].element_size(), total_elems - offset)
+            chunk_elems = min(
+                bucket_size_bytes // tensors[0].element_size(), total_elems - offset
+            )
             flat_buffer = torch.zeros(chunk_elems, dtype=dtype, device=device)
 
             pack_offset = 0
@@ -1130,7 +1244,11 @@ class _StreamingOptimizerStateFragment(_BaseFragment):
                 fut: torch.futures.Future[list[torch.Tensor]],
             ) -> list[torch.Tensor]:
                 for tensor, tensor_offset, numel in bucket_tensors:
-                    tensor.copy_(flat_buffer[tensor_offset : tensor_offset + numel].view_as(tensor))
+                    tensor.copy_(
+                        flat_buffer[tensor_offset : tensor_offset + numel].view_as(
+                            tensor
+                        )
+                    )
                 return []
 
             work.get_future().then(callback)
@@ -1148,7 +1266,11 @@ class _StreamingOptimizerStateFragment(_BaseFragment):
     def perform_sync(self) -> None:
         if not self._averaged_state_tensors:
             return
-        context = torch.cuda.stream(self._stream) if self._stream is not None else nullcontext()
+        context = (
+            torch.cuda.stream(self._stream)
+            if self._stream is not None
+            else nullcontext()
+        )
         with context:
             for work in self._allreduce_work:
                 work.wait()
@@ -1169,7 +1291,9 @@ class _StreamingOptimizerStateFragment(_BaseFragment):
             self.state_key,
             self._fragment_id,
             should_commit,
-            self._current_sync_step if self._current_sync_step is not None else "unknown",
+            self._current_sync_step
+            if self._current_sync_step is not None
+            else "unknown",
             self._manager.current_step(),
         )
         self._current_sync_step = None
@@ -1194,6 +1318,7 @@ class _StreamingOptimizerStateFragment(_BaseFragment):
             load_fn,
             save_fn,
         )
+
 
 class _StreamingParameterFragment:
     """Streaming-enabled parameter fragment with asynchronous allreduce."""
@@ -1227,7 +1352,7 @@ class _StreamingParameterFragment:
         self._fragment_id = fragment_id
         self._name_prefix = name_prefix
         self._param_entries = param_entries
-        self._param_map = {name: param for name, param in param_entries}
+        self._param_map = dict(param_entries)
         self._backup_device = backup_device
         self._pin_memory = pin_memory
         self._outer_optimizer = outer_optimizer
@@ -1263,7 +1388,9 @@ class _StreamingParameterFragment:
         self._init_backup_storage()
         self.save_parameters()
 
-    def set_metrics_logger(self, logger_fn: Callable[[dict[str, float]], None] | None) -> None:
+    def set_metrics_logger(
+        self, logger_fn: Callable[[dict[str, float]], None] | None
+    ) -> None:
         self._metrics_logger = logger_fn
 
     def set_step_context(self, step: int) -> None:
@@ -1286,15 +1413,22 @@ class _StreamingParameterFragment:
         return self._fragment_sync_delay
 
     def _named_parameters(self):
-        for name, param in self._param_entries:
-            yield name, param
+        yield from self._param_entries
 
     def _init_backup_storage(self) -> None:
         for name, param in self._named_parameters():
             local_tensor = _extract_local_tensor(param.data)
-            device = self._backup_device if self._backup_device is not None else local_tensor.device
+            device = (
+                self._backup_device
+                if self._backup_device is not None
+                else local_tensor.device
+            )
             backup = torch.empty_like(local_tensor, device=device)
-            if self._pin_memory and backup.device.type == "cpu" and torch.cuda.is_available():
+            if (
+                self._pin_memory
+                and backup.device.type == "cpu"
+                and torch.cuda.is_available()
+            ):
                 backup = backup.pin_memory()
             self.original_parameters[name] = backup
 
@@ -1338,7 +1472,9 @@ class _StreamingParameterFragment:
     def save_parameters(self) -> None:
         with torch.no_grad():
             for name, param in self._named_parameters():
-                self.original_parameters[name].copy_(_extract_local_tensor(param.data), non_blocking=True)
+                self.original_parameters[name].copy_(
+                    _extract_local_tensor(param.data), non_blocking=True
+                )
 
     def restore_parameters(self) -> None:
         with torch.no_grad():
@@ -1376,7 +1512,11 @@ class _StreamingParameterFragment:
     def _save_grads(self) -> None:
         with torch.no_grad():
             for name, param in self._named_parameters():
-                tensor = param.to_local() if DTensor is not None and isinstance(param, DTensor) else param
+                tensor = (
+                    param.to_local()
+                    if DTensor is not None and isinstance(param, DTensor)
+                    else param
+                )
                 pseudo = self.original_parameters[name].to(tensor.device) - tensor
                 self._grads[name] = pseudo
 
@@ -1384,7 +1524,9 @@ class _StreamingParameterFragment:
         self._averaged_parameters.clear()
         with torch.no_grad():
             for name, param in self._named_parameters():
-                self._averaged_parameters.append((name, _extract_local_tensor(param.data)))
+                self._averaged_parameters.append(
+                    (name, _extract_local_tensor(param.data))
+                )
 
     def _set_grads(self) -> None:
         with torch.no_grad():
@@ -1431,7 +1573,9 @@ class _StreamingParameterFragment:
         device = tensors[0].device
 
         while offset < total_elems:
-            chunk_elems = min(bucket_size_bytes // tensors[0].element_size(), total_elems - offset)
+            chunk_elems = min(
+                bucket_size_bytes // tensors[0].element_size(), total_elems - offset
+            )
             flat_buffer = torch.zeros(chunk_elems, dtype=dtype, device=device)
 
             pack_offset = 0
@@ -1454,7 +1598,11 @@ class _StreamingParameterFragment:
                 fut: torch.futures.Future[list[torch.Tensor]],
             ) -> list[torch.Tensor]:
                 for tensor, tensor_offset, numel in bucket_tensors:
-                    tensor.copy_(flat_buffer[tensor_offset : tensor_offset + numel].view_as(tensor))
+                    tensor.copy_(
+                        flat_buffer[tensor_offset : tensor_offset + numel].view_as(
+                            tensor
+                        )
+                    )
                 return []
 
             work.get_future().then(callback)
@@ -1497,11 +1645,17 @@ class _StreamingParameterFragment:
         logger.info(
             "DES-LOC streaming parameter fragment=%s sync starting (step=%s, manager_step=%s)",
             self._fragment_id,
-            self._current_sync_step if self._current_sync_step is not None else "unknown",
+            self._current_sync_step
+            if self._current_sync_step is not None
+            else "unknown",
             self._manager.current_step(),
         )
 
-        context = torch.cuda.stream(self._stream) if self._stream is not None else nullcontext()
+        context = (
+            torch.cuda.stream(self._stream)
+            if self._stream is not None
+            else nullcontext()
+        )
         with context:
             if self._averaging_only:
                 self._save_averaged_parameters()
@@ -1513,7 +1667,9 @@ class _StreamingParameterFragment:
     def _zero_outer_optimizer_grads(self) -> None:
         _zero_optimizer_grads(self._outer_optimizer)
 
-    def _emit_outer_metrics(self, pseudo_norm_sq: float, momentum_norm_sq: float, has_momentum: bool) -> None:
+    def _emit_outer_metrics(
+        self, pseudo_norm_sq: float, momentum_norm_sq: float, has_momentum: bool
+    ) -> None:
         if not self._log_outer_metrics or self._metrics_logger is None:
             return
         metrics: dict[str, float] = {}
@@ -1527,7 +1683,11 @@ class _StreamingParameterFragment:
 
     def perform_sync(self) -> bool:
         assert self._allreduce_work
-        context = torch.cuda.stream(self._stream) if self._stream is not None else nullcontext()
+        context = (
+            torch.cuda.stream(self._stream)
+            if self._stream is not None
+            else nullcontext()
+        )
         with context:
             for work in self._allreduce_work:
                 work.wait()
@@ -1580,7 +1740,9 @@ class _StreamingParameterFragment:
             "DES-LOC streaming parameter fragment=%s sync complete (commit=%s, step=%s, manager_step=%s)",
             self._fragment_id,
             should_commit,
-            self._current_sync_step if self._current_sync_step is not None else "unknown",
+            self._current_sync_step
+            if self._current_sync_step is not None
+            else "unknown",
             self._manager.current_step(),
         )
         self._current_sync_step = None
@@ -1636,6 +1798,7 @@ class DesLocController:
             low_rank_server_update=config.low_rank_server_update,
             outer_optimizer_low_rank=config.outer_optimizer_low_rank,
             low_rank_projector_error_feedback=config.low_rank_projector_error_feedback,
+            low_rank_projector_source=config.low_rank_projector_source,
         )
         fragment_cls = (
             _OuterOptimizingParameterFragment
@@ -1657,7 +1820,9 @@ class DesLocController:
             self._hook.remove()
             self._hook = None
 
-    def set_metrics_logger(self, logger_fn: Callable[[dict[str, float]], None] | None) -> None:
+    def set_metrics_logger(
+        self, logger_fn: Callable[[dict[str, float]], None] | None
+    ) -> None:
         self._param_fragment.set_metrics_logger(logger_fn)
 
     def _resolve_optimizer_sync_intervals(self, state_keys: Iterable[str]) -> list[int]:
@@ -1682,7 +1847,9 @@ class DesLocController:
         self._validate_positive_interval(interval)
         return [interval for _ in keys]
 
-    def _expand_list_intervals(self, intervals: list[int], keys: list[str]) -> list[int]:
+    def _expand_list_intervals(
+        self, intervals: list[int], keys: list[str]
+    ) -> list[int]:
         if not intervals:
             return [self._param_fragment.sync_every for _ in keys]
 
@@ -1698,7 +1865,9 @@ class DesLocController:
             self._validate_positive_interval(value)
         return normalized
 
-    def _expand_dict_intervals(self, mapping: dict[str, int], keys: list[str]) -> list[int]:
+    def _expand_dict_intervals(
+        self, mapping: dict[str, int], keys: list[str]
+    ) -> list[int]:
         resolved: list[int] = []
         for key in keys:
             if key not in mapping:
@@ -1860,7 +2029,9 @@ class StreamingDesLocController:
             before_len = len(partitions)
             partitions = _merge_non_layer_partition(partitions)
             if len(partitions) < before_len:
-                logger.info("DES-LOC streaming merged non-layer parameters into fragment 0.")
+                logger.info(
+                    "DES-LOC streaming merged non-layer parameters into fragment 0."
+                )
 
         layer_fragment_indices = list(range(len(partitions)))
 
@@ -1868,7 +2039,9 @@ class StreamingDesLocController:
         num_fragments = len(partitions)
 
         if config.param_sync_every < layer_fragment_count:
-            msg = "desloc.param_sync_every must be >= the number of streaming fragments."
+            msg = (
+                "desloc.param_sync_every must be >= the number of streaming fragments."
+            )
             raise ValueError(msg)
         if config.param_sync_every % layer_fragment_count != 0:
             msg = "desloc.param_sync_every must be divisible by the number of streaming fragments."
@@ -1883,7 +2056,9 @@ class StreamingDesLocController:
             msg = "desloc.streaming.update_alpha must be between 0 and 1."
             raise ValueError(msg)
 
-        outer_handles = self._build_outer_optimizer_handles(config.outer_optimizer, partitions)
+        outer_handles = self._build_outer_optimizer_handles(
+            config.outer_optimizer, partitions
+        )
         self._partitions = partitions
         self._fragment_sync_delay = streaming.sync_delay
         layer_offsets = self._resolve_fragment_offsets(layer_fragment_count, streaming)
@@ -1893,7 +2068,9 @@ class StreamingDesLocController:
         outer_checkpoint_flags = self._build_outer_checkpoint_flags(outer_handles)
         self._schedule_entries: list[_StreamingFragmentSchedule] = []
         self._fragments: list[_StreamingParameterFragment] = []
-        for idx, (params, offset) in enumerate(zip(partitions, fragment_offsets, strict=True)):
+        for idx, (params, offset) in enumerate(
+            zip(partitions, fragment_offsets, strict=True)
+        ):
             fragment = _StreamingParameterFragment(
                 manager=self._manager,
                 fragment_id=idx,
@@ -1933,17 +2110,23 @@ class StreamingDesLocController:
             self._fragments.append(fragment)
         self._hooks: list[RemovableHandle] = []
         self._hooks.append(self._optimizer.register_step_pre_hook(self._step_pre_hook))
-        self._hooks.append(self._optimizer.register_step_post_hook(self._step_post_hook))
+        self._hooks.append(
+            self._optimizer.register_step_post_hook(self._step_post_hook)
+        )
 
         self._inner_step = 0
         self._state_cursor = 0
         self._optimizer_state_log_emitted = False
         self._optimizer_state_schedule = streaming.optimizer_state_schedule
 
-        self._state_fragments_per_fragment: list[list[_StreamingOptimizerStateFragment]] = []
+        self._state_fragments_per_fragment: list[
+            list[_StreamingOptimizerStateFragment]
+        ] = []
         self._is_opt_init = not self._optimizer_state_sync_enabled
         self._fragments_synced_this_step: set[int] = set()
-        self._pending_aligned_state_frags: dict[int, list[tuple[_StreamingOptimizerStateFragment, int]]] = {}
+        self._pending_aligned_state_frags: dict[
+            int, list[tuple[_StreamingOptimizerStateFragment, int]]
+        ] = {}
 
         self._register_state_dict_functions()
         self._log_parameter_fragment_assignments()
@@ -1953,7 +2136,9 @@ class StreamingDesLocController:
             hook.remove()
         self._hooks.clear()
 
-    def set_metrics_logger(self, logger_fn: Callable[[dict[str, float]], None] | None) -> None:
+    def set_metrics_logger(
+        self, logger_fn: Callable[[dict[str, float]], None] | None
+    ) -> None:
         self._metrics_logger = logger_fn
         for fragment in self._fragments:
             fragment.set_metrics_logger(logger_fn if self._log_outer_metrics else None)
@@ -2014,7 +2199,9 @@ class StreamingDesLocController:
         msg = "desloc.outer_optimizer must be a config, Optimizer, list of Optimizers, or None."
         raise TypeError(msg)
 
-    def _build_outer_checkpoint_flags(self, outer_handles: list[Optimizer | None]) -> list[bool]:
+    def _build_outer_checkpoint_flags(
+        self, outer_handles: list[Optimizer | None]
+    ) -> list[bool]:
         if not self._checkpoint_outer_optimizer:
             return [False for _ in outer_handles]
         seen: set[int] = set()
@@ -2039,7 +2226,9 @@ class StreamingDesLocController:
         fragment_sync_offsets = getattr(streaming, "fragment_sync_offsets", None)
         if fragment_sync_offsets is None:
             stride = self._sync_window / num_fragments
-            offsets = [max(1, int(math.floor(stride * (idx + 1)))) for idx in range(num_fragments)]
+            offsets = [
+                max(1, math.floor(stride * (idx + 1))) for idx in range(num_fragments)
+            ]
             offsets[-1] = self._sync_window
         else:
             offsets = [int(value) for value in fragment_sync_offsets]
@@ -2055,7 +2244,9 @@ class StreamingDesLocController:
             raise ValueError(msg)
         for offset in offsets:
             if offset <= self._fragment_sync_delay:
-                msg = "Each fragment sync offset must exceed desloc.streaming.sync_delay."
+                msg = (
+                    "Each fragment sync offset must exceed desloc.streaming.sync_delay."
+                )
                 raise ValueError(msg)
         return offsets
 
@@ -2255,7 +2446,9 @@ class StreamingDesLocController:
         self._validate_positive_interval(interval)
         return [interval for _ in keys]
 
-    def _expand_list_intervals(self, intervals: list[int], keys: list[str]) -> list[int]:
+    def _expand_list_intervals(
+        self, intervals: list[int], keys: list[str]
+    ) -> list[int]:
         if not intervals:
             return [self._fragment_stride for _ in keys]
 
@@ -2270,7 +2463,9 @@ class StreamingDesLocController:
             self._validate_positive_interval(value)
         return normalized
 
-    def _expand_dict_intervals(self, mapping: dict[str, int], keys: list[str]) -> list[int]:
+    def _expand_dict_intervals(
+        self, mapping: dict[str, int], keys: list[str]
+    ) -> list[int]:
         resolved: list[int] = []
         for key in keys:
             if key not in mapping:
@@ -2345,7 +2540,9 @@ class StreamingDesLocController:
         self._is_opt_init = True
         self._log_optimizer_state_fragment_assignments()
 
-    def _sync_state_fragments(self, fragment_idx: int, *, limit_one: bool = False) -> None:
+    def _sync_state_fragments(
+        self, fragment_idx: int, *, limit_one: bool = False
+    ) -> None:
         if not self._optimizer_state_sync_enabled:
             return
         if not self._state_fragments_per_fragment:
@@ -2363,7 +2560,9 @@ class StreamingDesLocController:
 
         self._execute_state_sync_batch(ready)
 
-    def _execute_state_sync_batch(self, fragments: list[_StreamingOptimizerStateFragment]) -> None:
+    def _execute_state_sync_batch(
+        self, fragments: list[_StreamingOptimizerStateFragment]
+    ) -> None:
         if not fragments:
             return
         try:
@@ -2436,6 +2635,8 @@ class StreamingDesLocController:
                 formatted or "none",
             )
         self._optimizer_state_log_emitted = True
+
+
 class DesLocFTOptimizersContainer(FTOptimizersContainer):
     """FT optimizer container augmented with DES-LOC synchronization."""
 
@@ -2443,6 +2644,15 @@ class DesLocFTOptimizersContainer(FTOptimizersContainer):
         desloc_config = config.desloc_config
         if desloc_config.param_sync_every <= 0:
             msg = "desloc.param_sync_every must be a positive integer."
+            raise ValueError(msg)
+        if desloc_config.low_rank_projector_source not in (
+            "pseudo_grad",
+            "full_rank_grad",
+        ):
+            msg = (
+                "desloc.low_rank_projector_source must be 'pseudo_grad' or 'full_rank_grad'; "
+                f"received {desloc_config.low_rank_projector_source!r}."
+            )
             raise ValueError(msg)
 
         streaming_cfg = config.streaming or desloc_config.resolved_streaming()
@@ -2458,10 +2668,16 @@ class DesLocFTOptimizersContainer(FTOptimizersContainer):
 
         backup_device = desloc_config.resolved_backup_device()
         optimizer_sync = desloc_config.normalized_optimizer_sync()
-        outer_optimizer_spec = config.outer_optimizer or desloc_config.normalized_outer_optimizer()
+        outer_optimizer_spec = (
+            config.outer_optimizer or desloc_config.normalized_outer_optimizer()
+        )
 
-        self._desloc_controllers: list[DesLocController | StreamingDesLocController] = []
-        for idx, (model, optimizer) in enumerate(zip(self.model_parts, self.optimizers, strict=True)):
+        self._desloc_controllers: list[
+            DesLocController | StreamingDesLocController
+        ] = []
+        for idx, (model, optimizer) in enumerate(
+            zip(self.model_parts, self.optimizers, strict=True)
+        ):
             controller_config = DesLocControllerConfig(
                 manager=config.ft_manager,
                 model=model,
@@ -2480,6 +2696,7 @@ class DesLocFTOptimizersContainer(FTOptimizersContainer):
                 low_rank_server_update=desloc_config.low_rank_server_update,
                 outer_optimizer_low_rank=desloc_config.low_rank_outer_optimizer,
                 low_rank_projector_error_feedback=desloc_config.low_rank_projector_error_feedback,
+                low_rank_projector_source=desloc_config.low_rank_projector_source,
             )
             if streaming_cfg is not None:
                 controller = StreamingDesLocController(controller_config, streaming_cfg)
@@ -2493,13 +2710,17 @@ class DesLocFTOptimizersContainer(FTOptimizersContainer):
             controller.close()
         self._desloc_controllers.clear()
 
-    def set_desloc_metrics_logger(self, logger_fn: Callable[[dict[str, float]], None] | None) -> None:
+    def set_desloc_metrics_logger(
+        self, logger_fn: Callable[[dict[str, float]], None] | None
+    ) -> None:
         for controller in self._desloc_controllers:
             controller.set_metrics_logger(logger_fn)
 
 
 @contextmanager
-def desloc_semi_sync_context(_ft_manager: FTManager, optimizer: torch.optim.Optimizer) -> Iterator[None]:
+def desloc_semi_sync_context(
+    _ft_manager: FTManager, optimizer: torch.optim.Optimizer
+) -> Iterator[None]:
     """Context manager wiring DES-LOC into TorchFT semi-sync execution."""
     try:
         yield
