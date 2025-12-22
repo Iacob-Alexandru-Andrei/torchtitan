@@ -5,27 +5,24 @@ set -euo pipefail
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 CONFIG_FILE=${CONFIG_FILE:-"${SCRIPT_DIR}/base.toml"}
 TRAIN_MODULE=${TRAIN_MODULE:-"torchtitan.experiments.fl.train"}
-RUN_PREFIX=${RUN_PREFIX:-"icml2026-test-256-full"}
+RUN_PREFIX=${RUN_PREFIX:-"icml2026-qhm-tuning"}
 LOG_RANK=${LOG_RANK:-0}
 
-# PROJECTION_RANKS=${PROJECTION_RANKS:-"8 16 32 64 128 256"}
-PROJECTION_RANKS=${PROJECTION_RANKS:-"256"}
-LR_VALUES=${LR_VALUES:-"0.008"}
-# LR_VALUES=${LR_VALUES:-"0.0005 0.001 0.002 0.004 0.008 0.016"}
-# (16, 0.008, "icml2026-galore-5f8b3874-r16-lr0p008-rottrue-20251127-114042-idx3")
-# (32, 0.008, "icml2026-galore-5f8b3874-r32-lr0p008-rottrue-20251127-114042-idx5")
-# (64, 0.008, "icml2026-galore-5f8b3874-r64-lr0p008-rottrue-20251127-114042-idx7")
-# (128, 0.016, "icml2026-galore-06db68b5-r128-lr0p016-rottrue-20251127-165236-idx9")
+PROJECTION_RANKS=${PROJECTION_RANKS:-"8 16 32 64 128 256"}
+LR_VALUES=${LR_VALUES:-"0.016 0.008 0.008 0.008 0.016 0.008"}
 ROTATE_MOMENTS_OPTIONS=${ROTATE_MOMENTS_OPTIONS:-"true"}
-ADAM_SENTINEL_RANK=${ADAM_SENTINEL_RANK:-256}
+SWITCH_SCALES=${SWITCH_SCALES:-"1.0 2.0"}
 
+VS_VALUES=${VS_VALUES:-"0.90 0.91 0.92 0.93 0.94 0.95 0.96 0.97 0.98 0.99"}
+QHM_OUTSIDE_OPTIONS=${QHM_OUTSIDE_OPTIONS:-"true false"}
+ADAM_SENTINEL_RANK=${ADAM_SENTINEL_RANK:-256}
 RUN_INDEX=${RUN_INDEX:-}
 RUN_INDEX_OFFSET=${RUN_INDEX_OFFSET:-0}
 RUN_INDEX_RANGE=${RUN_INDEX_RANGE:-}
 DRY_RUN=${DRY_RUN:-false}
 SBATCH_CPUS_PER_TASK=${SBATCH_CPUS_PER_TASK:-8}
-SBATCH_GPUS_PER_TASK=${SBATCH_GPUS_PER_TASK:-4}
-SBATCH_MAX_CHAINS=${SBATCH_MAX_CHAINS:-1}
+SBATCH_GPUS_PER_TASK=${SBATCH_GPUS_PER_TASK:-1}
+SBATCH_MAX_CHAINS=${SBATCH_MAX_CHAINS:-8}
 SBATCH_MEM=${SBATCH_MEM:-}
 SBATCH_TIME=${SBATCH_TIME:-}
 SBATCH_PARTITION=${SBATCH_PARTITION:-}
@@ -139,15 +136,28 @@ fi
 
 read -r -a PROJECTION_RANK_ARRAY <<< "${PROJECTION_RANKS}"
 read -r -a LR_ARRAY <<< "${LR_VALUES}"
-read -r -a ROTATE_MOMENTS_ARRAY_RAW <<< "${ROTATE_MOMENTS_OPTIONS}"
-ROTATE_MOMENTS_ARRAY=()
-for rotate_option in "${ROTATE_MOMENTS_ARRAY_RAW[@]}"; do
-  normalized=$(normalize_bool "${rotate_option}")
-  if [[ "${normalized}" != "true" && "${normalized}" != "false" ]]; then
-    echo "ROTATE_MOMENTS_OPTIONS entries must be boolean strings (got ${rotate_option})." >&2
+
+# Use a fixed LR per rank: lengths must match one-to-one
+if (( ${#LR_ARRAY[@]} != ${#PROJECTION_RANK_ARRAY[@]} )); then
+  echo "When using fixed LR per rank, PROJECTION_RANKS and LR_VALUES must have the same number of entries." >&2
+  exit 1
+fi
+
+# Force rotate to true for all runs (ignore ROTATE_MOMENTS_OPTIONS input)
+ROTATE_MOMENTS_OPTIONS="true"
+ROTATE_MOMENTS_ARRAY=("true")
+
+read -r -a SWITCH_SCALE_ARRAY <<< "${SWITCH_SCALES}"
+read -r -a VS_ARRAY <<< "${VS_VALUES}"
+read -r -a QHM_OUTSIDE_ARRAY_RAW <<< "${QHM_OUTSIDE_OPTIONS}"
+QHM_OUTSIDE_ARRAY=()
+for qopt in "${QHM_OUTSIDE_ARRAY_RAW[@]}"; do
+  normalized_q=$(normalize_bool "${qopt}")
+  if [[ "${normalized_q}" != "true" && "${normalized_q}" != "false" ]]; then
+    echo "QHM_OUTSIDE_OPTIONS entries must be boolean strings (got ${qopt})." >&2
     exit 1
   fi
-  ROTATE_MOMENTS_ARRAY+=("${normalized}")
+  QHM_OUTSIDE_ARRAY+=("${normalized_q}")
 done
 
 if (( ${#PROJECTION_RANK_ARRAY[@]} == 0 )); then
@@ -158,12 +168,22 @@ if (( ${#LR_ARRAY[@]} == 0 )); then
   echo "LR_VALUES must contain at least one entry." >&2
   exit 1
 fi
-if (( ${#ROTATE_MOMENTS_ARRAY[@]} == 0 )); then
-  echo "ROTATE_MOMENTS_OPTIONS must contain at least one entry." >&2
+
+if (( ${#SWITCH_SCALE_ARRAY[@]} == 0 )); then
+  echo "SWITCH_SCALES must contain at least one entry." >&2
+  exit 1
+fi
+if (( ${#VS_ARRAY[@]} == 0 )); then
+  echo "VS_VALUES must contain at least one entry." >&2
+  exit 1
+fi
+if (( ${#QHM_OUTSIDE_ARRAY[@]} == 0 )); then
+  echo "QHM_OUTSIDE_OPTIONS must contain at least one entry." >&2
   exit 1
 fi
 
-TOTAL_RUNS=$(( ${#PROJECTION_RANK_ARRAY[@]} * ${#LR_ARRAY[@]} * ${#ROTATE_MOMENTS_ARRAY[@]} ))
+# TOTAL runs is product of ranks x switch_scales x vs x qhm options x rotate options
+TOTAL_RUNS=$(( ${#PROJECTION_RANK_ARRAY[@]} * ${#SWITCH_SCALE_ARRAY[@]} * ${#VS_ARRAY[@]} * ${#QHM_OUTSIDE_ARRAY[@]} * ${#ROTATE_MOMENTS_ARRAY[@]} ))
 
 RANGE_ENABLED=false
 RANGE_START=
@@ -246,13 +266,17 @@ should_run_combination() {
 count_selected_runs() {
   local idx=0
   local selected=0
-  for rank in "${PROJECTION_RANK_ARRAY[@]}"; do
-    for lr in "${LR_ARRAY[@]}"; do
-      for rotate_flag in "${ROTATE_MOMENTS_ARRAY[@]}"; do
-        ((++idx))
-        if should_run_combination "${idx}"; then
-          ((++selected))
-        fi
+  for i in "${!PROJECTION_RANK_ARRAY[@]}"; do
+    for switch_scale in "${SWITCH_SCALE_ARRAY[@]}"; do
+      for new_v in "${VS_ARRAY[@]}"; do
+        for qhm in "${QHM_OUTSIDE_ARRAY[@]}"; do
+          for rotate_flag in "${ROTATE_MOMENTS_ARRAY[@]}"; do
+            ((++idx))
+            if should_run_combination "${idx}"; then
+              ((++selected))
+            fi
+          done
+        done
       done
     done
   done
@@ -269,19 +293,32 @@ declare -a RUN_PLAN_INDICES=()
 declare -a RUN_PLAN_RANKS=()
 declare -a RUN_PLAN_LRS=()
 declare -a RUN_PLAN_ROTATES=()
+declare -a RUN_PLAN_SWITCH_SCALES=()
+declare -a RUN_PLAN_NEW_VS=()
+declare -a RUN_PLAN_QHM_OUTSIDE=()
 
 combination_index=0
-for rank in "${PROJECTION_RANK_ARRAY[@]}"; do
-  for lr in "${LR_ARRAY[@]}"; do
-    for rotate_flag in "${ROTATE_MOMENTS_ARRAY[@]}"; do
-      ((++combination_index))
-      if ! should_run_combination "${combination_index}"; then
-        continue
-      fi
-      RUN_PLAN_INDICES+=("${combination_index}")
-      RUN_PLAN_RANKS+=("${rank}")
-      RUN_PLAN_LRS+=("${lr}")
-      RUN_PLAN_ROTATES+=("${rotate_flag}")
+# Build runs by index: LR maps 1:1 to PROJECTION_RANKS, and we sweep switch_scale, vs, qhm_outside
+for i in "${!PROJECTION_RANK_ARRAY[@]}"; do
+  rank=${PROJECTION_RANK_ARRAY[i]}
+  lr=${LR_ARRAY[i]}
+  for switch_scale in "${SWITCH_SCALE_ARRAY[@]}"; do
+    for new_v in "${VS_ARRAY[@]}"; do
+      for qhm in "${QHM_OUTSIDE_ARRAY[@]}"; do
+        for rotate_flag in "${ROTATE_MOMENTS_ARRAY[@]}"; do
+          ((++combination_index))
+          if ! should_run_combination "${combination_index}"; then
+            continue
+          fi
+          RUN_PLAN_INDICES+=("${combination_index}")
+          RUN_PLAN_RANKS+=("${rank}")
+          RUN_PLAN_LRS+=("${lr}")
+          RUN_PLAN_ROTATES+=("${rotate_flag}")
+          RUN_PLAN_SWITCH_SCALES+=("${switch_scale}")
+          RUN_PLAN_NEW_VS+=("${new_v}")
+          RUN_PLAN_QHM_OUTSIDE+=("${qhm}")
+        done
+      done
     done
   done
 done
@@ -289,6 +326,7 @@ done
 SELECTED_RUNS=${#RUN_PLAN_INDICES[@]}
 
 SWEEP_CONFIG_STRING="proj_ranks=${PROJECTION_RANKS}|lrs=${LR_VALUES}|rotate=${ROTATE_MOMENTS_OPTIONS}|train_module=${TRAIN_MODULE}|config=${CONFIG_FILE}"
+SWEEP_CONFIG_STRING="proj_ranks=${PROJECTION_RANKS}|lrs=${LR_VALUES}|rotate=${ROTATE_MOMENTS_OPTIONS}|switch_scales=${SWITCH_SCALES}|vs=${VS_VALUES}|qhm=${QHM_OUTSIDE_OPTIONS}|train_module=${TRAIN_MODULE}|config=${CONFIG_FILE}"
 if command -v sha1sum >/dev/null 2>&1; then
   SWEEP_HASH=$(printf "%s" "${SWEEP_CONFIG_STRING}" | sha1sum | awk '{print $1}')
 elif command -v shasum >/dev/null 2>&1; then
@@ -315,11 +353,16 @@ PORT_STRIDE=${PORT_STRIDE:-4}
 LIGHTHOUSE_PROTOCOL=${LIGHTHOUSE_PROTOCOL:-"http"}
 GALORE_REGEX_PATTERN=${GALORE_REGEX_PATTERN:-"attention\\.w[qkv]|attention\\.wo|feed_forward\\.w[12]"}
 GENERATED_CONFIG_DIR=${GENERATED_CONFIG_DIR:-"${SCRIPT_DIR}/generated_configs"}
+NEW_V=${NEW_V:-1.0}
 
 generate_run_config() {
   local run_uuid=$1
   local target_rank=$2
   local rotate_flag=$3
+  local switch_scale=${4:-}
+  local new_v_run=${5:-}
+  local qhm_outside=${6:-}
+  local lr_value=${7:-}
   local output_path="${GENERATED_CONFIG_DIR}/${run_uuid}.toml"
 
   BASE_CONFIG_PATH="${CONFIG_FILE}" \
@@ -328,6 +371,11 @@ generate_run_config() {
   TARGET_RANK="${target_rank}" \
   ROTATE_MOMENTS_FLAG="${rotate_flag}" \
   ADAM_SENTINEL_RANK="${ADAM_SENTINEL_RANK}" \
+  NEW_V="${NEW_V}" \
+  NEW_V_RUN="${new_v_run}" \
+  SWITCH_SCALE="${switch_scale}" \
+  QHM_OUTSIDE="${qhm_outside}" \
+  LR_VALUE="${lr_value}" \
   uv run --no-sync python3  <<'PY'
 import os
 import sys
@@ -393,6 +441,80 @@ for entry in normalized:
     normalized.append({"param_str_match": pattern, "rank": rank})
 
 optimizer["galore_param_regexes"] = normalized
+# Enable local error feedback for GaLore optimizer in generated configs
+optimizer["galore_use_error_feedback"] = True
+
+# Insert or update a fl_metrics.hyperparameter_switch entry to trigger at step 2048
+# Prefer per-run NEW_V_RUN if provided, otherwise fall back to global NEW_V
+new_v_env = os.environ.get("NEW_V_RUN", os.environ.get("NEW_V", "1.0"))
+try:
+  new_v = float(new_v_env)
+except Exception:
+  raise ValueError(f"NEW_V must be numeric (got {new_v_env})")
+
+# Optional switch_scale passed per-run
+switch_scale_env = os.environ.get("SWITCH_SCALE", None)
+if switch_scale_env is not None and switch_scale_env.strip() != "":
+  try:
+    switch_scale_val = float(switch_scale_env)
+  except Exception:
+    raise ValueError(f"SWITCH_SCALE must be numeric (got {switch_scale_env})")
+else:
+  switch_scale_val = None
+
+# Optional qhm_outside flag passed per-run
+qhm_env = os.environ.get("QHM_OUTSIDE", "").strip().lower()
+if qhm_env in true_values:
+  qhm_bool = True
+elif qhm_env in false_values:
+  qhm_bool = False
+elif qhm_env == "":
+  qhm_bool = None
+else:
+  raise ValueError(f"Unsupported boolean for QHM_OUTSIDE: {qhm_env}")
+
+fl_metrics = data.setdefault("fl_metrics", {})
+# Use the expected schema for hyperparameter_switch
+# [fl_metrics.hyperparameter_switch]
+# enabled = false
+# steps = []
+# new_vs = []
+# new_betas = []
+# reset_momenta = []
+hp_switch = fl_metrics.get("hyperparameter_switch")
+if hp_switch is None:
+  fl_metrics["hyperparameter_switch"] = {
+    "enabled": True,
+    "steps": [2048],
+    "new_vs": [new_v],
+    "new_betas": [0.999, 0.999],
+    "reset_momenta": ["exp_avg", "exp_avg_sq"],
+  }
+  hp_switch = fl_metrics["hyperparameter_switch"]
+else:
+  # update fields conservatively to the expected schema
+  hp_switch["enabled"] = True
+  hp_switch["steps"] = [2048]
+  hp_switch["new_vs"] = [new_v]
+  hp_switch["new_betas"] = [0.999, 0.999]
+  hp_switch["reset_momenta"] = ["exp_avg", "exp_avg_sq"]
+
+# If a per-run switch_scale was provided, store it under the hyperparameter_switch
+if switch_scale_val is not None:
+  # Also apply switch_scale to lr_scheduler config so scheduler sees the value
+  lr_scheduler = data.setdefault("lr_scheduler", {})
+  lr_scheduler["switch_scale"] = switch_scale_val
+
+# If qhm_outside flag provided, add to optimizer config
+if qhm_bool is not None:
+  optimizer["galore_qhm_outside_projection"] = qhm_bool
+# If a per-run LR value was provided, write it into the optimizer section
+lr_env = os.environ.get("LR_VALUE", "")
+if lr_env is not None and lr_env.strip() != "":
+  try:
+    optimizer["lr"] = float(lr_env)
+  except Exception:
+    optimizer["lr"] = lr_env
 output.parent.mkdir(parents=True, exist_ok=True)
 output.write_text(tomli_w.dumps(data), encoding="utf-8")
 PY
@@ -441,15 +563,18 @@ print_run_plan_table() {
   fi
   echo "" >&2
   echo "Selected run configurations (${total} total):" >&2
-  printf "%-10s %-10s %-10s %-10s %-10s\n" "Idx(1-based)" "Idx(0-based)" "rank" "lr" "rotate" >&2
-  printf "%-10s %-10s %-10s %-10s %-10s\n" "----------" "----------" "----" "----" "------" >&2
+  printf "% -10s % -10s % -8s % -10s % -8s % -12s % -8s % -12s\n" "Idx(1-based)" "Idx(0-based)" "rank" "lr" "rotate" "switch_scale" "new_v" "qhm_outside" >&2
+  printf "% -10s % -10s % -8s % -10s % -8s % -12s % -8s % -12s\n" "----------" "----------" "----" "----" "------" "------------" "-----" "-----------" >&2
   for idx in "${!RUN_PLAN_INDICES[@]}"; do
     local combo_index_1=${RUN_PLAN_INDICES[idx]}
     local combo_index_0=$((combo_index_1 - 1))
     local rank=${RUN_PLAN_RANKS[idx]}
     local lr=${RUN_PLAN_LRS[idx]}
     local rotate_flag=${RUN_PLAN_ROTATES[idx]}
-    printf "%-10s %-10s %-10s %-10s %-10s\n" "${combo_index_1}" "${combo_index_0}" "${rank}" "${lr}" "${rotate_flag}" >&2
+    local switch_scale=${RUN_PLAN_SWITCH_SCALES[idx]:-}
+    local new_v=${RUN_PLAN_NEW_VS[idx]:-}
+    local qhm_outside=${RUN_PLAN_QHM_OUTSIDE[idx]:-}
+    printf "% -10s % -10s % -8s % -10s % -8s % -12s % -8s % -12s\n" "${combo_index_1}" "${combo_index_0}" "${rank}" "${lr}" "${rotate_flag}" "${switch_scale}" "${new_v}" "${qhm_outside}" >&2
   done
   echo "" >&2
 }
@@ -502,7 +627,7 @@ export TORCHTITAN_FORCE_WANDB_WORKER_SUFFIX=\${TORCHTITAN_FORCE_WANDB_WORKER_SUF
 export S3_ENDPOINT_URL='http://taranaki.cl.cam.ac.uk:9000'
 
 uv run --no-sync torchrun \
-  --nproc_per_node=4 \
+  --nproc_per_node=1 \
   --rdzv_backend=c10d \
   --rdzv_endpoint="${rdzv_endpoint}" \
   --rdzv_id "${run_uuid}" \
@@ -557,12 +682,18 @@ for idx in "${!RUN_PLAN_INDICES[@]}"; do
     rank_label=$(sanitize_value "${proj_rank}")
     lr_label=$(sanitize_value "${lr_value}")
     rotate_label=$(sanitize_value "${rotate_flag}")
-    run_uuid="${RUN_PREFIX}-${SWEEP_HASH}-r${rank_label}-lr${lr_label}-rot${rotate_label}-${timestamp_global}-idx${combination_index_zero}"
+    switch_scale_val=${RUN_PLAN_SWITCH_SCALES[idx]:-}
+    new_v_val=${RUN_PLAN_NEW_VS[idx]:-}
+    qhm_outside_val=${RUN_PLAN_QHM_OUTSIDE[idx]:-}
+    switch_label=$(sanitize_value "${switch_scale_val}")
+    new_v_label=$(sanitize_value "${new_v_val}")
+    qhm_label=$(sanitize_value "${qhm_outside_val}")
+    run_uuid="${RUN_PREFIX}-${SWEEP_HASH}-r${rank_label}-lr${lr_label}-rot${rotate_label}-ss${switch_label}-v${new_v_label}-q${qhm_label}-${timestamp_global}-idx${combination_index_zero}"
     run_progress="run ${combination_index}/${TOTAL_RUNS}"
 
     if [[ "${DRY_RUN}" != "true" ]]; then
       mkdir -p "${GENERATED_CONFIG_DIR}"
-      run_config_path=$(generate_run_config "${run_uuid}" "${proj_rank}" "${rotate_flag}")
+      run_config_path=$(generate_run_config "${run_uuid}" "${proj_rank}" "${rotate_flag}" "${switch_scale_val}" "${new_v_val}" "${qhm_outside_val}" "${lr_value}")
     else
       run_config_path="${CONFIG_FILE}"
     fi
@@ -594,7 +725,7 @@ for idx in "${!RUN_PLAN_INDICES[@]}"; do
     SBATCH_CHAIN_LAST_IDS[chain_index]="${job_id}"
     SBATCH_JOB_IDS+=("${job_id}")
     echo "[SBATCH] Submitted ${run_uuid} (${run_progress}) as job ${job_id} | rank=${proj_rank}, lr=${lr_value}, rotate=${rotate_flag}" >&2
-    sleep 30
+    sleep 1
 
     ((++dispatched_runs))
 done
