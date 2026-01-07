@@ -12,14 +12,14 @@ NGPU=${NGPU:-4}
 MIN_REPLICAS=${MIN_REPLICAS:-${NGPU}}
 QUORUM_TICK_MS=${QUORUM_TICK_MS:-100}
 LIGHTHOUSE_HOST=${LIGHTHOUSE_HOST:-"localhost"}
-LIGHTHOUSE_PORT=${LIGHTHOUSE_PORT:-29510}
+LIGHTHOUSE_PORT=${LIGHTHOUSE_PORT:-29610}
 S3_ENDPOINT_URL=${S3_ENDPOINT_URL:-"http://taranaki.cl.cam.ac.uk:9000"}
 if [[ -z "${PYTHONPATH:-}" ]]; then
   PYTHONPATH="${REPO_ROOT}"
 else
   PYTHONPATH="${REPO_ROOT}:${PYTHONPATH}"
 fi
-RUN_PREFIX=${RUN_PREFIX:-"icml2026-exp3-pg-test"}
+RUN_PREFIX=${RUN_PREFIX:-"icml2026-exp3.1-local-test"}
 TIMESTAMP=$(date +"%Y%m%d-%H%M%S")
 
 # Chain definition (rank, lr, resume path per run).
@@ -43,11 +43,18 @@ TIMESTAMP=$(date +"%Y%m%d-%H%M%S")
 # 	"icml2026-warmup-ef-a35e91e2-r128-lr0p016-rottrue-20251217-151833-idx0"
 # 	"icml2026-warmed-up-ddp-75a6984d-r256-lr0p008-rottrue-20251128-171759-idx0"
 # )
-declare -a CHAIN_RANKS=(8)
+declare -a CHAIN_RANKS=(128)
 declare -a CHAIN_LRS=(0.016)
 declare -a CHAIN_RESUME_RUNS=( # THESE ARE THE EF WARMED UP RUNS!
-	"icml2026-galore-ef-d99a5257-r8-lr0p016-rottrue-20251217-102843-idx0"
+	"icml2026-warmup-ef-a35e91e2-r128-lr0p016-rottrue-20251217-151833-idx0"
 )
+
+# Optional per-run hyperparameter-switch omega values (will be written to
+# HP_SWITCH_NEW_VS for the per-run config). Provide one entry per run.
+declare -a CHAIN_OMEGAS=("0.95,")
+# Optional per-run lr-scheduler switch scale values (will be written to
+# lr_scheduler.switch_scale in the generated config). Provide one entry per run.
+declare -a CHAIN_SWITCH_SCALES=("1.0")
 
 CHAIN_LENGTH=${#CHAIN_RANKS[@]}
 
@@ -55,8 +62,9 @@ if (( CHAIN_LENGTH == 0 )); then
 	echo "No GaLore runs specified." >&2
 	exit 1
 fi
-if (( ${#CHAIN_LRS[@]} != CHAIN_LENGTH || ${#CHAIN_RESUME_RUNS[@]} != CHAIN_LENGTH )); then
+if (( ${#CHAIN_LRS[@]} != CHAIN_LENGTH || ${#CHAIN_RESUME_RUNS[@]} != CHAIN_LENGTH || ${#CHAIN_OMEGAS[@]} != CHAIN_LENGTH || ${#CHAIN_SWITCH_SCALES[@]} != CHAIN_LENGTH )); then
 	echo "Chain arrays are mismatched in length." >&2
+	echo "Ensure CHAIN_RANKS, CHAIN_LRS, CHAIN_RESUME_RUNS, CHAIN_OMEGAS, and CHAIN_SWITCH_SCALES all have the same length." >&2
 	exit 1
 fi
 
@@ -74,6 +82,7 @@ HP_SWITCH_STEPS=${HP_SWITCH_STEPS:-2048}
 HP_SWITCH_NEW_VS=${HP_SWITCH_NEW_VS:-"0.95,"}
 HP_SWITCH_NEW_BETAS=${HP_SWITCH_NEW_BETAS:-"0.999,0.999"}
 HP_SWITCH_RESET_MOMENTA=${HP_SWITCH_RESET_MOMENTA:-"exp_avg,exp_avg_sq"}
+LOCAL_DESLOC_PROJECTOR_SOURCE=${LOCAL_DESLOC_PROJECTOR_SOURCE:-"pseudo_grad"}
 
 GENERATED_CONFIG_DIR=${GENERATED_CONFIG_DIR:-"${SCRIPT_DIR}/generated_configs"}
 ARGS_DIR=${ARGS_DIR:-"${GENERATED_CONFIG_DIR}/args"}
@@ -141,6 +150,12 @@ rotate_flag = os.environ["ROTATE_MOMENTS"].strip().lower() in {"true", "1", "yes
 use_error_feedback = os.environ["USE_ERROR_FEEDBACK"].strip().lower() in {"true", "1", "yes", "on"}
 full_rank_threshold = int(os.environ["FULL_RANK_THRESHOLD"])
 # Respect the base config unless the env var is explicitly provided.
+proj_source_env = os.environ.get("DESLOC_PROJECTOR_SOURCE", "").strip()
+if proj_source_env == "":
+	desloc_projector_source = None
+else:
+	desloc_projector_source = proj_source_env
+# Respect the base config unless the env var is explicitly provided.
 galore_qhm_env = os.environ.get("GALORE_QHM_OUTSIDE")
 if galore_qhm_env is None or galore_qhm_env.strip() == "":
 	# keep existing optimizer value if present; otherwise default to False
@@ -162,6 +177,8 @@ hp_new_vs_env = os.environ.get("HP_SWITCH_NEW_VS", "").strip()
 hp_new_betas_env = os.environ.get("HP_SWITCH_NEW_BETAS", "").strip()
 hp_reset_momenta_env = os.environ.get("HP_SWITCH_RESET_MOMENTA", "").strip()
 
+lr_sched_switch_scale_env = os.environ.get("LR_SCHED_SWITCH_SCALE", "").strip()
+
 data = tomllib.loads(base.read_text(encoding="utf-8"))
 optimizer = data.setdefault("optimizer", {})
 optimizer["lr"] = lr
@@ -178,26 +195,33 @@ else:
 		optimizer["name"] = "GaLore"
 		optimizer["galore_rotate_moments_on_refresh"] = rotate_flag
 		optimizer["galore_use_error_feedback"] = use_error_feedback
-		param_sync = optimizer.get("desloc", {}).get("param_sync_every")
+		desloc_cfg = optimizer.setdefault("desloc", {})
+		if not isinstance(desloc_cfg, dict):  # pragma: no cover - defensive guard
+			desloc_cfg = {}
+			optimizer["desloc"] = desloc_cfg
+		param_sync = desloc_cfg.get("param_sync_every")
 		if param_sync is None:
-				param_sync = optimizer.get("galore_update_proj_gap", 32)
+			param_sync = optimizer.get("galore_update_proj_gap", 32)
+		desloc_cfg["param_sync_every"] = param_sync
 		optimizer["galore_update_proj_gap"] = param_sync
 		regex_entries = optimizer.get("galore_param_regexes")
 		normalized = []
 		if isinstance(regex_entries, list):
-				for entry in regex_entries:
-						if isinstance(entry, dict):
-								normalized.append(dict(entry))
+			for entry in regex_entries:
+				if isinstance(entry, dict):
+					normalized.append(dict(entry))
 		elif isinstance(regex_entries, dict):
-				normalized = [dict(regex_entries)]
+			normalized = [dict(regex_entries)]
 		if not any(entry.get("param_str_match") == pattern for entry in normalized):
-				normalized.append({"param_str_match": pattern, "rank": rank})
+			normalized.append({"param_str_match": pattern, "rank": rank})
 		else:
-				for entry in normalized:
-						if entry.get("param_str_match") == pattern:
-								entry["rank"] = rank
-								break
+			for entry in normalized:
+				if entry.get("param_str_match") == pattern:
+					entry["rank"] = rank
+					break
 		optimizer["galore_param_regexes"] = normalized
+		if desloc_projector_source is not None:
+			desloc_cfg["low_rank_projector_source"] = desloc_projector_source
 
 # determine galore vs list from env (GALORE_VS) or fallback to base config/defaults
 galore_vs_env = os.environ.get("GALORE_VS", "").strip()
@@ -236,6 +260,15 @@ if resume_run:
 		s3_cfg["resume_from_run_step"] = f"{resume_run}/step-{resume_step}"
 else:
 		s3_cfg["resume_from_run_step"] = ""
+
+# Apply optional lr-scheduler switch scale override when provided.
+if lr_sched_switch_scale_env:
+	try:
+		switch_scale_val = float(lr_sched_switch_scale_env)
+	except Exception:
+		switch_scale_val = None
+	if switch_scale_val is not None:
+		data.setdefault("lr_scheduler", {})["switch_scale"] = switch_scale_val
 
 output.parent.mkdir(parents=True, exist_ok=True)
 output.write_text(tomli_w.dumps(data), encoding="utf-8")
@@ -288,9 +321,12 @@ COMMON_SBATCH_ARGS=(
 [[ -n "${SBATCH_QOS}" ]] && COMMON_SBATCH_ARGS+=(--qos="${SBATCH_QOS}")
 COMMON_SBATCH_ARGS+=("${SBATCH_EXTRA_ARRAY[@]}")
 
-echo "Planned GaLore chain (${CHAIN_LENGTH} runs):"
+total_planned=$(( CHAIN_LENGTH * 3 ))
+echo "Planned GaLore chain (expanded ${total_planned} runs: base HP-off plus HP-on GALORE_QHM_OUTSIDE sweep):"
 for ((idx=0; idx<CHAIN_LENGTH; idx++)); do
-	printf '  [%d] rank=%-4d lr=%-6s resume=%s\n' "${idx}" "${CHAIN_RANKS[$idx]}" "${CHAIN_LRS[$idx]}" "${CHAIN_RESUME_RUNS[$idx]}"
+	printf '  [%d.a] rank=%-4d lr=%-6s resume=%s hp_switch=%s qhm=%s\n' "${idx}" "${CHAIN_RANKS[$idx]}" "${CHAIN_LRS[$idx]}" "${CHAIN_RESUME_RUNS[$idx]}" "false" "${GALORE_QHM_OUTSIDE}"
+	printf '  [%d.b1] rank=%-4d lr=%-6s resume=%s hp_switch=%s qhm=%s\n' "${idx}" "${CHAIN_RANKS[$idx]}" "${CHAIN_LRS[$idx]}" "${CHAIN_RESUME_RUNS[$idx]}" "true" "true"
+	printf '  [%d.b2] rank=%-4d lr=%-6s resume=%s hp_switch=%s qhm=%s\n' "${idx}" "${CHAIN_RANKS[$idx]}" "${CHAIN_LRS[$idx]}" "${CHAIN_RESUME_RUNS[$idx]}" "true" "false"
 done
 echo ""
 
@@ -302,44 +338,69 @@ for ((idx=0; idx<CHAIN_LENGTH; idx++)); do
 	lr=${CHAIN_LRS[$idx]}
 	resume_run=${CHAIN_RESUME_RUNS[$idx]}
 	lr_tag=${lr/./p}
-	run_suffix=$(printf "idx%02d-r%d-lr%s" $((idx + 1)) "${rank}" "${lr_tag}")
-	run_uuid="${RUN_PREFIX}-${TIMESTAMP}-${run_suffix}"
-	config_path="${GENERATED_CONFIG_DIR}/${run_uuid}.toml"
-	args_file="${ARGS_DIR}/${run_uuid}.args"
-	log_dir="${LOG_ROOT}/${run_uuid}"
-	mkdir -p "${log_dir}"
 
-	run_python_config "${CONFIG_FILE}" "${config_path}" "${rank}" "${lr}" "${resume_run}"
-	write_args_file "${args_file}" "${TRAINING_ARGS[@]}"
+	# For each chain index, sweep over HP_SWITCH being disabled (false) and enabled (true).
+	for hp_flag in false true; do
+		if [[ "${hp_flag}" == "true" ]]; then
+			qhm_values=(true false)
+		else
+			qhm_values=("${GALORE_QHM_OUTSIDE}")
+		fi
 
-	job_name="galore_chain_r${rank}_lr${lr_tag}"
-	sbatch_args=("${COMMON_SBATCH_ARGS[@]}" --job-name="${job_name}" --output="${SLURM_LOG_DIR}/slurm-${run_uuid}-%j.out")
-	if [[ -n "${previous_job_id}" ]]; then
-		sbatch_args+=(--dependency="afterok:${previous_job_id}")
-	fi
+		for qhm_value in "${qhm_values[@]}"; do
+			if [[ "${hp_flag}" == "true" ]]; then
+				run_suffix_extra="-qhm${qhm_value}"
+				job_suffix_extra="_qhm${qhm_value}"
+			else
+				run_suffix_extra=""
+				job_suffix_extra=""
+			fi
 
-	# Export run-specific values directly to the sbatch job so we can use a
-	# single-quoted heredoc without triggering premature shell expansion.
-	sbatch_export_arg="ALL"
-	for kv in \
-		"RUN_UUID=${run_uuid}" \
-		"CONFIG_PATH=${config_path}" \
-		"LOG_DIR=${log_dir}" \
-		"ARGS_FILE=${args_file}" \
-		"REPO_ROOT=${REPO_ROOT}" \
-		"TRAIN_MODULE=${TRAIN_MODULE}" \
-		"NGPU=${NGPU}" \
-		"MIN_REPLICAS=${MIN_REPLICAS}" \
-		"QUORUM_TICK_MS=${QUORUM_TICK_MS}" \
-		"LIGHTHOUSE_HOST=${LIGHTHOUSE_HOST}" \
-		"LIGHTHOUSE_PORT=${LIGHTHOUSE_PORT}" \
-		"S3_ENDPOINT_URL=${S3_ENDPOINT_URL}" \
-		"PYTHONPATH=${PYTHONPATH}"; do
-		sbatch_export_arg+="${kv:+,${kv}}"
-	done
-	sbatch_args+=("--export=${sbatch_export_arg}")
+			run_suffix=$(printf "idx%02d-r%d-lr%s-hp%s%s" $((idx + 1)) "${rank}" "${lr_tag}" "${hp_flag}" "${run_suffix_extra}")
+			run_uuid="${RUN_PREFIX}-${TIMESTAMP}-${run_suffix}"
+			config_path="${GENERATED_CONFIG_DIR}/${run_uuid}.toml"
+			args_file="${ARGS_DIR}/${run_uuid}.args"
+			log_dir="${LOG_ROOT}/${run_uuid}"
+			mkdir -p "${log_dir}"
 
-	sbatch_output=$(sbatch "${sbatch_args[@]}" <<'EOF'
+			if [[ "${hp_flag}" == "true" ]]; then
+				HP_SWITCH_ENABLED="${hp_flag}" HP_SWITCH_NEW_VS="${CHAIN_OMEGAS[$idx]:-}" LR_SCHED_SWITCH_SCALE="${CHAIN_SWITCH_SCALES[$idx]:-}" \
+					GALORE_QHM_OUTSIDE="${qhm_value}" DESLOC_PROJECTOR_SOURCE="${LOCAL_DESLOC_PROJECTOR_SOURCE}" \
+					run_python_config "${CONFIG_FILE}" "${config_path}" "${rank}" "${lr}" "${resume_run}"
+			else
+				HP_SWITCH_ENABLED="${hp_flag}" GALORE_QHM_OUTSIDE="${qhm_value}" DESLOC_PROJECTOR_SOURCE="${LOCAL_DESLOC_PROJECTOR_SOURCE}" \
+					run_python_config "${CONFIG_FILE}" "${config_path}" "${rank}" "${lr}" "${resume_run}"
+			fi
+			write_args_file "${args_file}" "${TRAINING_ARGS[@]}"
+
+			job_name="galore_chain_r${rank}_lr${lr_tag}_hp${hp_flag}${job_suffix_extra}"
+			sbatch_args=("${COMMON_SBATCH_ARGS[@]}" --job-name="${job_name}" --output="${SLURM_LOG_DIR}/slurm-${run_uuid}-%j.out")
+			if [[ -n "${previous_job_id}" ]]; then
+				sbatch_args+=(--dependency="afterok:${previous_job_id}")
+			fi
+
+			# Export run-specific values directly to the sbatch job so we can use a
+			# single-quoted heredoc without triggering premature shell expansion.
+			sbatch_export_arg="ALL"
+			for kv in \
+				"RUN_UUID=${run_uuid}" \
+				"CONFIG_PATH=${config_path}" \
+				"LOG_DIR=${log_dir}" \
+				"ARGS_FILE=${args_file}" \
+				"REPO_ROOT=${REPO_ROOT}" \
+				"TRAIN_MODULE=${TRAIN_MODULE}" \
+				"NGPU=${NGPU}" \
+				"MIN_REPLICAS=${MIN_REPLICAS}" \
+				"QUORUM_TICK_MS=${QUORUM_TICK_MS}" \
+				"LIGHTHOUSE_HOST=${LIGHTHOUSE_HOST}" \
+				"LIGHTHOUSE_PORT=${LIGHTHOUSE_PORT}" \
+				"S3_ENDPOINT_URL=${S3_ENDPOINT_URL}" \
+				"PYTHONPATH=${PYTHONPATH}"; do
+				sbatch_export_arg+="${kv:+,${kv}}"
+			done
+			sbatch_args+=("--export=${sbatch_export_arg}")
+
+			sbatch_output=$(sbatch "${sbatch_args[@]}" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
 
@@ -423,7 +484,7 @@ for ((replica_id=0; replica_id<NGPU; replica_id++)); do
 		cd "${REPO_ROOT}"
 		export CUDA_VISIBLE_DEVICES="${gpu_id}"
 		export PYTORCH_ALLOC_CONF="expandable_segments:True"
-		rdzv_port=$((40000 + replica_id))
+		rdzv_port=$((30000 + replica_id))
 		uv run --no-sync torchrun \
 			--nproc_per_node=1 \
 			--rdzv_backend=c10d \
@@ -462,15 +523,17 @@ exit ${replica_status}
 EOF
 )
 
-	if [[ "${sbatch_output}" =~ Submitted\ batch\ job\ ([0-9]+) ]]; then
-		job_id=${BASH_REMATCH[1]}
-		previous_job_id=${job_id}
-		SUBMITTED_JOB_IDS+=(${job_id})
-		echo "Submitted job ${job_id} (${job_name})"
-	else
-		echo "Failed to submit job for run ${run_uuid}" >&2
-		exit 1
-	fi
+			if [[ "${sbatch_output}" =~ Submitted\ batch\ job\ ([0-9]+) ]]; then
+				job_id=${BASH_REMATCH[1]}
+				previous_job_id=${job_id}
+				SUBMITTED_JOB_IDS+=(${job_id})
+				echo "Submitted job ${job_id} (${job_name})"
+			else
+				echo "Failed to submit job for run ${run_uuid}" >&2
+				exit 1
+			fi
+		done
+	done
 done
 
 echo ""
