@@ -27,13 +27,13 @@ hf_assets_path = "./tests/assets/tokenizer"
 
 
 [optimizer]
-name = "GaLore"
+name = "GaLoreGlobal"
 builder = "mosaic"
 lr = 0.001
 eps = 1e-8
 weight_decay = 0.0
 betas = [0.9, 0.999]
-galore_update_proj_gap = 32 # make this the same to the number of param sync steps!
+galore_update_proj_gap = 32 # keep projection refresh aligned with sync cadence
 galore_scale = 1.0
 galore_dim = 2
 galore_vs = [0.0]
@@ -41,16 +41,19 @@ galore_rotate_moments_on_refresh = false
 galore_use_error_feedback = true
 # Keep regex-based rank selection identical to the checkpoint.
 galore_param_regexes = [
-  { param_str_match = "attention\\.w[qkv]|attention\\.wo|feed_forward\\.w[12]", rank = 32 },
+    { param_str_match = "attention\\.w[qkv]|attention\\.wo|feed_forward\\.w[12]", rank = 32 },
 ]
 implementation = "for-loop"
 
-# [optimizer.desloc]
-# enabled = false
-# param_sync_every = 32
-# optimizer_sync_every = [32,32]
-# backup_device = "cpu"
-# pin_memory = true
+[optimizer.desloc]
+enabled = true
+param_sync_every = 32
+optimizer_sync_every = [32,32,32]
+backup_device = "cpu"
+pin_memory = true
+low_rank_server_update = true
+low_rank_projector_error_feedback = false # We do not want server error feedback.
+low_rank_projector_source = "pseudo_grad"
 
 [fl_metrics.optimizer_monitor]
 interval = 16

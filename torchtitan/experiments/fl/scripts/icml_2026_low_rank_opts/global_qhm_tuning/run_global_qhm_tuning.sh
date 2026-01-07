@@ -1,17 +1,35 @@
 #!/usr/bin/env bash
-# Sweep GaLore ranks and learning rates via sbatch without reusing a warmed checkpoint.
+# Sweep GaLoreGlobal ranks and learning rates via sbatch using warmed checkpoints.
 set -euo pipefail
 
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 CONFIG_FILE=${CONFIG_FILE:-"${SCRIPT_DIR}/base.toml"}
 TRAIN_MODULE=${TRAIN_MODULE:-"torchtitan.experiments.fl.train"}
-RUN_PREFIX=${RUN_PREFIX:-"icml2026-qhm-tuning"}
+RUN_PREFIX=${RUN_PREFIX:-"icml2026-global-qhm-tuning"}
 LOG_RANK=${LOG_RANK:-0}
+# TorchFT/Des-LOC runtime knobs
+NGPU=${NGPU:-${SBATCH_GPUS_PER_TASK:-4}}
+MIN_REPLICAS=${MIN_REPLICAS:-${NGPU}}
+QUORUM_TICK_MS=${QUORUM_TICK_MS:-100}
+PORT_OFFSET=${PORT_OFFSET:-0}
 
-PROJECTION_RANKS=${PROJECTION_RANKS:-"8 16 32 64 128 256"}
-LR_VALUES=${LR_VALUES:-"0.016 0.008 0.008 0.008 0.016 0.008"}
+# PROJECTION_RANKS=${PROJECTION_RANKS:-"8 16 32 64 128"}
+# LR_VALUES=${LR_VALUES:-"0.016 0.008 0.008 0.008 0.016"}
+# WARMED_CHECKPOINTS=${WARMED_CHECKPOINTS:-"\
+#   icml2026-check-test-proj-savec-d99a5257-r8-lr0p016-rottrue-20251221-174207-idx0 \
+#   icml2026-global-checkpoint-4dd9e45e-r16-lr0p008-rottrue-20260104-215851-idx0 \
+#   icml2026-global-checkpoint-54f19506-r32-lr0p008-rottrue-20260104-222010-idx0 \
+#   icml2026-global-checkpoint-ebf60169-r64-lr0p008-rottrue-20260104-223953-idx0 \
+#   icml2026-global-checkpoint-a35e91e2-r128-lr0p016-rottrue-20260105-075751-idx0 \
+# "}
+PROJECTION_RANKS=${PROJECTION_RANKS:-"8"}
+LR_VALUES=${LR_VALUES:-"0.016"}
+WARMED_CHECKPOINTS=${WARMED_CHECKPOINTS:-"\
+  icml2026-check-test-proj-savec-d99a5257-r8-lr0p016-rottrue-20251221-174207-idx0 \
+"}
+RESUME_STEP=${RESUME_STEP:-2048}
 ROTATE_MOMENTS_OPTIONS=${ROTATE_MOMENTS_OPTIONS:-"true"}
-SWITCH_SCALES=${SWITCH_SCALES:-"1.0 2.0 4.0 8.0"}
+SWITCH_SCALES=${SWITCH_SCALES:-"1.0"}
 
 VS_VALUES=${VS_VALUES:-"0.90 0.91 0.92 0.93 0.94 0.95 0.96 0.97 0.98 0.99"}
 QHM_OUTSIDE_OPTIONS=${QHM_OUTSIDE_OPTIONS:-"true false"}
@@ -21,8 +39,8 @@ RUN_INDEX_OFFSET=${RUN_INDEX_OFFSET:-0}
 RUN_INDEX_RANGE=${RUN_INDEX_RANGE:-}
 DRY_RUN=${DRY_RUN:-false}
 SBATCH_CPUS_PER_TASK=${SBATCH_CPUS_PER_TASK:-8}
-SBATCH_GPUS_PER_TASK=${SBATCH_GPUS_PER_TASK:-1}
-SBATCH_MAX_CHAINS=${SBATCH_MAX_CHAINS:-6}
+SBATCH_GPUS_PER_TASK=${SBATCH_GPUS_PER_TASK:-4}
+SBATCH_MAX_CHAINS=${SBATCH_MAX_CHAINS:-1}
 SBATCH_MEM=${SBATCH_MEM:-}
 SBATCH_TIME=${SBATCH_TIME:-}
 SBATCH_PARTITION=${SBATCH_PARTITION:-}
@@ -31,6 +49,7 @@ SBATCH_QOS=${SBATCH_QOS:-}
 SBATCH_CONSTRAINT=${SBATCH_CONSTRAINT:-}
 SBATCH_COMMENT=${SBATCH_COMMENT:-}
 SBATCH_LOG_DIR=${SBATCH_LOG_DIR:-"${SCRIPT_DIR}/logs"}
+RUN_LOG_DIR=${RUN_LOG_DIR:-"${SCRIPT_DIR}/run_logs"}
 SBATCH_ADDITIONAL_ARGS=${SBATCH_ADDITIONAL_ARGS:-}
 SBATCH_NODE=${SBATCH_NODE:-"mauao"}
 
@@ -136,10 +155,24 @@ fi
 
 read -r -a PROJECTION_RANK_ARRAY <<< "${PROJECTION_RANKS}"
 read -r -a LR_ARRAY <<< "${LR_VALUES}"
+read -r -a WARMED_CKPT_ARRAY <<< "${WARMED_CHECKPOINTS}"
 
 # Use a fixed LR per rank: lengths must match one-to-one
 if (( ${#LR_ARRAY[@]} != ${#PROJECTION_RANK_ARRAY[@]} )); then
   echo "When using fixed LR per rank, PROJECTION_RANKS and LR_VALUES must have the same number of entries." >&2
+  exit 1
+fi
+if (( ${#WARMED_CKPT_ARRAY[@]} != 0 && ${#WARMED_CKPT_ARRAY[@]} != ${#PROJECTION_RANK_ARRAY[@]} )); then
+  echo "WARMED_CHECKPOINTS must either be empty or match PROJECTION_RANKS/LR_VALUES length." >&2
+  exit 1
+fi
+if (( ${#WARMED_CKPT_ARRAY[@]} == 0 )); then
+  echo "WARMED_CHECKPOINTS is required: provide one warmed checkpoint per rank/lr pair." >&2
+  exit 1
+fi
+
+if ! [[ "${RESUME_STEP}" =~ ^[0-9]+$ ]]; then
+  echo "RESUME_STEP must be a positive integer (got ${RESUME_STEP})." >&2
   exit 1
 fi
 
@@ -296,12 +329,14 @@ declare -a RUN_PLAN_ROTATES=()
 declare -a RUN_PLAN_SWITCH_SCALES=()
 declare -a RUN_PLAN_NEW_VS=()
 declare -a RUN_PLAN_QHM_OUTSIDE=()
+declare -a RUN_PLAN_RESUME=()
 
 combination_index=0
 # Build runs by index: LR maps 1:1 to PROJECTION_RANKS, and we sweep switch_scale, vs, qhm_outside
 for i in "${!PROJECTION_RANK_ARRAY[@]}"; do
   rank=${PROJECTION_RANK_ARRAY[i]}
   lr=${LR_ARRAY[i]}
+  resume_run=${WARMED_CKPT_ARRAY[i]}
   for switch_scale in "${SWITCH_SCALE_ARRAY[@]}"; do
     for new_v in "${VS_ARRAY[@]}"; do
       for qhm in "${QHM_OUTSIDE_ARRAY[@]}"; do
@@ -317,6 +352,7 @@ for i in "${!PROJECTION_RANK_ARRAY[@]}"; do
           RUN_PLAN_SWITCH_SCALES+=("${switch_scale}")
           RUN_PLAN_NEW_VS+=("${new_v}")
           RUN_PLAN_QHM_OUTSIDE+=("${qhm}")
+          RUN_PLAN_RESUME+=("${resume_run}")
         done
       done
     done
@@ -363,6 +399,7 @@ generate_run_config() {
   local new_v_run=${5:-}
   local qhm_outside=${6:-}
   local lr_value=${7:-}
+  local resume_run=${8:-}
   local output_path="${GENERATED_CONFIG_DIR}/${run_uuid}.toml"
 
   BASE_CONFIG_PATH="${CONFIG_FILE}" \
@@ -376,6 +413,8 @@ generate_run_config() {
   SWITCH_SCALE="${switch_scale}" \
   QHM_OUTSIDE="${qhm_outside}" \
   LR_VALUE="${lr_value}" \
+  RESUME_RUN="${resume_run}" \
+  RESUME_STEP="${RESUME_STEP}" \
   uv run --no-sync python3  <<'PY'
 import os
 import sys
@@ -408,9 +447,26 @@ else:
   raise ValueError(f"Unsupported boolean for rotate_moments_on_refresh: {rotate_flag}")
 
 data = tomllib.loads(base.read_text(encoding="utf-8"))
+
+# Enable fault tolerance for TorchFT/DES-LOC
+fault_tolerance = data.setdefault("fault_tolerance", {})
+fault_tolerance["enable"] = True
+
 optimizer = data.setdefault("optimizer", {})
-regex_entries = optimizer.get("galore_param_regexes")
+# enforce GaLoreGlobal + DesLoc defaults for the tuning sweep
+optimizer["name"] = "GaLoreGlobal"
 optimizer["galore_rotate_moments_on_refresh"] = rotate_moments
+optimizer["galore_use_error_feedback"] = True
+optimizer["galore_update_proj_gap"] = 32
+desloc_cfg = optimizer.get("desloc") if isinstance(optimizer.get("desloc"), dict) else {}
+desloc_cfg["enabled"] = True
+desloc_cfg["param_sync_every"] = 32
+desloc_cfg["optimizer_sync_every"] = [32, 32, 32]
+desloc_cfg["low_rank_server_update"] = True
+desloc_cfg["low_rank_projector_error_feedback"] = True
+desloc_cfg["low_rank_projector_source"] = "pseudo_grad"
+optimizer["desloc"] = desloc_cfg
+regex_entries = optimizer.get("galore_param_regexes")
 
 normalized: list[dict] = []
 if isinstance(regex_entries, (list, tuple)):
@@ -515,6 +571,16 @@ if lr_env is not None and lr_env.strip() != "":
     optimizer["lr"] = float(lr_env)
   except Exception:
     optimizer["lr"] = lr_env
+
+# Resume from warmed checkpoint and enforce training steps
+resume_run = os.environ.get("RESUME_RUN", "").strip()
+resume_step = os.environ.get("RESUME_STEP", "2048").strip()
+if resume_run:
+  s3_cfg = data.setdefault("s3_checkpoint", {})
+  s3_cfg["resume_from_run_step"] = f"{resume_run}/step-{resume_step}"
+  data.setdefault("training", {})["steps"] = int(data.get("training", {}).get("steps", 6144))
+else:
+  raise ValueError("RESUME_RUN must be provided for warmed checkpoint tuning")
 output.parent.mkdir(parents=True, exist_ok=True)
 output.write_text(tomli_w.dumps(data), encoding="utf-8")
 PY
@@ -540,6 +606,9 @@ if [[ "${DRY_RUN}" != "true" ]]; then
   fi
   if [[ -n "${SBATCH_LOG_DIR}" ]]; then
     mkdir -p "${SBATCH_LOG_DIR}"
+  fi
+  if [[ -n "${RUN_LOG_DIR}" ]]; then
+    mkdir -p "${RUN_LOG_DIR}"
   fi
 fi
 
@@ -582,8 +651,8 @@ print_run_plan_table() {
 submit_sbatch_job() {
   local run_uuid=$1
   local run_progress=$2
-  local rdzv_endpoint=$3
-  local lighthouse_url=$4
+  local lighthouse_port=$3
+  local rdzv_base_port=$4
   local combo_index_label=$5
   local proj_rank=$6
   local lr_value=$7
@@ -591,6 +660,13 @@ submit_sbatch_job() {
   local dependency_job=$9
   local chain_index=${10}
   local run_config_path=${11}
+  local run_log_dir=${12}
+
+  # Precompute lighthouse URL to avoid set -u issues during heredoc expansion
+  local lighthouse_url="${LIGHTHOUSE_PROTOCOL}://${LIGHTHOUSE_HOST}:${lighthouse_port}"
+  local lighthouse_log_file="${run_log_dir}/lighthouse.log"
+  # Provide uppercase binding to satisfy set -u during heredoc expansion
+  LIGHTHOUSE_LOG_FILE="${lighthouse_log_file}"
 
   local job_name="${RUN_PREFIX}-${SWEEP_HASH}-idx${combo_index_label}"
   local sbatch_opts=(--parsable "-c" "${SBATCH_CPUS_PER_TASK}" "--gres=gpu:${SBATCH_GPUS_PER_TASK}" "--job-name=${job_name}")
@@ -608,45 +684,121 @@ submit_sbatch_job() {
   fi
   sbatch_opts+=("${SBATCH_EXTRA_ARRAY[@]}")
 
-  local job_id
-  if ! job_id=$(sbatch "${sbatch_opts[@]}" <<EOF
+  # Export all necessary variables for the sbatch job
+  local sbatch_export_arg="ALL"
+  for kv in \
+    "RUN_UUID=${run_uuid}" \
+    "WANDB_PROJECT=${WANDB_PROJECT:-galore-tune-lr}" \
+    "WANDB_TEAM=${WANDB_TEAM:-camlsys}" \
+    "WANDB_RUN_NAME=${run_uuid}" \
+    "TORCHTITAN_FORCE_WANDB_WORKER_SUFFIX=1" \
+    "S3_ENDPOINT_URL=http://taranaki.cl.cam.ac.uk:9000" \
+    "LOG_DIR=${run_log_dir}" \
+    "NGPU=${NGPU}" \
+    "MIN_REPLICAS=${MIN_REPLICAS}" \
+    "QUORUM_TICK_MS=${QUORUM_TICK_MS}" \
+    "LIGHTHOUSE_HOST=${LIGHTHOUSE_HOST}" \
+    "LIGHTHOUSE_PORT=${lighthouse_port}" \
+    "RDZV_PORT_BASE=${rdzv_base_port}" \
+    "TRAIN_MODULE=${TRAIN_MODULE}" \
+    "LIGHTHOUSE_LOG_FILE=${lighthouse_log_file}" \
+    "LIGHTHOUSE_PROTOCOL=${LIGHTHOUSE_PROTOCOL:-http}" \
+    "TORCHFT_LIGHTHOUSE=${lighthouse_url}" \
+    "CONFIG_PATH=${run_config_path}" \
+    "TRAINING_ARGS_ESCAPED=${TRAINING_ARGS_ESCAPED}"; do
+    sbatch_export_arg+="${kv:+,${kv}}"
+  done
+  sbatch_opts+=("--export=${sbatch_export_arg}")
+
+  local sbatch_output
+  sbatch_output=$(sbatch "${sbatch_opts[@]}" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
-echo "==================================================================="
-echo "STARTING SBATCH JOB: ${job_name} (ID: \$SLURM_JOB_ID)"
-echo "Run UUID: ${run_uuid} | Progress: ${run_progress} | rank=${proj_rank} | lr=${lr_value} | rotate=${rotate_flag}"
-echo "Chain Index: ${chain_index} | Dependency: ${dependency_job:-none}"
-echo "Node: \$(hostname) at \$(date)"
-echo "==================================================================="
-      export TORCHFT_LIGHTHOUSE="${lighthouse_url}"
-      export RUN_UUID="${run_uuid}"
-export WANDB_PROJECT=\${WANDB_PROJECT:-"galore-tune-lr"}
-export WANDB_TEAM=\${WANDB_TEAM:-"camlsys"}
-export WANDB_RUN_NAME="${run_uuid}"
-export TORCHTITAN_FORCE_WANDB_WORKER_SUFFIX=\${TORCHTITAN_FORCE_WANDB_WORKER_SUFFIX:-1}
-export S3_ENDPOINT_URL='http://taranaki.cl.cam.ac.uk:9000'
 
-uv run --no-sync torchrun \
-  --nproc_per_node=1 \
-  --rdzv_backend=c10d \
-  --rdzv_endpoint="${rdzv_endpoint}" \
-  --rdzv_id "${run_uuid}" \
-  --local-ranks-filter="${LOG_RANK}" \
-  --role rank \
-  --tee 3 \
-  -m "${TRAIN_MODULE}" \
-  --job.config_file "${run_config_path}" \
-  --optimizer.builder mosaic \
-  --optimizer.name GaLore \
-  --optimizer.lr "${lr_value}" \
-  --training.global_batch_size 64 \
-  --training.local_batch_size 16 \
-  --training.steps 6144 \
-  ${TRAINING_ARGS_ESCAPED}
-echo "JOB FINISHED: \$(date)"
+echo "==================================================================="
+echo "STARTING SBATCH JOB (ID: $SLURM_JOB_ID)"
+echo "Run UUID: ${RUN_UUID}"
+echo "Node: $(hostname) at $(date)"
+echo "Lighthouse: ${LIGHTHOUSE_HOST}:${LIGHTHOUSE_PORT} | RDZV base: ${RDZV_PORT_BASE}"
+echo "==================================================================="
+
+find /dev/shm -maxdepth 1 -user "${USER}" -exec rm -rf {} + 2>/dev/null || true
+
+mkdir -p "${LOG_DIR}"
+
+uv run --no-sync torchft_lighthouse \
+  --min_replicas "${MIN_REPLICAS}" \
+  --quorum_tick_ms "${QUORUM_TICK_MS}" \
+  --bind "${LIGHTHOUSE_HOST}:${LIGHTHOUSE_PORT}" \
+  > "${LIGHTHOUSE_LOG_FILE}" 2>&1 &
+LIGHTHOUSE_PID=$!
+sleep 2
+if ! kill -0 "${LIGHTHOUSE_PID}" 2>/dev/null; then
+  echo "Lighthouse failed to start; see ${LIGHTHOUSE_LOG_FILE}" >&2
+  exit 1
+fi
+
+AVAILABLE_GPUS=()
+if [[ -n "${CUDA_VISIBLE_DEVICES:-}" ]]; then
+  IFS=',' read -r -a AVAILABLE_GPUS <<< "${CUDA_VISIBLE_DEVICES}"
+else
+  for ((i=0; i<NGPU; i++)); do
+    AVAILABLE_GPUS+=("${i}")
+  done
+fi
+
+if (( ${#AVAILABLE_GPUS[@]} < NGPU )); then
+  echo "Requested ${NGPU} replicas but only ${#AVAILABLE_GPUS[@]} GPU(s) available." >&2
+  exit 1
+fi
+
+REPLICA_GPUS=("${AVAILABLE_GPUS[@]:0:NGPU}")
+declare -a REPLICA_PIDS=()
+
+for ((replica_id=0; replica_id<NGPU; replica_id++)); do
+  gpu_id="${REPLICA_GPUS[$replica_id]}"
+  log_file="${LOG_DIR}/replica_${replica_id}.log"
+  (
+    set -euo pipefail
+    export CUDA_VISIBLE_DEVICES="${gpu_id}"
+    export PYTORCH_ALLOC_CONF="expandable_segments:True"
+    rdzv_port=$((RDZV_PORT_BASE + replica_id))
+    cmd="uv run --no-sync torchrun --nproc_per_node=1 --rdzv_backend=c10d --rdzv_endpoint=\"localhost:${rdzv_port}\" --role=rank --tee=3 -m \"${TRAIN_MODULE}\" --job.config_file \"${CONFIG_PATH}\" --fault_tolerance.replica_id \"${replica_id}\" --fault_tolerance.group_size \"${NGPU}\" --fault_tolerance.min_replica_size \"${MIN_REPLICAS}\" ${TRAINING_ARGS_ESCAPED}"
+    eval "${cmd}"
+  ) > "${log_file}" 2>&1 &
+  REPLICA_PIDS[$replica_id]=$!
+  sleep 1
+done
+
+set +e
+replica_status=0
+for pid in "${REPLICA_PIDS[@]}"; do
+  if ! wait "${pid}"; then
+    replica_status=$?
+  fi
+done
+set -e
+
+if kill -0 "${LIGHTHOUSE_PID}" 2>/dev/null; then
+  kill "${LIGHTHOUSE_PID}"
+fi
+
+exit "${replica_status}"
 EOF
-); then
-    echo "Failed to submit sbatch job ${job_name}." >&2
+)
+
+  # Parse the sbatch output to extract job ID
+  local job_id
+  if [[ "${sbatch_output}" =~ ^[0-9]+$ ]]; then
+    job_id="${sbatch_output}"
+  else
+    echo "Failed to submit sbatch job ${job_name}. Output: ${sbatch_output}" >&2
+    return 1
+  fi
+
+  # Ensure sbatch command succeeds and sets job_id
+  if [[ -z "${job_id:-}" ]]; then
+    echo "Failed to retrieve job ID from sbatch command." >&2
     return 1
   fi
 
@@ -678,6 +830,7 @@ for idx in "${!RUN_PLAN_INDICES[@]}"; do
     proj_rank=${RUN_PLAN_RANKS[idx]}
     lr_value=${RUN_PLAN_LRS[idx]}
     rotate_flag=${RUN_PLAN_ROTATES[idx]}
+    resume_run=${RUN_PLAN_RESUME[idx]}
 
     rank_label=$(sanitize_value "${proj_rank}")
     lr_label=$(sanitize_value "${lr_value}")
@@ -693,7 +846,7 @@ for idx in "${!RUN_PLAN_INDICES[@]}"; do
 
     if [[ "${DRY_RUN}" != "true" ]]; then
       mkdir -p "${GENERATED_CONFIG_DIR}"
-      run_config_path=$(generate_run_config "${run_uuid}" "${proj_rank}" "${rotate_flag}" "${switch_scale_val}" "${new_v_val}" "${qhm_outside_val}" "${lr_value}")
+      run_config_path=$(generate_run_config "${run_uuid}" "${proj_rank}" "${rotate_flag}" "${switch_scale_val}" "${new_v_val}" "${qhm_outside_val}" "${lr_value}" "${resume_run}")
     else
       run_config_path="${CONFIG_FILE}"
     fi
@@ -704,11 +857,12 @@ for idx in "${!RUN_PLAN_INDICES[@]}"; do
     fi
 
     launch_index=$((RUN_COUNTER + 1))
-    rdzv_port=$((RDZV_BASE_PORT + launch_index * PORT_STRIDE))
-    lighthouse_port=$((LIGHTHOUSE_BASE_PORT + launch_index * PORT_STRIDE))
-    rdzv_endpoint="${RDZV_HOST}:${rdzv_port}"
-    lighthouse_url="${LIGHTHOUSE_PROTOCOL}://${LIGHTHOUSE_HOST}:${lighthouse_port}"
+    rdzv_base_port=$((RDZV_BASE_PORT + PORT_OFFSET + launch_index * PORT_STRIDE))
+    lighthouse_port=$((LIGHTHOUSE_BASE_PORT + PORT_OFFSET + launch_index * PORT_STRIDE))
     RUN_COUNTER=${launch_index}
+
+    run_log_dir="${RUN_LOG_DIR}/${run_uuid}"
+    mkdir -p "${run_log_dir}"
 
     chain_index=$((dispatched_runs % SBATCH_MAX_CHAINS))
     dependency_job=${SBATCH_CHAIN_LAST_IDS[chain_index]:-}
@@ -717,7 +871,7 @@ for idx in "${!RUN_PLAN_INDICES[@]}"; do
     else
       echo "[SBATCH] Chain ${chain_index}: submitting ${run_uuid} with no dependency." >&2
     fi
-    job_id=$(submit_sbatch_job "${run_uuid}" "${run_progress}" "${rdzv_endpoint}" "${lighthouse_url}" "${combination_index_zero}" "${proj_rank}" "${lr_value}" "${rotate_flag}" "${dependency_job}" "${chain_index}" "${run_config_path}")
+    job_id=$(submit_sbatch_job "${run_uuid}" "${run_progress}" "${lighthouse_port}" "${rdzv_base_port}" "${combination_index_zero}" "${proj_rank}" "${lr_value}" "${rotate_flag}" "${dependency_job}" "${chain_index}" "${run_config_path}" "${run_log_dir}")
     if [[ -z "${job_id}" ]]; then
       echo "Aborting sweep after failed sbatch submission." >&2
       exit 1
