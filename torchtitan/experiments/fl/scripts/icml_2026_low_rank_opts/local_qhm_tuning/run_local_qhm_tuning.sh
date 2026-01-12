@@ -5,7 +5,7 @@ set -euo pipefail
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 CONFIG_FILE=${CONFIG_FILE:-"${SCRIPT_DIR}/base.toml"}
 TRAIN_MODULE=${TRAIN_MODULE:-"torchtitan.experiments.fl.train"}
-RUN_PREFIX=${RUN_PREFIX:-"icml2026-global-qhm-tuning"}
+RUN_PREFIX=${RUN_PREFIX:-"icml2026-local-qhm-tuning"}
 LOG_RANK=${LOG_RANK:-0}
 # TorchFT/Des-LOC runtime knobs
 NGPU=${NGPU:-${SBATCH_GPUS_PER_TASK:-4}}
@@ -16,17 +16,17 @@ PORT_OFFSET=${PORT_OFFSET:-0}
 # PROJECTION_RANKS=${PROJECTION_RANKS:-"8 16 32 64 128"}
 # LR_VALUES=${LR_VALUES:-"0.016 0.008 0.008 0.008 0.016"}
 # WARMED_CHECKPOINTS=${WARMED_CHECKPOINTS:-"\
-#   icml2026-check-test-proj-savec-d99a5257-r8-lr0p016-rottrue-20251221-174207-idx0 \
-#   icml2026-global-checkpoint-4dd9e45e-r16-lr0p008-rottrue-20260104-215851-idx0 \
-#   icml2026-global-checkpoint-54f19506-r32-lr0p008-rottrue-20260104-222010-idx0 \
-#   icml2026-global-checkpoint-ebf60169-r64-lr0p008-rottrue-20260104-223953-idx0 \
-#   icml2026-global-checkpoint-a35e91e2-r128-lr0p016-rottrue-20260105-075751-idx0 \
+#   icml2026-galore-ef-d99a5257-r8-lr0p016-rottrue-20251217-102843-idx0 \
+# 	icml2026-warmup-ef-4dd9e45e-r16-lr0p008-rottrue-20251217-144111-idx0 \
+# 	icml2026-warmup-ef-54f19506-r32-lr0p008-rottrue-20251217-150027-idx0 \
+# 	icml2026-warmup-ef-ebf60169-r64-lr0p008-rottrue-20251217-151755-idx0 \
+# 	icml2026-warmup-ef-a35e91e2-r128-lr0p016-rottrue-20251217-151833-idx0 \
 # "}
 PROJECTION_RANKS=${PROJECTION_RANKS:-"64 128"}
 LR_VALUES=${LR_VALUES:-"0.008 0.016"}
 WARMED_CHECKPOINTS=${WARMED_CHECKPOINTS:-"\
-  icml2026-global-checkpoint-ebf60169-r64-lr0p008-rottrue-20260104-223953-idx0 \
-  icml2026-global-checkpoint-a35e91e2-r128-lr0p016-rottrue-20260105-075751-idx0 \
+	icml2026-warmup-ef-ebf60169-r64-lr0p008-rottrue-20251217-151755-idx0 \
+	icml2026-warmup-ef-a35e91e2-r128-lr0p016-rottrue-20251217-151833-idx0 \
 "}
 RESUME_STEP=${RESUME_STEP:-2048}
 ROTATE_MOMENTS_OPTIONS=${ROTATE_MOMENTS_OPTIONS:-"true"}
@@ -383,9 +383,9 @@ fi
 SWEEP_HASH=${SWEEP_HASH:0:8}
 
 RDZV_HOST=${RDZV_HOST:-"127.0.0.1"}
-RDZV_BASE_PORT=${RDZV_BASE_PORT:-45000}
+RDZV_BASE_PORT=${RDZV_BASE_PORT:-35000}
 LIGHTHOUSE_HOST=${LIGHTHOUSE_HOST:-"127.0.0.1"}
-LIGHTHOUSE_BASE_PORT=${LIGHTHOUSE_BASE_PORT:-46200}
+LIGHTHOUSE_BASE_PORT=${LIGHTHOUSE_BASE_PORT:-36200}
 PORT_STRIDE=${PORT_STRIDE:-4}
 LIGHTHOUSE_PROTOCOL=${LIGHTHOUSE_PROTOCOL:-"http"}
 GALORE_REGEX_PATTERN=${GALORE_REGEX_PATTERN:-"attention\\.w[qkv]|attention\\.wo|feed_forward\\.w[12]"}
@@ -454,8 +454,8 @@ fault_tolerance = data.setdefault("fault_tolerance", {})
 fault_tolerance["enable"] = True
 
 optimizer = data.setdefault("optimizer", {})
-# enforce GaLoreGlobal + DesLoc defaults for the tuning sweep
-optimizer["name"] = "GaLoreGlobal"
+# enforce GaLore (local) + DesLoc defaults for the tuning sweep
+optimizer["name"] = "GaLore"
 optimizer["galore_rotate_moments_on_refresh"] = rotate_moments
 optimizer["galore_use_error_feedback"] = True
 optimizer["galore_update_proj_gap"] = 32
@@ -463,9 +463,11 @@ desloc_cfg = optimizer.get("desloc") if isinstance(optimizer.get("desloc"), dict
 desloc_cfg["enabled"] = True
 desloc_cfg["param_sync_every"] = 32
 desloc_cfg["optimizer_sync_every"] = [32, 32, 32]
-desloc_cfg["low_rank_server_update"] = True
-desloc_cfg["low_rank_projector_error_feedback"] = True
-desloc_cfg["low_rank_projector_source"] = "pseudo_grad"
+# Local GaLore doesn't use the low_rank_server_update settings
+# Remove any global-specific keys if present
+desloc_cfg.pop("low_rank_server_update", None)
+desloc_cfg.pop("low_rank_projector_error_feedback", None)
+desloc_cfg.pop("low_rank_projector_source", None)
 optimizer["desloc"] = desloc_cfg
 regex_entries = optimizer.get("galore_param_regexes")
 
@@ -617,6 +619,15 @@ for ((chain_idx = 0; chain_idx < SBATCH_MAX_CHAINS; ++chain_idx)); do
   SBATCH_CHAIN_LAST_IDS[chain_idx]=''
 done
 
+# Optionally depend on an external Slurm job id for the very first submission.
+# Set DEPEND_ON_JOBID in the environment before running this script if you want
+# the first job in chain 0 to wait for an existing Slurm job to finish .
+DEPEND_ON_JOBID=${DEPEND_ON_JOBID:-}
+if [[ -n "${DEPEND_ON_JOBID}" ]]; then
+  SBATCH_CHAIN_LAST_IDS[0]="${DEPEND_ON_JOBID}"
+  echo "INFO: Initializing chain 0 to depend on job ${DEPEND_ON_JOBID}." >&2
+fi
+
 sanitize_value() {
   local value=$1
   value=${value//./p}
@@ -679,7 +690,7 @@ submit_sbatch_job() {
   [[ -n "${SBATCH_CONSTRAINT}" ]] && sbatch_opts+=("--constraint=${SBATCH_CONSTRAINT}")
   [[ -n "${SBATCH_COMMENT}" ]] && sbatch_opts+=("--comment=${SBATCH_COMMENT}")
   [[ -n "${SBATCH_NODE}" ]] && sbatch_opts+=("-w" "${SBATCH_NODE}")
-  [[ -n "${dependency_job}" ]] && sbatch_opts+=("--dependency=afterany:${dependency_job}")
+  [[ -n "${dependency_job}" ]] && sbatch_opts+=("--dependency=afterok:${dependency_job}")
   if [[ -n "${SBATCH_LOG_DIR}" ]]; then
     sbatch_opts+=("--output=${SBATCH_LOG_DIR}/%j-${job_name}.out" "--error=${SBATCH_LOG_DIR}/%j-${job_name}.err")
   fi

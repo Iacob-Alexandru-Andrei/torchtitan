@@ -43,15 +43,15 @@ TIMESTAMP=$(date +"%Y%m%d-%H%M%S")
 # 	"icml2026-warmup-ef-a35e91e2-r128-lr0p016-rottrue-20251217-151833-idx0"
 # 	"icml2026-warmed-up-ddp-75a6984d-r256-lr0p008-rottrue-20251128-171759-idx0"
 # )
-declare -a CHAIN_RANKS=(128)
-declare -a CHAIN_LRS=(0.016)
+declare -a CHAIN_RANKS=(64)
+declare -a CHAIN_LRS=(0.008)
 declare -a CHAIN_RESUME_RUNS=( # THESE ARE THE EF WARMED UP RUNS!
-	"icml2026-warmup-ef-a35e91e2-r128-lr0p016-rottrue-20251217-151833-idx0"
+	"icml2026-warmup-ef-ebf60169-r64-lr0p008-rottrue-20251217-151755-idx0"
 )
 
 # Optional per-run hyperparameter-switch omega values (will be written to
 # HP_SWITCH_NEW_VS for the per-run config). Provide one entry per run.
-declare -a CHAIN_OMEGAS=("0.95,")
+declare -a CHAIN_OMEGAS=("0.94,")
 # Optional per-run lr-scheduler switch scale values (will be written to
 # lr_scheduler.switch_scale in the generated config). Provide one entry per run.
 declare -a CHAIN_SWITCH_SCALES=("1.0")

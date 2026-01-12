@@ -17,13 +17,13 @@ RDZV_PORT_BASE=${RDZV_PORT_BASE:-30000}
 # PORT_OFFSET allows running multiple experiments simultaneously without port conflicts.
 # Set PORT_OFFSET=100 for a second experiment, PORT_OFFSET=200 for a third, etc.
 PORT_OFFSET=${PORT_OFFSET:-100}
-S3_ENDPOINT_URL=${S3_ENDPOINT_URL:-"http://taranaki.cl.cam.ac.uk:9000"}
+S3_ENDPOINT_URL=${S3_ENDPOINT_URL:-"http://128.232.115.19:9000"}
 if [[ -z "${PYTHONPATH:-}" ]]; then
   PYTHONPATH="${REPO_ROOT}"
 else
   PYTHONPATH="${REPO_ROOT}:${PYTHONPATH}"
 fi
-RUN_PREFIX=${RUN_PREFIX:-"icml2026-exp1-global-sim-scores"}
+RUN_PREFIX=${RUN_PREFIX:-"icml2026-exp1-global-ef"}
 TIMESTAMP=$(date +"%Y%m%d-%H%M%S")
 
 # Chain definition (rank, lr, resume path per run).
@@ -37,10 +37,14 @@ TIMESTAMP=$(date +"%Y%m%d-%H%M%S")
 # 	"icml2026-warmed-up-ddp-a35e91e2-r128-lr0p016-rottrue-20251128-163708-idx0"
 # 	"icml2026-warmed-up-ddp-75a6984d-r256-lr0p008-rottrue-20251128-171759-idx0"
 # )
-declare -a CHAIN_RANKS=(8)
-declare -a CHAIN_LRS=(0.016)
+declare -a CHAIN_RANKS=(8 16 32 64 128)
+declare -a CHAIN_LRS=(0.016 0.008 0.008 0.008 0.016)
 declare -a CHAIN_RESUME_RUNS=(
-	"icml2026-warmed-up-ddp-d99a5257-r8-lr0p016-rottrue-20251128-163213-idx0"
+  "icml2026-check-test-proj-savec-d99a5257-r8-lr0p016-rottrue-20251221-174207-idx0" 
+  "icml2026-global-checkpoint-4dd9e45e-r16-lr0p008-rottrue-20260104-215851-idx0"
+  "icml2026-global-checkpoint-54f19506-r32-lr0p008-rottrue-20260104-222010-idx0"
+  "icml2026-global-checkpoint-ebf60169-r64-lr0p008-rottrue-20260104-223953-idx0"
+  "icml2026-global-checkpoint-a35e91e2-r128-lr0p016-rottrue-20260105-075751-idx0"
 )
 CHAIN_LENGTH=${#CHAIN_RANKS[@]}
 
@@ -90,7 +94,7 @@ ROTATE_MOMENTS=${ROTATE_MOMENTS:-true}
 LOW_RANK_SERVER_UPDATE=${LOW_RANK_SERVER_UPDATE:-true}
 LOW_RANK_PROJECTOR_ERROR_FEEDBACK=${LOW_RANK_PROJECTOR_ERROR_FEEDBACK:-false}
 LOW_RANK_PROJECTOR_MOMENTUM_WEIGHT=${LOW_RANK_PROJECTOR_MOMENTUM_WEIGHT:-""}
-GALORE_USE_ERROR_FEEDBACK=${GALORE_USE_ERROR_FEEDBACK:-false}
+GALORE_USE_ERROR_FEEDBACK=${GALORE_USE_ERROR_FEEDBACK:-true}
 GALORE_REGEX_PATTERN=${GALORE_REGEX_PATTERN:-"attention\\.w[qkv]|attention\\.wo|feed_forward\\.w[12]"}
 FULL_RANK_THRESHOLD=${FULL_RANK_THRESHOLD:-256}
 GENERATED_CONFIG_DIR=${GENERATED_CONFIG_DIR:-"${SCRIPT_DIR}/generated_configs"}
