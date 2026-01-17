@@ -23,7 +23,7 @@ if [[ -z "${PYTHONPATH:-}" ]]; then
 else
   PYTHONPATH="${REPO_ROOT}:${PYTHONPATH}"
 fi
-RUN_PREFIX=${RUN_PREFIX:-"icml2026-exp3.3-global-low-mom"}
+RUN_PREFIX=${RUN_PREFIX:-"icml2026-exp3.4-global-qhm-rank"}
 TIMESTAMP=$(date +"%Y%m%d-%H%M%S")
 
 # Chain definition (rank, lr, resume path per run).
@@ -40,46 +40,27 @@ TIMESTAMP=$(date +"%Y%m%d-%H%M%S")
 # declare -a CHAIN_RANKS=(8 16 32 64 128 256)
 # declare -a CHAIN_LRS=(0.016 0.008 0.008 0.008 0.016 0.008)
 # declare -a CHAIN_RESUME_RUNS=( # THESE ARE THE EF WARMED UP RUNS!
-# 	"icml2026-galore-ef-d99a5257-r8-lr0p016-rottrue-20251217-102843-idx0"
+# 	"icml2026-check-test-proj-savec-d99a5257-r8-lr0p016-rottrue-20251221-174207-idx0"
 # 	"icml2026-warmup-ef-4dd9e45e-r16-lr0p008-rottrue-20251217-144111-idx0"
 # 	"icml2026-warmup-ef-54f19506-r32-lr0p008-rottrue-20251217-150027-idx0"
 # 	"icml2026-warmup-ef-ebf60169-r64-lr0p008-rottrue-20251217-151755-idx0"
 # 	"icml2026-warmup-ef-a35e91e2-r128-lr0p016-rottrue-20251217-151833-idx0"
 # 	"icml2026-warmed-up-ddp-75a6984d-r256-lr0p008-rottrue-20251128-171759-idx0"
 # )
-declare -a CHAIN_RANKS=(8)
-declare -a CHAIN_LRS=(0.016)
+declare -a CHAIN_RANKS=(8 16 32 64 128)
+declare -a CHAIN_LRS=(0.016 0.008 0.008 0.008 0.016)
 declare -a CHAIN_RESUME_RUNS=( # THESE ARE THE EF WARMED UP RUNS!
 	"icml2026-check-test-proj-savec-d99a5257-r8-lr0p016-rottrue-20251221-174207-idx0"
+	"icml2026-global-checkpoint-4dd9e45e-r16-lr0p008-rottrue-20260104-215851-idx0"
+	"icml2026-global-checkpoint-54f19506-r32-lr0p008-rottrue-20260104-222010-idx0"
+	"icml2026-global-checkpoint-ebf60169-r64-lr0p008-rottrue-20260104-223953-idx0"
+	"icml2026-global-checkpoint-a35e91e2-r128-lr0p016-rottrue-20260105-075751-idx0"
 )
-# declare -a CHAIN_RANKS=(16)
-# declare -a CHAIN_LRS=(0.008)
-# declare -a CHAIN_RESUME_RUNS=( # THESE ARE THE EF WARMED UP RUNS!
-# 	"icml2026-global-checkpoint-4dd9e45e-r16-lr0p008-rottrue-20260104-215851-idx0"
-# )
-# declare -a CHAIN_RANKS=(32)
-# declare -a CHAIN_LRS=(0.008)
-# declare -a CHAIN_RESUME_RUNS=( # THESE ARE THE EF WARMED UP RUNS!
-# 	"icml2026-global-checkpoint-54f19506-r32-lr0p008-rottrue-20260104-222010-idx0"
-# )
-# declare -a CHAIN_RANKS=(64)
-# declare -a CHAIN_LRS=(0.008)
-# declare -a CHAIN_RESUME_RUNS=( # THESE ARE THE EF WARMED UP RUNS!
-# 	"icml2026-global-checkpoint-ebf60169-r64-lr0p008-rottrue-20260104-223953-idx0"
-# )
-# declare -a CHAIN_RANKS=(128)
-# declare -a CHAIN_LRS=(0.016)
-# declare -a CHAIN_RESUME_RUNS=( # THESE ARE THE EF WARMED UP RUNS!
-# 	"icml2026-global-checkpoint-a35e91e2-r128-lr0p016-rottrue-20260105-075751-idx0"
-# )
-# Optional per-run hyperparameter-switch omega values (will be written to
-# HP_SWITCH_NEW_VS for the per-run config). Provide one entry per run.
-# declare -a CHAIN_OMEGAS=("0.94,")
-declare -a CHAIN_OMEGAS=("0.99,")
+declare -a CHAIN_OMEGAS=("0.99," "0.97," "0.97," "0.97," "0.97,")
 # Optional per-run lr-scheduler switch scale values (will be written to
 # lr_scheduler.switch_scale in the generated config). Provide one entry per run.
 # declare -a CHAIN_SWITCH_SCALES=("2.0")
-declare -a CHAIN_SWITCH_SCALES=("1.0")
+declare -a CHAIN_SWITCH_SCALES=("1.0" "0.5" "0.5" "0.5" "0.5")
 CHAIN_LENGTH=${#CHAIN_RANKS[@]}
 
 if (( CHAIN_LENGTH == 0 )); then
@@ -142,6 +123,13 @@ HP_SWITCH_STEPS=${HP_SWITCH_STEPS:-2048}
 HP_SWITCH_NEW_VS=${HP_SWITCH_NEW_VS:-"0.98,"}
 HP_SWITCH_NEW_BETAS=${HP_SWITCH_NEW_BETAS:-"0.999,0.999"}
 HP_SWITCH_RESET_MOMENTA=${HP_SWITCH_RESET_MOMENTA:-"exp_avg,exp_avg_sq"}
+SYNC_FREQUENCIES_DEFAULT="64 128 256 512 1024"
+SYNC_FREQUENCIES_STR=${SYNC_FREQUENCIES:-${SYNC_FREQUENCIES_DEFAULT}}
+read -r -a SYNC_FREQUENCIES <<< "${SYNC_FREQUENCIES_STR}"
+if (( ${#SYNC_FREQUENCIES[@]} == 0 )); then
+	echo "At least one sync frequency is required (received: '${SYNC_FREQUENCIES_STR}')." >&2
+	exit 1
+fi
 GENERATED_CONFIG_DIR=${GENERATED_CONFIG_DIR:-"${SCRIPT_DIR}/generated_configs"}
 ARGS_DIR=${ARGS_DIR:-"${GENERATED_CONFIG_DIR}/args"}
 LOG_ROOT=${LOG_ROOT:-"${SCRIPT_DIR}/logs"}
@@ -158,9 +146,6 @@ normalize_bool() {
 }
 
 TRAINING_ARGS=("$@")
-
-# Normalized hp-switch enabled flag for deciding whether to expand the per-index grid
-HP_SWITCH_ENABLED_FLAG=$(normalize_bool "${HP_SWITCH_ENABLED}")
 
 run_python_config() {
 	local base_cfg=$1
@@ -262,10 +247,14 @@ if not isinstance(desloc_cfg, dict):  # pragma: no cover - defensive guard
 	optimizer["desloc"] = desloc_cfg
 desloc_cfg.setdefault("enabled", True)
 is_full_rank = rank >= full_rank_threshold
+param_sync_override_env = os.environ.get("PARAM_SYNC_EVERY", "").strip()
+param_sync_override = int(param_sync_override_env) if param_sync_override_env else None
 desloc_cfg["low_rank_server_update"] = low_rank_update and not is_full_rank
 desloc_cfg["low_rank_projector_error_feedback"] = error_feedback and not is_full_rank
 param_sync = desloc_cfg.get("param_sync_every")
-if param_sync is None:
+if param_sync_override is not None:
+	param_sync = param_sync_override
+elif param_sync is None:
 	param_sync = optimizer.get("galore_update_proj_gap", 32)
 desloc_cfg["param_sync_every"] = param_sync
 if is_full_rank:
@@ -427,66 +416,62 @@ for ((idx=0; idx<CHAIN_LENGTH; idx++)); do
 	lr=${CHAIN_LRS[$idx]}
 	resume_run=${CHAIN_RESUME_RUNS[$idx]}
 	lr_tag=${lr/./p}
-	run_suffix=$(printf "chain%02d-idx%02d-r%d-lr%s" "${chain_label}" $((idx + 1)) "${rank}" "${lr_tag}")
-	run_uuid="${RUN_PREFIX}-${TIMESTAMP}-${run_suffix}"
-	config_path="${GENERATED_CONFIG_DIR}/${run_uuid}.toml"
-	args_file="${ARGS_DIR}/${run_uuid}.args"
-	log_dir="${LOG_ROOT}/${run_uuid}"
-	mkdir -p "${log_dir}"
+ 	for sync_freq in "${SYNC_FREQUENCIES[@]}"; do
+		freq_tag=$(printf "%04d" "${sync_freq}")
+		run_suffix=$(printf "chain%02d-idx%02d-r%d-lr%s-sync%s" "${chain_label}" $((idx + 1)) "${rank}" "${lr_tag}" "${freq_tag}")
+		run_uuid="${RUN_PREFIX}-${TIMESTAMP}-${run_suffix}"
+		config_path="${GENERATED_CONFIG_DIR}/${run_uuid}.toml"
+		args_file="${ARGS_DIR}/${run_uuid}.args"
+		log_dir="${LOG_ROOT}/${run_uuid}"
+		mkdir -p "${log_dir}"
 
-	# Set per-run hyperparameter-switch omega and lr-scheduler switch-scale
-	# (these environment variables are consumed by run_python_config -> Python).
-	# Only pass HP switch overrides to the base run when HP switch is explicitly
-	# enabled. When HP_SWITCH_ENABLED is "both" we run the base (no-switch)
-	# and then submit expanded HP-switch runs separately.
-	if [[ "${HP_SWITCH_ENABLED_FLAG,,}" == "true" ]]; then
-		HP_SWITCH_NEW_VS="${CHAIN_OMEGAS[$idx]:-}" LR_SCHED_SWITCH_SCALE="${CHAIN_SWITCH_SCALES[$idx]:-}" run_python_config "${CONFIG_FILE}" "${config_path}" "${rank}" "${lr}" "${resume_run}"
-	else
+		HP_SWITCH_ENABLED="true" \
+		HP_SWITCH_NEW_VS="${CHAIN_OMEGAS[$idx]:-}" \
+		LR_SCHED_SWITCH_SCALE="${CHAIN_SWITCH_SCALES[$idx]:-}" \
+		DESLOC_PROJECTOR_SOURCE="pseudo_grad" \
+		GALORE_QHM_OUTSIDE="true" \
+		PARAM_SYNC_EVERY="${sync_freq}" \
 		run_python_config "${CONFIG_FILE}" "${config_path}" "${rank}" "${lr}" "${resume_run}"
-	fi
-	write_args_file "${args_file}" "${TRAINING_ARGS[@]}"
+		write_args_file "${args_file}" "${TRAINING_ARGS[@]}"
 
-	job_name="galore_global_chain${chain_label}_r${rank}_lr${lr_tag}"
-	sbatch_args=("${COMMON_SBATCH_ARGS[@]}" --job-name="${job_name}" --output="${SLURM_LOG_DIR}/slurm-${run_uuid}-%j.out")
-	previous_job_id="${PREVIOUS_JOB_IDS[$chain_idx]:-}"
-	if [[ -n "${previous_job_id}" ]]; then
-		sbatch_args+=(--dependency="afterok:${previous_job_id}")
-	fi
+		job_name="galore_global_chain${chain_label}_r${rank}_lr${lr_tag}_sync${freq_tag}"
+		sbatch_args=("${COMMON_SBATCH_ARGS[@]}" --job-name="${job_name}" --output="${SLURM_LOG_DIR}/slurm-${run_uuid}-%j.out")
+		previous_job_id="${PREVIOUS_JOB_IDS[$chain_idx]:-}"
+		if [[ -n "${previous_job_id}" ]]; then
+			sbatch_args+=(--dependency="afterok:${previous_job_id}")
+		fi
 
-	# Export run-specific values directly to the sbatch job so we can use a
-	# single-quoted heredoc without triggering premature shell expansion.
-	# Compute actual ports using base + offset to avoid conflicts with other experiments.
-	lighthouse_port=$((LIGHTHOUSE_PORT_BASE + PORT_OFFSET))
-	rdzv_port_base=$((RDZV_PORT_BASE + PORT_OFFSET))
-	sbatch_export_arg="ALL"
-	for kv in \
-		"RUN_UUID=${run_uuid}" \
-		"CONFIG_PATH=${config_path}" \
-		"LOG_DIR=${log_dir}" \
-		"ARGS_FILE=${args_file}" \
-		"REPO_ROOT=${REPO_ROOT}" \
-		"TRAIN_MODULE=${TRAIN_MODULE}" \
-		"NGPU=${NGPU}" \
-		"MIN_REPLICAS=${MIN_REPLICAS}" \
-		"QUORUM_TICK_MS=${QUORUM_TICK_MS}" \
-		"LIGHTHOUSE_HOST=${LIGHTHOUSE_HOST}" \
-		"LIGHTHOUSE_PORT=${lighthouse_port}" \
-		"RDZV_PORT_BASE=${rdzv_port_base}" \
-		"S3_ENDPOINT_URL=${S3_ENDPOINT_URL}" \
-		"PYTHONPATH=${PYTHONPATH}"; do
-		sbatch_export_arg+="${kv:+,${kv}}"
-	done
-	sbatch_args+=("--export=${sbatch_export_arg}")
+		lighthouse_port=$((LIGHTHOUSE_PORT_BASE + PORT_OFFSET))
+		rdzv_port_base=$((RDZV_PORT_BASE + PORT_OFFSET))
+		sbatch_export_arg="ALL"
+		for kv in \
+			"RUN_UUID=${run_uuid}" \
+			"CONFIG_PATH=${config_path}" \
+			"LOG_DIR=${log_dir}" \
+			"ARGS_FILE=${args_file}" \
+			"REPO_ROOT=${REPO_ROOT}" \
+			"TRAIN_MODULE=${TRAIN_MODULE}" \
+			"NGPU=${NGPU}" \
+			"MIN_REPLICAS=${MIN_REPLICAS}" \
+			"QUORUM_TICK_MS=${QUORUM_TICK_MS}" \
+			"LIGHTHOUSE_HOST=${LIGHTHOUSE_HOST}" \
+			"LIGHTHOUSE_PORT=${lighthouse_port}" \
+			"RDZV_PORT_BASE=${rdzv_port_base}" \
+			"S3_ENDPOINT_URL=${S3_ENDPOINT_URL}" \
+			"PYTHONPATH=${PYTHONPATH}"; do
+			sbatch_export_arg+="${kv:+,${kv}}"
+		done
+		sbatch_args+=("--export=${sbatch_export_arg}")
 
-	sbatch_output=$(sbatch "${sbatch_args[@]}" <<'EOF'
+		sbatch_output=$(sbatch "${sbatch_args[@]}" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
 
-	LOG_DIR="${LOG_DIR:-}"
-	if [[ -z "${LOG_DIR}" ]]; then
-		echo "LOG_DIR environment variable is not set" >&2
-		exit 1
-	fi
+LOG_DIR="${LOG_DIR:-}"
+if [[ -z "${LOG_DIR}" ]]; then
+	echo "LOG_DIR environment variable is not set" >&2
+	exit 1
+fi
 
 export REPO_ROOT
 export S3_ENDPOINT_URL
@@ -597,215 +582,26 @@ if kill -0 ${LIGHTHOUSE_PID} 2>/dev/null; then
 	kill ${LIGHTHOUSE_PID}
 fi
 
-				exit ${replica_status}
-
+exit ${replica_status}
 EOF
 )
 
-	if [[ "${sbatch_output}" =~ Submitted\ batch\ job\ ([0-9]+) ]]; then
-		job_id=${BASH_REMATCH[1]}
-		PREVIOUS_JOB_IDS[$chain_idx]=${job_id}
-		SUBMITTED_JOB_IDS+=(${job_id})
-		if [[ -n "${SUBMITTED_JOB_IDS_PER_CHAIN[$chain_idx]:-}" ]]; then
-			SUBMITTED_JOB_IDS_PER_CHAIN[$chain_idx]+=" ${job_id}"
-		else
-			SUBMITTED_JOB_IDS_PER_CHAIN[$chain_idx]="${job_id}"
-		fi
-		echo "Submitted job ${job_id} (${job_name})"
-	else
-		echo "Failed to submit job for run ${run_uuid}" >&2
-		exit 1
-	fi
-
-	# If HP switch expansion is enabled, submit additional runs for the grid of
-	# GALORE_QHM_OUTSIDE {true,false} x DESLOC_PROJECTOR_SOURCE {full_rank_grad,pseudo_grad}.
-	# We treat HP_SWITCH_ENABLED_FLAG=="both" as a request to run both the base
-	# (HP switch off) and the expanded HP-switch grid (HP switch on).
-	if [[ "${HP_SWITCH_ENABLED_FLAG,,}" == "true" || "${HP_SWITCH_ENABLED_FLAG,,}" == "both" ]]; then
-		for qhm in true; do
-			for src in pseudo_grad; do
-				# Build a descriptive suffix for the extra run
-				extra_suffix=$(printf "chain%02d-idx%02d-r%d-lr%s-qhm%s-src%s" "${chain_label}" $((idx + 1)) "${rank}" "${lr_tag}" "${qhm}" "${src}")
-				extra_uuid="${RUN_PREFIX}-${TIMESTAMP}-${extra_suffix}"
-				extra_config_path="${GENERATED_CONFIG_DIR}/${extra_uuid}.toml"
-				extra_args_file="${ARGS_DIR}/${extra_uuid}.args"
-				extra_log_dir="${LOG_ROOT}/${extra_uuid}"
-				mkdir -p "${extra_log_dir}"
-
-				# Export per-run overrides: enable HP switch, set new_vs and switch_scale,
-				# and override projector source & galore qhm outside.
-				HP_SWITCH_ENABLED="true" HP_SWITCH_NEW_VS="${CHAIN_OMEGAS[$idx]:-}" LR_SCHED_SWITCH_SCALE="${CHAIN_SWITCH_SCALES[$idx]:-}" DESLOC_PROJECTOR_SOURCE="${src}" GALORE_QHM_OUTSIDE="${qhm}" run_python_config "${CONFIG_FILE}" "${extra_config_path}" "${rank}" "${lr}" "${resume_run}"
-				write_args_file "${extra_args_file}" "${TRAINING_ARGS[@]}"
-
-				# Submit the extra run with dependency on the last job in this chain
-				extra_job_name="galore_global_chain${chain_label}_r${rank}_lr${lr_tag}_extra"
-				extra_sbatch_args=("${COMMON_SBATCH_ARGS[@]}" --job-name="${extra_job_name}" --output="${SLURM_LOG_DIR}/slurm-${extra_uuid}-%j.out")
-				previous_job_id="${PREVIOUS_JOB_IDS[$chain_idx]:-}"
-				if [[ -n "${previous_job_id}" ]]; then
-					extra_sbatch_args+=(--dependency="afterok:${previous_job_id}")
-				fi
-
-				sbatch_export_arg="ALL"
-				for kv in \
-					"RUN_UUID=${extra_uuid}" \
-					"CONFIG_PATH=${extra_config_path}" \
-					"LOG_DIR=${extra_log_dir}" \
-					"ARGS_FILE=${extra_args_file}" \
-					"REPO_ROOT=${REPO_ROOT}" \
-					"TRAIN_MODULE=${TRAIN_MODULE}" \
-					"NGPU=${NGPU}" \
-					"MIN_REPLICAS=${MIN_REPLICAS}" \
-					"QUORUM_TICK_MS=${QUORUM_TICK_MS}" \
-					"LIGHTHOUSE_HOST=${LIGHTHOUSE_HOST}" \
-					"LIGHTHOUSE_PORT=${lighthouse_port}" \
-					"RDZV_PORT_BASE=${rdzv_port_base}" \
-					"S3_ENDPOINT_URL=${S3_ENDPOINT_URL}" \
-					"PYTHONPATH=${PYTHONPATH}"; do
-					sbatch_export_arg+="${kv:+,${kv}}"
-				done
-				extra_sbatch_args+=("--export=${sbatch_export_arg}")
-
-				sbatch_output=$(sbatch "${extra_sbatch_args[@]}" <<'EOF'
-#!/usr/bin/env bash
-				set -euo pipefail
-
-				LOG_DIR="${LOG_DIR:-}"
-				if [[ -z "${LOG_DIR}" ]]; then
-					echo "LOG_DIR environment variable is not set" >&2
-					exit 1
-				fi
-
-				export REPO_ROOT
-				export S3_ENDPOINT_URL
-				export PYTHONPATH="${PYTHONPATH}"
-
-				cleanup() {
-					pkill -P $$ || true
-					pkill -f "torchft_lighthouse" || true
-				}
-				trap cleanup EXIT INT TERM
-
-				if [[ -n "${SLURM_SUBMIT_DIR:-}" ]]; then
-					cd "${SLURM_SUBMIT_DIR}"
+			if [[ "${sbatch_output}" =~ Submitted\ batch\ job\ ([0-9]+) ]]; then
+				job_id=${BASH_REMATCH[1]}
+				PREVIOUS_JOB_IDS[$chain_idx]=${job_id}
+				SUBMITTED_JOB_IDS+=(${job_id})
+				if [[ -n "${SUBMITTED_JOB_IDS_PER_CHAIN[$chain_idx]:-}" ]]; then
+					SUBMITTED_JOB_IDS_PER_CHAIN[$chain_idx]+=" ${job_id}"
 				else
-					cd "${REPO_ROOT}"
+					SUBMITTED_JOB_IDS_PER_CHAIN[$chain_idx]="${job_id}"
 				fi
-
-				find /dev/shm -maxdepth 1 -user "${USER}" -exec rm -rf {} + 2>/dev/null || true
-
-				mkdir -p "${LOG_DIR}"
-				LIGHTHOUSE_LOG_FILE="${LOG_DIR}/lighthouse.log"
-
-				export RUN_UUID="${RUN_UUID}"
-				export WANDB_RUN_NAME="${RUN_UUID}"
-				export WANDB_PROJECT=${WANDB_PROJECT:-"galore-tune-lr"}
-				export WANDB_TEAM=${WANDB_TEAM:-"camlsys"}
-				export TORCHTITAN_WANDB_BASE_RUN_NAME="${RUN_UUID}"
-				export TORCHTITAN_FORCE_WANDB_WORKER_SUFFIX=1
-
-				TORCHFT_LIGHTHOUSE_URL="http://${LIGHTHOUSE_HOST}:${LIGHTHOUSE_PORT}"
-				export TORCHFT_LIGHTHOUSE="${TORCHFT_LIGHTHOUSE_URL}"
-
-				echo "[TorchFT Chain] RUN_UUID=${RUN_UUID}"
-				echo "Config: ${CONFIG_PATH}"
-				echo "Logs: ${LOG_DIR}"
-
-				mapfile -d '' TRAIN_ARGS < "${ARGS_FILE}" || true
-
-				uv run --no-sync torchft_lighthouse \
-					--min_replicas ${MIN_REPLICAS} \
-					--quorum_tick_ms ${QUORUM_TICK_MS} \
-					--bind ${LIGHTHOUSE_HOST}:${LIGHTHOUSE_PORT} \
-					> "${LIGHTHOUSE_LOG_FILE}" 2>&1 &
-				LIGHTHOUSE_PID=$!
-				sleep 2
-				if ! kill -0 ${LIGHTHOUSE_PID} 2>/dev/null; then
-					echo "Lighthouse failed to start, see ${LIGHTHOUSE_LOG_FILE}" >&2
-					exit 1
-				fi
-
-				AVAILABLE_GPUS=()
-				if [[ -n "${CUDA_VISIBLE_DEVICES:-}" ]]; then
-					IFS=',' read -r -a AVAILABLE_GPUS <<< "${CUDA_VISIBLE_DEVICES}"
-				else
-					for ((i=0; i<NGPU; i++)); do
-						AVAILABLE_GPUS+=("${i}")
-					done
-				fi
-
-				if (( ${#AVAILABLE_GPUS[@]} < NGPU )); then
-					echo "Requested ${NGPU} replicas but only ${#AVAILABLE_GPUS[@]} GPU(s) available." >&2
-					exit 1
-				fi
-
-				REPLICA_GPUS=("${AVAILABLE_GPUS[@]:0:NGPU}")
-				declare -a REPLICA_PIDS=()
-
-				for ((replica_id=0; replica_id<NGPU; replica_id++)); do
-					gpu_id="${REPLICA_GPUS[$replica_id]}"
-					log_file="${LOG_DIR}/replica_${replica_id}.log"
-					(
-						set -euo pipefail
-						cd "${REPO_ROOT}"
-						export CUDA_VISIBLE_DEVICES="${gpu_id}"
-						export PYTORCH_ALLOC_CONF="expandable_segments:True"
-						rdzv_port=$((RDZV_PORT_BASE + replica_id))
-						uv run --no-sync torchrun \
-							--nproc_per_node=1 \
-							--rdzv_backend=c10d \
-							--rdzv_endpoint="localhost:${rdzv_port}" \
-							--role=rank \
-							--tee=3 \
-							-m "${TRAIN_MODULE}" \
-							--job.config_file "${CONFIG_PATH}" \
-							--fault_tolerance.replica_id "${replica_id}" \
-							--fault_tolerance.group_size "${NGPU}" \
-							--fault_tolerance.min_replica_size "${MIN_REPLICAS}" \
-							"${TRAIN_ARGS[@]}"
-					) > "${log_file}" 2>&1 &
-					REPLICA_PIDS[$replica_id]=$!
-					sleep 1
-				done
-
-				set +e
-				replica_status=0
-				for ((replica_id=0; replica_id<NGPU; replica_id++)); do
-					pid=${REPLICA_PIDS[$replica_id]}
-					if ! wait "${pid}"; then
-						replica_status=$?
-						echo "Replica ${replica_id} exited with status ${replica_status}."
-					else
-						echo "Replica ${replica_id} completed successfully."
-					fi
-				done
-				set -e
-
-				if kill -0 ${LIGHTHOUSE_PID} 2>/dev/null; then
-					kill ${LIGHTHOUSE_PID}
-				fi
-
-				exit ${replica_status}
-EOF
-)
-
-				if [[ "${sbatch_output}" =~ Submitted\ batch\ job\ ([0-9]+) ]]; then
-					job_id=${BASH_REMATCH[1]}
-					PREVIOUS_JOB_IDS[$chain_idx]=${job_id}
-					SUBMITTED_JOB_IDS+=(${job_id})
-					if [[ -n "${SUBMITTED_JOB_IDS_PER_CHAIN[$chain_idx]:-}" ]]; then
-						SUBMITTED_JOB_IDS_PER_CHAIN[$chain_idx]+=" ${job_id}"
-					else
-						SUBMITTED_JOB_IDS_PER_CHAIN[$chain_idx]="${job_id}"
-					fi
-					echo "Submitted extra job ${job_id} (${extra_job_name})"
-				else
-					echo "Failed to submit extra job for run ${extra_uuid}" >&2
-					exit 1
-				fi
-				done
-			done
-		fi
-done
+				echo "Submitted job ${job_id} (${job_name})"
+			else
+				echo "Failed to submit job for run ${run_uuid}" >&2
+				exit 1
+			fi
+		done
+	done
 
 echo ""
 echo "Submitted jobs by chain:"
