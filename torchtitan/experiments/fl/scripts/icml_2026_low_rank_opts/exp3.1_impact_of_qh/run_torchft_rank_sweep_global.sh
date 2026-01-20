@@ -12,8 +12,8 @@ NGPU=${NGPU:-4}
 MIN_REPLICAS=${MIN_REPLICAS:-${NGPU}}
 QUORUM_TICK_MS=${QUORUM_TICK_MS:-100}
 LIGHTHOUSE_HOST=${LIGHTHOUSE_HOST:-"localhost"}
-LIGHTHOUSE_PORT_BASE=${LIGHTHOUSE_PORT_BASE:-29710}
-RDZV_PORT_BASE=${RDZV_PORT_BASE:-41000}
+LIGHTHOUSE_PORT_BASE=${LIGHTHOUSE_PORT_BASE:-39710}
+RDZV_PORT_BASE=${RDZV_PORT_BASE:-31000}
 # PORT_OFFSET allows running multiple experiments simultaneously without port conflicts.
 # Set PORT_OFFSET=100 for a second experiment, PORT_OFFSET=200 for a third, etc.
 PORT_OFFSET=${PORT_OFFSET:-100}
@@ -23,7 +23,7 @@ if [[ -z "${PYTHONPATH:-}" ]]; then
 else
   PYTHONPATH="${REPO_ROOT}:${PYTHONPATH}"
 fi
-RUN_PREFIX=${RUN_PREFIX:-"icml2026-exp3.3-global-low-mom"}
+RUN_PREFIX=${RUN_PREFIX:-"icml2026-ablation-ranks-global"}
 TIMESTAMP=$(date +"%Y%m%d-%H%M%S")
 
 # Chain definition (rank, lr, resume path per run).
@@ -47,39 +47,20 @@ TIMESTAMP=$(date +"%Y%m%d-%H%M%S")
 # 	"icml2026-warmup-ef-a35e91e2-r128-lr0p016-rottrue-20251217-151833-idx0"
 # 	"icml2026-warmed-up-ddp-75a6984d-r256-lr0p008-rottrue-20251128-171759-idx0"
 # )
-declare -a CHAIN_RANKS=(8)
-declare -a CHAIN_LRS=(0.016)
+declare -a CHAIN_RANKS=(8 16 32 64 128)
+declare -a CHAIN_LRS=(0.016 0.008 0.008 0.008 0.016)
 declare -a CHAIN_RESUME_RUNS=( # THESE ARE THE EF WARMED UP RUNS!
 	"icml2026-check-test-proj-savec-d99a5257-r8-lr0p016-rottrue-20251221-174207-idx0"
+	"icml2026-global-checkpoint-4dd9e45e-r16-lr0p008-rottrue-20260104-215851-idx0"
+	"icml2026-global-checkpoint-54f19506-r32-lr0p008-rottrue-20260104-222010-idx0"
+	"icml2026-global-checkpoint-ebf60169-r64-lr0p008-rottrue-20260104-223953-idx0"
+	"icml2026-global-checkpoint-a35e91e2-r128-lr0p016-rottrue-20260105-075751-idx0"
 )
-# declare -a CHAIN_RANKS=(16)
-# declare -a CHAIN_LRS=(0.008)
-# declare -a CHAIN_RESUME_RUNS=( # THESE ARE THE EF WARMED UP RUNS!
-# 	"icml2026-global-checkpoint-4dd9e45e-r16-lr0p008-rottrue-20260104-215851-idx0"
-# )
-# declare -a CHAIN_RANKS=(32)
-# declare -a CHAIN_LRS=(0.008)
-# declare -a CHAIN_RESUME_RUNS=( # THESE ARE THE EF WARMED UP RUNS!
-# 	"icml2026-global-checkpoint-54f19506-r32-lr0p008-rottrue-20260104-222010-idx0"
-# )
-# declare -a CHAIN_RANKS=(64)
-# declare -a CHAIN_LRS=(0.008)
-# declare -a CHAIN_RESUME_RUNS=( # THESE ARE THE EF WARMED UP RUNS!
-# 	"icml2026-global-checkpoint-ebf60169-r64-lr0p008-rottrue-20260104-223953-idx0"
-# )
-# declare -a CHAIN_RANKS=(128)
-# declare -a CHAIN_LRS=(0.016)
-# declare -a CHAIN_RESUME_RUNS=( # THESE ARE THE EF WARMED UP RUNS!
-# 	"icml2026-global-checkpoint-a35e91e2-r128-lr0p016-rottrue-20260105-075751-idx0"
-# )
-# Optional per-run hyperparameter-switch omega values (will be written to
-# HP_SWITCH_NEW_VS for the per-run config). Provide one entry per run.
-# declare -a CHAIN_OMEGAS=("0.94,")
-declare -a CHAIN_OMEGAS=("0.99,")
+declare -a CHAIN_OMEGAS=("0.99," "0.97," "0.97," "0.97," "0.97,")
 # Optional per-run lr-scheduler switch scale values (will be written to
 # lr_scheduler.switch_scale in the generated config). Provide one entry per run.
 # declare -a CHAIN_SWITCH_SCALES=("2.0")
-declare -a CHAIN_SWITCH_SCALES=("1.0")
+declare -a CHAIN_SWITCH_SCALES=("1.0" "0.5" "0.5" "0.5" "0.5")
 CHAIN_LENGTH=${#CHAIN_RANKS[@]}
 
 if (( CHAIN_LENGTH == 0 )); then
@@ -137,7 +118,7 @@ GALORE_QHM_OUTSIDE=${GALORE_QHM_OUTSIDE:-true}
 # HP_SWITCH_ENABLED may be: "true", "false", or "both".
 # If set to "both", the script will submit the base run (HP switch off)
 # and then submit the HP-switch-expanded grid (HP switch on) for each index.
-HP_SWITCH_ENABLED=${HP_SWITCH_ENABLED:-true}
+HP_SWITCH_ENABLED=${HP_SWITCH_ENABLED:-both}
 HP_SWITCH_STEPS=${HP_SWITCH_STEPS:-2048}
 HP_SWITCH_NEW_VS=${HP_SWITCH_NEW_VS:-"0.98,"}
 HP_SWITCH_NEW_BETAS=${HP_SWITCH_NEW_BETAS:-"0.999,0.999"}

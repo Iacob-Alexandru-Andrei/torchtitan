@@ -12,14 +12,14 @@ NGPU=${NGPU:-4}
 MIN_REPLICAS=${MIN_REPLICAS:-${NGPU}}
 QUORUM_TICK_MS=${QUORUM_TICK_MS:-100}
 LIGHTHOUSE_HOST=${LIGHTHOUSE_HOST:-"localhost"}
-LIGHTHOUSE_PORT=${LIGHTHOUSE_PORT:-29610}
+LIGHTHOUSE_PORT=${LIGHTHOUSE_PORT:-39610}
 S3_ENDPOINT_URL=${S3_ENDPOINT_URL:-"http://taranaki.cl.cam.ac.uk:9000"}
 if [[ -z "${PYTHONPATH:-}" ]]; then
   PYTHONPATH="${REPO_ROOT}"
 else
   PYTHONPATH="${REPO_ROOT}:${PYTHONPATH}"
 fi
-RUN_PREFIX=${RUN_PREFIX:-"icml2026-exp3.1-local-test"}
+RUN_PREFIX=${RUN_PREFIX:-"icml2026-ablation-ranks-local"}
 TIMESTAMP=$(date +"%Y%m%d-%H%M%S")
 
 # Chain definition (rank, lr, resume path per run).
@@ -33,28 +33,27 @@ TIMESTAMP=$(date +"%Y%m%d-%H%M%S")
 # 	"icml2026-warmed-up-ddp-a35e91e2-r128-lr0p016-rottrue-20251128-163708-idx0"
 # 	"icml2026-warmed-up-ddp-75a6984d-r256-lr0p008-rottrue-20251128-171759-idx0"
 # )
-# declare -a CHAIN_RANKS=(8 16 32 64 128 256)
-# declare -a CHAIN_LRS=(0.016 0.008 0.008 0.008 0.016 0.008)
+declare -a CHAIN_RANKS=(8 16 32 64 128)
+declare -a CHAIN_LRS=(0.016 0.008 0.008 0.008 0.016)
+declare -a CHAIN_RESUME_RUNS=( # THESE ARE THE EF WARMED UP RUNS!
+	"icml2026-galore-ef-d99a5257-r8-lr0p016-rottrue-20251217-102843-idx0"
+	"icml2026-warmup-ef-4dd9e45e-r16-lr0p008-rottrue-20251217-144111-idx0"
+	"icml2026-warmup-ef-54f19506-r32-lr0p008-rottrue-20251217-150027-idx0"
+	"icml2026-warmup-ef-ebf60169-r64-lr0p008-rottrue-20251217-151755-idx0"
+	"icml2026-warmup-ef-a35e91e2-r128-lr0p016-rottrue-20251217-151833-idx0"
+)
+# declare -a CHAIN_RANKS=(8)
+# declare -a CHAIN_LRS=(0.016)
 # declare -a CHAIN_RESUME_RUNS=( # THESE ARE THE EF WARMED UP RUNS!
 # 	"icml2026-galore-ef-d99a5257-r8-lr0p016-rottrue-20251217-102843-idx0"
-# 	"icml2026-warmup-ef-4dd9e45e-r16-lr0p008-rottrue-20251217-144111-idx0"
-# 	"icml2026-warmup-ef-54f19506-r32-lr0p008-rottrue-20251217-150027-idx0"
-# 	"icml2026-warmup-ef-ebf60169-r64-lr0p008-rottrue-20251217-151755-idx0"
-# 	"icml2026-warmup-ef-a35e91e2-r128-lr0p016-rottrue-20251217-151833-idx0"
-# 	"icml2026-warmed-up-ddp-75a6984d-r256-lr0p008-rottrue-20251128-171759-idx0"
 # )
-declare -a CHAIN_RANKS=(64)
-declare -a CHAIN_LRS=(0.008)
-declare -a CHAIN_RESUME_RUNS=( # THESE ARE THE EF WARMED UP RUNS!
-	"icml2026-warmup-ef-ebf60169-r64-lr0p008-rottrue-20251217-151755-idx0"
-)
 
 # Optional per-run hyperparameter-switch omega values (will be written to
 # HP_SWITCH_NEW_VS for the per-run config). Provide one entry per run.
-declare -a CHAIN_OMEGAS=("0.94,")
+declare -a CHAIN_OMEGAS=("0.90," "0.92," "0.94," "0.98," "0.93,")
 # Optional per-run lr-scheduler switch scale values (will be written to
 # lr_scheduler.switch_scale in the generated config). Provide one entry per run.
-declare -a CHAIN_SWITCH_SCALES=("1.0")
+declare -a CHAIN_SWITCH_SCALES=("2.0" "2.0" "2.0" "2.0" "0.5")
 
 CHAIN_LENGTH=${#CHAIN_RANKS[@]}
 
@@ -342,7 +341,7 @@ for ((idx=0; idx<CHAIN_LENGTH; idx++)); do
 	# For each chain index, sweep over HP_SWITCH being disabled (false) and enabled (true).
 	for hp_flag in false true; do
 		if [[ "${hp_flag}" == "true" ]]; then
-			qhm_values=(true false)
+			qhm_values=(false)
 		else
 			qhm_values=("${GALORE_QHM_OUTSIDE}")
 		fi
