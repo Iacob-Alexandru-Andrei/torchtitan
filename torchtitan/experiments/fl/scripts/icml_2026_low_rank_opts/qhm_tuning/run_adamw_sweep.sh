@@ -51,7 +51,7 @@ Environment variables (override defaults):
   SBATCH_CPUS_PER_TASK, SBATCH_GPUS_PER_TASK, SBATCH_MAX_CHAINS, SBATCH_MEM, SBATCH_TIME
   SBATCH_PARTITION, SBATCH_ACCOUNT, SBATCH_QOS, SBATCH_CONSTRAINT
   SBATCH_COMMENT, SBATCH_LOG_DIR, SBATCH_ADDITIONAL_ARGS, SBATCH_NODE
-  PROJECTION_RANKS, LR_VALUES, ROTATE_MOMENTS_OPTIONS
+  PROJECTION_RANKS, LR_VALUES, ROTATE_MOMENTS_OPTIONS, VS_VALUES, QHM_OUTSIDE_OPTIONS, ADAM_SENTINEL_RANK
 EOF
 }
 
@@ -180,6 +180,16 @@ fi
 if (( ${#QHM_OUTSIDE_ARRAY[@]} == 0 )); then
   echo "QHM_OUTSIDE_OPTIONS must contain at least one entry." >&2
   exit 1
+fi
+
+ADAM_SENTINEL_RANK_INT=""
+if [[ -n "${ADAM_SENTINEL_RANK}" ]]; then
+  if [[ "${ADAM_SENTINEL_RANK}" =~ ^[0-9]+$ ]]; then
+    ADAM_SENTINEL_RANK_INT=$((10#${ADAM_SENTINEL_RANK}))
+  else
+    echo "ADAM_SENTINEL_RANK must be a non-negative integer (got ${ADAM_SENTINEL_RANK})." >&2
+    exit 1
+  fi
 fi
 
 # TOTAL runs is product of ranks x switch_scales x vs x qhm options x rotate options
@@ -346,9 +356,9 @@ fi
 SWEEP_HASH=${SWEEP_HASH:0:8}
 
 RDZV_HOST=${RDZV_HOST:-"127.0.0.1"}
-RDZV_BASE_PORT=${RDZV_BASE_PORT:-35000}
+RDZV_BASE_PORT=${RDZV_BASE_PORT:-45000}
 LIGHTHOUSE_HOST=${LIGHTHOUSE_HOST:-"127.0.0.1"}
-LIGHTHOUSE_BASE_PORT=${LIGHTHOUSE_BASE_PORT:-36200}
+LIGHTHOUSE_BASE_PORT=${LIGHTHOUSE_BASE_PORT:-46200}
 PORT_STRIDE=${PORT_STRIDE:-4}
 LIGHTHOUSE_PROTOCOL=${LIGHTHOUSE_PROTOCOL:-"http"}
 GALORE_REGEX_PATTERN=${GALORE_REGEX_PATTERN:-"attention\\.w[qkv]|attention\\.wo|feed_forward\\.w[12]"}
@@ -394,9 +404,8 @@ output = Path(os.environ["OUTPUT_CONFIG_PATH"])
 pattern = os.environ["SWEEP_REGEX_PATTERN"]
 rank = int(os.environ["TARGET_RANK"])
 rotate_flag = os.environ["ROTATE_MOMENTS_FLAG"].strip().lower()
-adam_rank_env = os.environ.get("ADAM_SENTINEL_RANK")
-adam_rank = int(adam_rank_env) if adam_rank_env not in {None, ""} else None
-# disable_projection = adam_rank is not None and rank == adam_rank
+adam_rank_env = os.environ.get("ADAM_SENTINEL_RANK", "").strip()
+full_rank_threshold = int(adam_rank_env) if adam_rank_env else None
 
 true_values = {"true", "1", "yes", "on"}
 false_values = {"false", "0", "no", "off", ""}
@@ -409,40 +418,46 @@ else:
 
 data = tomllib.loads(base.read_text(encoding="utf-8"))
 optimizer = data.setdefault("optimizer", {})
-regex_entries = optimizer.get("galore_param_regexes")
-optimizer["galore_rotate_moments_on_refresh"] = rotate_moments
 
-normalized: list[dict] = []
-if isinstance(regex_entries, (list, tuple)):
-    for entry in regex_entries:
-        if isinstance(entry, dict):
-            normalized.append(deepcopy(entry))
-        else:
-            try:
-                normalized.append(dict(entry))
-            except Exception:
-                continue
-elif regex_entries is None:
-    normalized = []
+is_full_rank = full_rank_threshold is not None and rank >= full_rank_threshold
+if is_full_rank:
+  optimizer["name"] = "GaLore"
+  # Disable low-rank projections for sentinel ranks by clearing all GaLore-specific fields.
+  optimizer.pop("galore_param_regexes", None)
+  for key in list(optimizer.keys()):
+    if key.startswith("galore_"):
+      optimizer.pop(key, None)
 else:
-    normalized = [dict(regex_entries)] if isinstance(regex_entries, dict) else []
+  optimizer["name"] = "GaLore"
+  optimizer["galore_rotate_moments_on_refresh"] = rotate_moments
+  optimizer["galore_use_error_feedback"] = True
+  regex_entries = optimizer.get("galore_param_regexes")
+  normalized: list[dict] = []
+  if isinstance(regex_entries, (list, tuple)):
+      for entry in regex_entries:
+          if isinstance(entry, dict):
+              normalized.append(deepcopy(entry))
+          else:
+              try:
+                  normalized.append(dict(entry))
+              except Exception:
+                  continue
+  elif regex_entries is None:
+      normalized = []
+  else:
+      normalized = [dict(regex_entries)] if isinstance(regex_entries, dict) else []
 
-# if disable_projection:
-#   normalized = [entry for entry in normalized if entry.get("param_str_match") != pattern]
-# else:
-updated = False
-for entry in normalized:
-  if entry.get("param_str_match") == pattern:
-    entry["rank"] = rank
-    updated = True
-    break
+  updated = False
+  for entry in normalized:
+    if entry.get("param_str_match") == pattern:
+      entry["rank"] = rank
+      updated = True
+      break
 
   if not updated:
     normalized.append({"param_str_match": pattern, "rank": rank})
 
-optimizer["galore_param_regexes"] = normalized
-# Enable local error feedback for GaLore optimizer in generated configs
-optimizer["galore_use_error_feedback"] = True
+  optimizer["galore_param_regexes"] = normalized
 
 # Insert or update a fl_metrics.hyperparameter_switch entry to trigger at step 2048
 # Prefer per-run NEW_V_RUN if provided, otherwise fall back to global NEW_V
@@ -506,7 +521,7 @@ if switch_scale_val is not None:
   lr_scheduler["switch_scale"] = switch_scale_val
 
 # If qhm_outside flag provided, add to optimizer config
-if qhm_bool is not None:
+if (not is_full_rank) and qhm_bool is not None:
   optimizer["galore_qhm_outside_projection"] = qhm_bool
 # If a per-run LR value was provided, write it into the optimizer section
 lr_env = os.environ.get("LR_VALUE", "")
@@ -592,6 +607,8 @@ submit_sbatch_job() {
   local chain_index=${10}
   local run_config_path=${11}
 
+  local optimizer_name="GaLore"
+
   local job_name="${RUN_PREFIX}-${SWEEP_HASH}-idx${combo_index_label}"
   local sbatch_opts=(--parsable "-c" "${SBATCH_CPUS_PER_TASK}" "--gres=gpu:${SBATCH_GPUS_PER_TASK}" "--job-name=${job_name}")
   [[ -n "${SBATCH_MEM}" ]] && sbatch_opts+=("--mem=${SBATCH_MEM}")
@@ -637,7 +654,7 @@ uv run --no-sync torchrun \
   -m "${TRAIN_MODULE}" \
   --job.config_file "${run_config_path}" \
   --optimizer.builder mosaic \
-  --optimizer.name GaLore \
+  --optimizer.name ${optimizer_name} \
   --optimizer.lr "${lr_value}" \
   --training.global_batch_size 64 \
   --training.local_batch_size 16 \
