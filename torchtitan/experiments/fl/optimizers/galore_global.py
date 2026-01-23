@@ -772,7 +772,7 @@ class GaLoreGlobal(AdamW):
                     adaptive_step_full = _project_back(param_optim_state, adaptive_step)
                     denom_scalar = denom.mean().item()
                     grad_norm = full_rank_grad / (denom_scalar + eps)
-                    # The below is the one where have a mean vector    
+                    # The below is the one where have a mean vector
                     # meta = param_optim_state.get("projector_meta", {})
                     # proj_type_code = meta.get(
                     #     "resolved_proj_type", meta.get("proj_type", PROJ_TO_CODE[STD_PROJ])
@@ -783,7 +783,7 @@ class GaLoreGlobal(AdamW):
                     #     full_rank_grad,
                     #     proj_type,
                     # )
-                    # grad_norm = full_rank_grad / (denom_mean + eps) 
+                    # grad_norm = full_rank_grad / (denom_mean + eps)
 
                     # denom_full = _project_back(param_optim_state, denom)
                     # if denom_full.shape != full_rank_grad.shape:
