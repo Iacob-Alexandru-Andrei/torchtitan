@@ -23,6 +23,11 @@ import torch
 from torch import nn
 from torch.optim import Optimizer
 
+try:  # Optional dependency; skip if unavailable.
+    import wandb
+except ImportError:  # pragma: no cover - wandb may not be installed
+    wandb = None
+
 try:  # pragma: no cover - optional dependency in some environments
     from torch.distributed.tensor import DTensor
 except ImportError:  # pragma: no cover - DTensor is optional
@@ -52,6 +57,104 @@ if _MODULE_PROXY is None:
     _MODULE_PROXY = ModuleType(__name__)
     sys.modules[__name__] = _MODULE_PROXY
 _MODULE_PROXY.__dict__.update(globals())
+
+
+def _flatten_for_svd(tensor: torch.Tensor) -> torch.Tensor:
+    if tensor.ndim == 0:
+        return tensor.reshape(1, 1)
+    if tensor.ndim == 1:
+        return tensor.reshape(1, -1)
+    return tensor.reshape(tensor.shape[0], -1)
+
+
+def _singular_values_from_tensor(tensor: torch.Tensor) -> torch.Tensor:
+    matrix = _flatten_for_svd(tensor).to(dtype=torch.float32)
+    m, n = matrix.shape
+    if m >= n:
+        gram = matrix.transpose(-1, -2) @ matrix
+    else:
+        gram = matrix @ matrix.transpose(-1, -2)
+    eigenvalues = torch.linalg.eigvalsh(gram)
+    eigenvalues = torch.clamp(eigenvalues, min=0.0)
+    singular_values = torch.sqrt(eigenvalues)
+    return torch.sort(singular_values, descending=True).values
+
+
+def _stable_rank_from_singular_values(singular_values: torch.Tensor) -> torch.Tensor:
+    if singular_values.numel() == 0:
+        return torch.tensor(float("nan"), device=singular_values.device, dtype=singular_values.dtype)
+    fro_sq = singular_values.square().sum()
+    spectral_sq = singular_values.max().square()
+    if spectral_sq == 0:
+        return torch.tensor(float("nan"), device=singular_values.device, dtype=singular_values.dtype)
+    return fro_sq / spectral_sq
+
+
+def _spectral_gap_from_singular_values(singular_values: torch.Tensor, rank: int | None) -> torch.Tensor:
+    if rank is None or rank <= 0:
+        return torch.tensor(float("nan"), device=singular_values.device, dtype=singular_values.dtype)
+    if singular_values.numel() <= rank:
+        return torch.tensor(float("nan"), device=singular_values.device, dtype=singular_values.dtype)
+    sigma = torch.sort(singular_values, descending=True).values
+    s_r = sigma[rank - 1]
+    s_r1 = sigma[rank] if sigma.numel() > rank else torch.tensor(0.0, device=sigma.device, dtype=sigma.dtype)
+    return s_r - s_r1
+
+
+def _powerlaw_alpha_from_singular_values(singular_values: torch.Tensor) -> torch.Tensor:
+    if singular_values.numel() < 2:
+        return torch.tensor(float("nan"), device=singular_values.device, dtype=singular_values.dtype)
+    sigma = torch.sort(singular_values, descending=True).values
+    sigma = torch.clamp(sigma, min=1e-12)
+    k = torch.arange(1, sigma.numel() + 1, device=sigma.device, dtype=sigma.dtype)
+    log_k = torch.log(k)
+    log_sigma = torch.log(sigma)
+    mean_log_k = log_k.mean()
+    mean_log_sigma = log_sigma.mean()
+    var_log_k = torch.sum((log_k - mean_log_k) ** 2)
+    if var_log_k <= 0:
+        return torch.tensor(float("nan"), device=sigma.device, dtype=sigma.dtype)
+    cov = torch.sum((log_k - mean_log_k) * (log_sigma - mean_log_sigma))
+    slope = cov / var_log_k
+    return -slope
+
+
+def _spectrum_metrics(tensor: torch.Tensor, rank: int | None) -> dict[str, float]:
+    singular_values = _singular_values_from_tensor(tensor)
+    stable_rank = _stable_rank_from_singular_values(singular_values)
+    spectral_gap = _spectral_gap_from_singular_values(singular_values, rank)
+    rel_gap = torch.tensor(float("nan"), device=singular_values.device, dtype=singular_values.dtype)
+    if rank is not None and rank > 0 and singular_values.numel() >= rank:
+        sigma_r = singular_values[rank - 1]
+        if torch.isfinite(sigma_r) and sigma_r != 0:
+            rel_gap = spectral_gap / sigma_r
+    alpha = _powerlaw_alpha_from_singular_values(singular_values)
+
+    metrics: dict[str, float] = {}
+    for key, val in {
+        "pseudo_grad_stable_rank": stable_rank,
+        "pseudo_grad_spectral_gap": spectral_gap,
+        "pseudo_grad_relative_gap": rel_gap,
+        "pseudo_grad_powerlaw_alpha": alpha,
+    }.items():
+        if torch.isfinite(val):
+            metrics[key] = float(val.item())
+    return metrics
+
+
+def _log_wandb_metrics(metrics: dict[str, float], *, step: int | None = None) -> None:
+    """Log DES-LOC metrics to wandb using the provided optimization step."""
+
+    if not metrics or wandb is None:
+        return
+    try:
+        if getattr(wandb, "run", None) is not None:
+            if step is None:
+                wandb.log(metrics)
+            else:
+                wandb.log(metrics, step=step)
+    except Exception:  # pragma: no cover - defensive guard
+        logger.debug("Skipping wandb logging for DES-LOC spectrum metrics due to runtime error.")
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable, Iterator, Sequence
@@ -502,6 +605,7 @@ class _ParameterFragment(_BaseFragment):
         self._reference_pending: list[tuple[str, torch.Tensor]] = []
         self._log_outer_metrics = config.log_outer_metrics
         self._metrics_logger = config.metrics_logger
+        self._step_ctx: int | None = None
         self._checkpoint_outer_optimizer = config.checkpoint_outer_optimizer
         if isinstance(outer_spec, Optimizer):
             self._outer_optimizer = outer_spec
@@ -550,6 +654,9 @@ class _ParameterFragment(_BaseFragment):
         self, logger_fn: Callable[[dict[str, float]], None] | None
     ) -> None:
         self._metrics_logger = logger_fn
+
+    def set_step_context(self, step: int) -> None:
+        self._step_ctx = step
 
     def _init_backup_storage(self) -> None:
         for name, param in self._model.named_parameters():
@@ -908,8 +1015,19 @@ class _ParameterFragment(_BaseFragment):
                 name=name,
                 base_pseudo_grad=base_pseudo_grad,
             )
+            logger.info(f"Projector signal for {name} selected from {self._low_rank_projector_source}.")
             if projector_signal is None:
                 continue
+            # Log spectrum stats of the projector signal (pseudo/full grad) for analysis.
+            spectrum_metrics = _spectrum_metrics(projector_signal, rank)
+            if spectrum_metrics:
+                metrics_payload = {f"desloc_outer/{k}/{name}": v for k, v in spectrum_metrics.items()}
+                if self._metrics_logger is not None:
+                    try:
+                        self._metrics_logger(metrics_payload)
+                    except Exception:  # pragma: no cover - diagnostics only
+                        logger.exception("DES-LOC spectrum metrics logger failed.")
+                _log_wandb_metrics(metrics_payload, step=self._step_ctx)
             if self._error_feedback_enabled:
                 feedback = self._projector_error_feedback.get(name)
                 if feedback is not None:
@@ -1782,6 +1900,7 @@ class DesLocController:
         self._raw_optimizer_sync_config = config.optimizer_sync_every
         self._quorum_timeout = timedelta(seconds=max(1, config.quorum_timeout_seconds))
         self._optimizer_state_sync_enabled = not config.disable_optimizer_state_sync
+        self._local_step = 0
 
         param_fragment_cfg = ParameterFragmentConfig(
             manager=config.manager,
@@ -1813,6 +1932,7 @@ class DesLocController:
         self._is_opt_init = not self._optimizer_state_sync_enabled
 
         self._hook = config.optimizer.register_step_post_hook(self._step_post_hook)
+        self._register_state_dict_fn()
 
     def close(self) -> None:
         """Detach the registered optimizer step hook."""
@@ -1925,6 +2045,7 @@ class DesLocController:
         _args: tuple[Any, ...],
         _kwargs: dict[str, Any],
     ) -> None:
+        self._local_step += 1
         if not self._is_opt_init:
             self._lazy_init_optimizer_fragments()
 
@@ -1953,6 +2074,12 @@ class DesLocController:
                     fragment.reset()
                 return
 
+            step_ctx = self._local_step
+            for fragment in fragments:
+                setter = getattr(fragment, "set_step_context", None)
+                if callable(setter):
+                    setter(step_ctx)
+
             self._prepare_sync(fragments)
             self._perform_sync(fragments)
             for fragment in fragments:
@@ -1978,6 +2105,42 @@ class DesLocController:
         else:
             for fragment in fragments:
                 fragment.restore_state()
+
+    def _register_state_dict_fn(self) -> None:
+        def load_fn(state: dict[str, Any]) -> None:
+            step_value = state.get("controller_step")
+            if isinstance(step_value, torch.Tensor):
+                self._local_step = int(step_value.item())
+            elif isinstance(step_value, (int, float)):
+                self._local_step = int(step_value)
+            else:
+                self._local_step = 0
+
+            fragment_steps_obj = state.get("fragment_steps")
+            fragment_steps = (
+                fragment_steps_obj.tolist()
+                if isinstance(fragment_steps_obj, torch.Tensor)
+                else []
+            )
+
+            for idx, fragment in enumerate(self._fragments):
+                if idx < len(fragment_steps):
+                    fragment._local_step = int(fragment_steps[idx])
+                else:
+                    fragment._local_step = self._local_step % fragment.sync_every
+
+        def save_fn() -> dict[str, torch.Tensor]:
+            fragment_steps = [getattr(fragment, "_local_step", 0) for fragment in self._fragments]
+            return {
+                "controller_step": torch.tensor(int(self._local_step), dtype=torch.int64),
+                "fragment_steps": torch.tensor(fragment_steps, dtype=torch.int64),
+            }
+
+        self._manager.register_state_dict_fn(
+            f"{self._name_prefix}_controller_meta",
+            load_fn,
+            save_fn,
+        )
 
 
 class StreamingDesLocController:

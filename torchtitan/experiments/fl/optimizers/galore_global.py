@@ -465,6 +465,37 @@ class GaLoreGlobal(AdamW):
         self.register_load_state_dict_post_hook(
             lambda optimizer: optimizer._repair_projector_states()  # type: ignore[attr-defined]
         )
+
+    @staticmethod
+    def _expanded_denom_mean(
+        denom: Tensor,
+        full_rank_grad: Tensor,
+        proj_type: str,
+    ) -> Tensor:
+        """Broadcast denom means to match the full-rank gradient shape.
+
+        For right projections we average over the reduced columns (last dim),
+        for left projections we average over the reduced rows (first dim),
+        and for full projections we combine row/column means. Fallback is the
+        global mean.
+        """
+
+        if denom.ndim == 0:
+            reduced = denom
+        elif proj_type == RIGHT_PROJ:
+            reduced = denom.mean(dim=-1, keepdim=True)
+        elif proj_type == LEFT_PROJ:
+            reduced = denom.mean(dim=0, keepdim=True)
+        elif proj_type == FULL_PROJ and denom.ndim >= 2:
+            row_mean = denom.mean(dim=1, keepdim=True)
+            col_mean = denom.mean(dim=0, keepdim=True)
+            reduced = row_mean @ col_mean
+        else:
+            reduced = denom.mean()
+
+        reduced = reduced.to(device=full_rank_grad.device, dtype=full_rank_grad.dtype)
+        return reduced.expand_as(full_rank_grad)
+
     def state_dict(self) -> dict[str, Any]:  # type: ignore[override]
         """Return the optimizer state while preserving projector basis/meta."""
         serialized = super().state_dict()
@@ -511,7 +542,10 @@ class GaLoreGlobal(AdamW):
             dim = group.get("dim", GALORE_MAX_SUPPORT_DIM)
             v1, *_ = cast("tuple[float,...]", group.get("vs", self.vs))
             qhm_outside = group.get("qhm_outside_projection", False)
-            log.debug(f"GaLoreGlobal step with v1={v1}, qhm_outside_projection={qhm_outside}")  # noqa: G004
+            log.info(f"Rotate Moments on Refresh: {group.get('rotate_moments_on_refresh', False)}")  # noqa: G004
+            log.info(f"Learning Rate: {lr}")  # noqa: G004
+            log.info(f"Beta1: {beta1}, Beta2: {beta2}")  # noqa: G004
+            log.info(f"GaLoreGlobal step with v1={v1}, qhm_outside_projection={qhm_outside}")  # noqa: G004
             for param in group["params"]:
                 grad = param.grad
                 if grad is None:
@@ -522,6 +556,7 @@ class GaLoreGlobal(AdamW):
 
                 rank = self._resolve_rank_for_param(param, base_rank)
                 use_low_rank = rank is not None
+                log.info(f"Parameter id {id(param)} using low-rank={use_low_rank} with rank={rank}")  # noqa: G004
                 use_error_feedback = (
                     group.get("use_error_feedback", False) and use_low_rank
                 )
@@ -613,6 +648,25 @@ class GaLoreGlobal(AdamW):
                         normalized_full_grad = full_rank_grad / (denom_scalar + eps)
                         step_tensor = (1.0 - v1) * normalized_full_grad + v1 * adaptive_full
                         has_been_projected_back = True
+                        # The below is the one where have a mean vector
+                        # meta = state.get("projector_meta", {})
+                        # proj_type_code = meta.get(
+                        #     "resolved_proj_type", meta.get("proj_type", PROJ_TO_CODE[STD_PROJ])
+                        # )
+                        # proj_type = _proj_name_from_value(proj_type_code, STD_PROJ)
+                        # denom_mean = self._expanded_denom_mean(
+                        #     denom,
+                        #     full_rank_grad,
+                        #     proj_type,
+                        # )
+                        # normalized_full_grad = full_rank_grad / (denom_mean + eps)
+
+                        # The full rank projection version!
+                        # denom_full = _project_back(param_optim_state, denom)
+                        # if denom_full.shape != full_rank_grad.shape:
+                        #     print("I am here")
+                        #     denom_full = denom_full.mean().expand_as(full_rank_grad)
+                        # grad_norm = full_rank_grad / (denom_full + eps)
                         log.debug("Using QHM outside projection mixing.")
                     else:
                         blended = (1 - v1) * grad + v1 * adaptive
@@ -718,6 +772,24 @@ class GaLoreGlobal(AdamW):
                     adaptive_step_full = _project_back(param_optim_state, adaptive_step)
                     denom_scalar = denom.mean().item()
                     grad_norm = full_rank_grad / (denom_scalar + eps)
+                    # The below is the one where have a mean vector    
+                    # meta = param_optim_state.get("projector_meta", {})
+                    # proj_type_code = meta.get(
+                    #     "resolved_proj_type", meta.get("proj_type", PROJ_TO_CODE[STD_PROJ])
+                    # )
+                    # proj_type = _proj_name_from_value(proj_type_code, STD_PROJ)
+                    # denom_mean = self._expanded_denom_mean(
+                    #     denom,
+                    #     full_rank_grad,
+                    #     proj_type,
+                    # )
+                    # grad_norm = full_rank_grad / (denom_mean + eps) 
+
+                    # denom_full = _project_back(param_optim_state, denom)
+                    # if denom_full.shape != full_rank_grad.shape:
+                    #     print("I am here")
+                    #     denom_full = denom_full.mean().expand_as(full_rank_grad)
+                    # grad_norm = full_rank_grad / (denom_full + eps)
                     step_tensor = (1.0 - v1) * grad_norm + v1 * adaptive_step_full
                     has_been_projected_back = True
                 else:

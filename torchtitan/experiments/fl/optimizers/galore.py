@@ -45,9 +45,87 @@ CODE_TO_PROJ: dict[int, str] = {code: name for name, code in PROJ_TO_CODE.items(
 
 ProjectionBasis = Tensor | list[Tensor]
 
+
+def _to_local_if_dtensor(tensor: Tensor) -> Tensor:
+    """Ensure metrics use local tensors; DTensors can trip mixed-op checks during logging."""
+    try:
+        from torch.distributed.tensor import DTensor as _DTensor  # type: ignore
+    except Exception:  # pragma: no cover - DTensor may be unavailable
+        _DTensor = None  # type: ignore
+
+    if _DTensor is not None and isinstance(tensor, _DTensor):
+        return tensor.to_local()
+    return tensor
+
+
 class _RotationContext(NamedTuple):
     beta1: float
     beta2: float
+
+
+def _flatten_for_svd(tensor: Tensor) -> Tensor:
+    if tensor.ndim == 0:
+        return tensor.reshape(1, 1)
+    if tensor.ndim == 1:
+        return tensor.reshape(1, -1)
+    return tensor.reshape(tensor.shape[0], -1)
+
+
+def _stable_rank_from_singular_values(singular_values: Tensor) -> Tensor:
+    singular_values = _to_local_if_dtensor(singular_values)
+    if singular_values.numel() == 0:
+        return torch.tensor(float("nan"), device=singular_values.device, dtype=singular_values.dtype)
+    fro_sq = singular_values.square().sum()
+    spectral_sq = singular_values.max().square()
+    if spectral_sq == 0:
+        return torch.tensor(float("nan"), device=singular_values.device, dtype=singular_values.dtype)
+    return fro_sq / spectral_sq
+
+
+def _spectral_gap_from_singular_values(singular_values: Tensor, rank: int | None) -> Tensor:
+    singular_values = _to_local_if_dtensor(singular_values)
+    if rank is None or rank <= 0:
+        return torch.tensor(float("nan"), device=singular_values.device, dtype=singular_values.dtype)
+
+    sigma = torch.sort(singular_values, descending=True).values
+    if sigma.numel() == 0:
+        return torch.tensor(float("nan"), device=singular_values.device, dtype=singular_values.dtype)
+
+    sigma = torch.clamp(sigma, min=1e-12)
+    s_r = sigma[rank - 1] if sigma.numel() >= rank else torch.tensor(float("nan"), device=sigma.device, dtype=sigma.dtype)
+    s_r1 = sigma[rank] if sigma.numel() > rank else torch.tensor(0.0, device=sigma.device, dtype=sigma.dtype)
+    return s_r - s_r1
+
+
+def _powerlaw_alpha_from_singular_values(singular_values: Tensor) -> Tensor:
+    sigma = _to_local_if_dtensor(singular_values)
+    sigma = torch.sort(sigma, descending=True).values
+    sigma = torch.clamp(sigma, min=1e-12)
+
+    k = torch.arange(1, sigma.numel() + 1, device=sigma.device, dtype=sigma.dtype)
+    log_k = torch.log(k)
+    log_sigma = torch.log(sigma)
+    mean_log_k = log_k.mean()
+    mean_log_sigma = log_sigma.mean()
+    var_log_k = torch.sum((log_k - mean_log_k) ** 2)
+    if var_log_k <= 0:
+        return torch.tensor(float("nan"), device=sigma.device, dtype=sigma.dtype)
+    cov = torch.sum((log_k - mean_log_k) * (log_sigma - mean_log_sigma))
+    slope = cov / var_log_k
+    return -slope
+
+
+def _singular_values_from_gradient(grad: Tensor) -> Tensor:
+    grad_f = _flatten_for_svd(grad).to(dtype=torch.float32)
+    m, n = grad_f.shape
+    if m >= n:
+        gram = grad_f.transpose(-1, -2) @ grad_f  # shape (n, n)
+    else:
+        gram = grad_f @ grad_f.transpose(-1, -2)  # shape (m, m)
+    eigenvalues = torch.linalg.eigvalsh(gram)
+    eigenvalues = torch.clamp(eigenvalues, min=0.0)
+    singular_values = torch.sqrt(eigenvalues)
+    return torch.sort(singular_values, descending=True).values
 
 
 def _apply_axis_transform(tensor: Tensor, matrix: Tensor, axis: int) -> Tensor:
@@ -490,7 +568,9 @@ class GaLore(AdamW):
             base_rank = group.get("rank")
             dim = group.get("dim", GALORE_MAX_SUPPORT_DIM)
             qhm_outside = group.get("qhm_outside_projection", False)
+            log.info(f"GaLore step with lr={lr}, weight_decay={weight_decay}, rank={base_rank}, dim={dim}, v1={v1}, qhm_outside={qhm_outside}, betas=({beta1}, {beta2}), eps={eps}")
             rotation_context = None
+            log.info(f"Rotate Moments on Refresh: {group.get('rotate_moments_on_refresh', False)}")  # noqa: G004
             if group.get("rotate_moments_on_refresh", False):
                 rotation_context = _RotationContext(beta1=beta1, beta2=beta2)
 
@@ -504,6 +584,7 @@ class GaLore(AdamW):
 
                 rank = self._resolve_rank_for_param(param, base_rank)
                 use_low_rank = rank is not None
+                print(f"rank {rank} use_low_rank {use_low_rank} for param id {id(param)}")
                 if use_low_rank and dim > GALORE_MAX_SUPPORT_DIM:
                     msg = "GaLore supports tensors up to 2 dimensions."
                     raise NotImplementedError(msg)
@@ -672,6 +753,7 @@ class GaLore(AdamW):
 
             step = param_optim_state["step"].item()
             grad = param.grad
+            original_grad = grad.detach() if grad is not None else None
             meta = param_optim_state.get("projector_meta")
             use_low_rank = meta is not None and meta.get("rank") is not None
             # Hold reference to full rank grad for outside projection logic
@@ -720,19 +802,41 @@ class GaLore(AdamW):
                 step_tensor.mul_(1 + scaling_factor).add_(param, alpha=scaling_factor)
 
             for metric in self.metric_functions:
-                optimizer_metrics[f"{metric}/{name}"] = self.metric_functions[metric](
+                metric_value = self.metric_functions[metric](
                     param,
                     param_optim_state,
                     step_tensor,
                 )
+                optimizer_metrics[f"{metric}/{name}"] = _to_local_if_dtensor(metric_value)
 
             if use_low_rank:
                 eigenvalues, eig_product = self._projector_eigenvalues(param_optim_state, param.device)
                 if eigenvalues is not None:
                     for idx, eig in enumerate(eigenvalues):
-                        optimizer_metrics[f"mean/projection_eigenvalue_{idx}/{name}"] = eig
+                        optimizer_metrics[f"mean/projection_eigenvalue_{idx}/{name}"] = _to_local_if_dtensor(eig)
                 if eig_product is not None:
-                    optimizer_metrics[f"mean/projection_eigenvalue_product/{name}"] = eig_product
+                    optimizer_metrics[f"mean/projection_eigenvalue_product/{name}"] = _to_local_if_dtensor(
+                        eig_product
+                    )
+
+            if original_grad is not None:
+                with torch.no_grad():
+                    singular_values = _singular_values_from_gradient(original_grad)
+                    stable_rank = _stable_rank_from_singular_values(singular_values)
+                    optimizer_metrics[f"mean/stable_rank/{name}"] = _to_local_if_dtensor(stable_rank)
+
+                    rank = meta.get("rank") if meta is not None else None
+                    if rank is not None:
+                        spectral_gap = _spectral_gap_from_singular_values(singular_values, rank)
+                        optimizer_metrics[f"mean/spectral_gap/{name}"] = _to_local_if_dtensor(spectral_gap)
+                        sigma_sorted = torch.sort(singular_values, descending=True).values
+                        sigma_r = sigma_sorted[rank - 1] if sigma_sorted.numel() >= rank else torch.tensor(float("nan"), device=sigma_sorted.device)
+                        if torch.isfinite(sigma_r) and sigma_r != 0:
+                            rel_gap = spectral_gap / sigma_r
+                            optimizer_metrics[f"mean/relative_spectral_gap/{name}"] = _to_local_if_dtensor(rel_gap)
+
+                    alpha = _powerlaw_alpha_from_singular_values(singular_values)
+                    optimizer_metrics[f"mean/powerlaw_alpha/{name}"] = _to_local_if_dtensor(alpha)
 
         return optimizer_metrics
 
