@@ -92,7 +92,7 @@ reset_momenta = []
 local_batch_size = 16
 global_batch_size = 256
 seq_len = 2048
-max_norm = 1.0  # grad norm clipping
+max_norm = 0.5  # grad norm clipping
 steps = 6144
 dataset = "c4_test"  # supported datasets: c4_test (2K), c4 (177M)
 
