@@ -22,18 +22,31 @@ fi
 RUN_PREFIX=${RUN_PREFIX:-"icml2026-720M-local-qhm"}
 TIMESTAMP=$(date +"%Y%m%d-%H%M%S")
 
-declare -a CHAIN_RANKS=(256 2048)
-declare -a CHAIN_LRS=(0.008 0.008)
+# declare -a CHAIN_RANKS=(256 2048)
+# declare -a CHAIN_LRS=(0.008 0.008)
+# declare -a CHAIN_RESUME_RUNS=( # THESE ARE THE EF WARMED UP RUNS!
+# 	"icml2026-720M-ddp-qhm-cc5ff2e8-r256-lr0p008-rottrue-ss1p0-v0p91-qfalse-20260123-141919-idx0"
+# )
+
+# # Optional per-run hyperparameter-switch omega values (will be written to
+# # HP_SWITCH_NEW_VS for the per-run config). Provide one entry per run.
+# declare -a CHAIN_OMEGAS=("0.94," "0.94,")
+# # Optional per-run lr-scheduler switch scale values (will be written to
+# # lr_scheduler.switch_scale in the generated config). Provide one entry per run.
+# declare -a CHAIN_SWITCH_SCALES=("2.0" "1.0")
+declare -a CHAIN_RANKS=(256)
+declare -a CHAIN_LRS=(0.008)
 declare -a CHAIN_RESUME_RUNS=( # THESE ARE THE EF WARMED UP RUNS!
-	"TODO"
+	"icml2026-720M-ddp-qhm-cc5ff2e8-r256-lr0p008-rottrue-ss1p0-v0p91-qfalse-20260123-141919-idx0"
 )
 
 # Optional per-run hyperparameter-switch omega values (will be written to
 # HP_SWITCH_NEW_VS for the per-run config). Provide one entry per run.
-declare -a CHAIN_OMEGAS=("0.94," "0.94,")
+declare -a CHAIN_OMEGAS=("0.94,")
 # Optional per-run lr-scheduler switch scale values (will be written to
 # lr_scheduler.switch_scale in the generated config). Provide one entry per run.
-declare -a CHAIN_SWITCH_SCALES=("2.0" "1.0")
+declare -a CHAIN_SWITCH_SCALES=("2.0"))
+
 
 CHAIN_LENGTH=${#CHAIN_RANKS[@]}
 

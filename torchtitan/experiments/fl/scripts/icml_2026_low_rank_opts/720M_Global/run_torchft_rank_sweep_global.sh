@@ -30,7 +30,7 @@ TIMESTAMP=$(date +"%Y%m%d-%H%M%S")
 declare -a CHAIN_RANKS=(256)
 declare -a CHAIN_LRS=(0.008)
 declare -a CHAIN_RESUME_RUNS=( # THESE ARE THE EF WARMED UP RUNS!
-	"TODO"
+	"icml2026-720M-ddp-qhm-cc5ff2e8-r256-lr0p008-rottrue-ss1p0-v0p91-qfalse-20260123-141919-idx0"
 )
 # declare -a CHAIN_OMEGAS=("0.99," "0.97," "0.97," "0.97," "0.97,")
 declare -a CHAIN_OMEGAS=("0.97,")
