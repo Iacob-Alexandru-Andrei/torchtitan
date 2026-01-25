@@ -12,8 +12,8 @@ NGPU=${NGPU:-4}
 MIN_REPLICAS=${MIN_REPLICAS:-${NGPU}}
 QUORUM_TICK_MS=${QUORUM_TICK_MS:-100}
 LIGHTHOUSE_HOST=${LIGHTHOUSE_HOST:-"localhost"}
-LIGHTHOUSE_PORT_BASE=${LIGHTHOUSE_PORT_BASE:-33710}
-RDZV_PORT_BASE=${RDZV_PORT_BASE:-31000}
+LIGHTHOUSE_PORT_BASE=${LIGHTHOUSE_PORT_BASE:-49610}
+RDZV_PORT_BASE=${RDZV_PORT_BASE:-40000}
 # PORT_OFFSET allows running multiple experiments simultaneously without port conflicts.
 # Set PORT_OFFSET=100 for a second experiment, PORT_OFFSET=200 for a third, etc.
 PORT_OFFSET=${PORT_OFFSET:-100}
@@ -27,27 +27,27 @@ RUN_PREFIX=${RUN_PREFIX:-"icml2026-125M-global-qhm"}
 TIMESTAMP=$(date +"%Y%m%d-%H%M%S")
 
 # Chain definition (rank, lr, resume path per run).
-# TODO: ADD 384!
 # declare -a CHAIN_RANKS=(24 48 96 192 384)
 # declare -a CHAIN_LRS=(0.016 0.008 0.008 0.008 0.016)
 # declare -a CHAIN_RESUME_RUNS=( # THESE ARE THE EF WARMED UP RUNS!
-# 	"icml2026-125M-ddp-qhm-7acd4307-r24-lr0p016-rottrue-ss2p0-v0p94-qfalse-20260120-143840-idx0"
-# 	"icml2026-125M-ddp-qhm-7acd4307-r48-lr0p008-rottrue-ss2p0-v0p94-qfalse-20260120-143840-idx1"
-# 	"icml2026-125M-ddp-qhm-7acd4307-r96-lr0p008-rottrue-ss1p0-v0p91-qfalse-20260120-143840-idx2"
-# 	"icml2026-125M-ddp-qhm-7acd4307-r192-lr0p008-rottrue-ss1p0-v0p94-qfalse-20260120-143840-idx3"
-# 	"icml2026-125M-ddp-qhm-8731ca49-r384-lr0p016-rottrue-ss1p0-v0p92-qfalse-20260121-143919-idx0"
+# 	"icml2026-125M-ddp-qhm-7acd4307-r24-lr0p016-rottrue-ss2p0-v0p94-qfalse-20260122-233428-idx0"
+# 	"icml2026-125M-ddp-qhm-7acd4307-r48-lr0p008-rottrue-ss2p0-v0p94-qfalse-20260122-233428-idx1"
+# 	"icml2026-125M-ddp-qhm-7acd4307-r96-lr0p008-rottrue-ss1p0-v0p91-qfalse-20260122-233428-idx2"
+# 	"icml2026-125M-ddp-qhm-db10e848-r192-lr0p008-rottrue-ss1p0-v0p94-qfalse-20260124-173007-idx0"
+# 	"icml2026-125M-ddp-qhm-7a871a1d-r384-lr0p016-rottrue-ss1p0-v0p92-qfalse-20260123-165718-idx0"
 # )
-declare -a CHAIN_RANKS=(384)
-declare -a CHAIN_LRS=(0.016)
-declare -a CHAIN_RESUME_RUNS=( # THESE ARE THE EF WARMED UP RUNS!
-	"icml2026-125M-ddp-qhm-8731ca49-r384-lr0p016-rottrue-ss1p0-v0p92-qfalse-20260121-143919-idx0"
-)
 # declare -a CHAIN_OMEGAS=("0.99," "0.97," "0.97," "0.97," "0.97,")
+# # Optional per-run lr-scheduler switch scale values (will be written to
+# # lr_scheduler.switch_scale in the generated config). Provide one entry per run.
+# declare -a CHAIN_SWITCH_SCALES=("1.0" "0.5" "0.5" "0.5" "0.5")
+declare -a CHAIN_RANKS=(192)
+declare -a CHAIN_LRS=(0.008)
+declare -a CHAIN_RESUME_RUNS=( # THESE ARE THE EF WARMED UP RUNS!
+	"icml2026-125M-ddp-qhm-db10e848-r192-lr0p008-rottrue-ss1p0-v0p94-qfalse-20260124-173007-idx0"
+)
 declare -a CHAIN_OMEGAS=("0.97,")
 # Optional per-run lr-scheduler switch scale values (will be written to
 # lr_scheduler.switch_scale in the generated config). Provide one entry per run.
-# declare -a CHAIN_SWITCH_SCALES=("2.0")
-# declare -a CHAIN_SWITCH_SCALES=("1.0" "0.5" "0.5" "0.5" "0.5)
 declare -a CHAIN_SWITCH_SCALES=("0.5")
 
 CHAIN_LENGTH=${#CHAIN_RANKS[@]}

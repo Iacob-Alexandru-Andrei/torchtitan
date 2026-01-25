@@ -12,7 +12,7 @@ NGPU=${NGPU:-4}
 MIN_REPLICAS=${MIN_REPLICAS:-${NGPU}}
 QUORUM_TICK_MS=${QUORUM_TICK_MS:-100}
 LIGHTHOUSE_HOST=${LIGHTHOUSE_HOST:-"localhost"}
-LIGHTHOUSE_PORT=${LIGHTHOUSE_PORT:-49610}
+LIGHTHOUSE_PORT=${LIGHTHOUSE_PORT:-33710}
 S3_ENDPOINT_URL=${S3_ENDPOINT_URL:-"http://taranaki.cl.cam.ac.uk:9000"}
 if [[ -z "${PYTHONPATH:-}" ]]; then
   PYTHONPATH="${REPO_ROOT}"
@@ -22,23 +22,35 @@ fi
 RUN_PREFIX=${RUN_PREFIX:-"icml2026-125M-local-qhm"}
 TIMESTAMP=$(date +"%Y%m%d-%H%M%S")
 
-declare -a CHAIN_RANKS=(24 48 96 192 384 768)
-declare -a CHAIN_LRS=(0.016 0.008 0.008 0.008 0.016 0.008)
+# declare -a CHAIN_RANKS=(24 48 96 192 384 768)
+# declare -a CHAIN_LRS=(0.016 0.008 0.008 0.008 0.016 0.008)
+# declare -a CHAIN_RESUME_RUNS=( # THESE ARE THE EF WARMED UP RUNS!
+# 	"icml2026-125M-ddp-qhm-7acd4307-r24-lr0p016-rottrue-ss2p0-v0p94-qfalse-20260122-233428-idx0"
+# 	"icml2026-125M-ddp-qhm-7acd4307-r48-lr0p008-rottrue-ss2p0-v0p94-qfalse-20260122-233428-idx1"
+# 	"icml2026-125M-ddp-qhm-7acd4307-r96-lr0p008-rottrue-ss1p0-v0p91-qfalse-20260122-233428-idx2"
+# 	"icml2026-125M-ddp-qhm-db10e848-r192-lr0p008-rottrue-ss1p0-v0p94-qfalse-20260124-173007-idx0"
+# 	"icml2026-125M-ddp-qhm-7a871a1d-r384-lr0p016-rottrue-ss1p0-v0p92-qfalse-20260123-165718-idx0"
+# 	"icml2026-125M-ddp-qhm-7a871a1d-r768-lr0p008-rottrue-ss1p0-v0p94-qfalse-20260123-165718-idx1"
+# )
+
+# # Optional per-run hyperparameter-switch omega values (will be written to
+# # HP_SWITCH_NEW_VS for the per-run config). Provide one entry per run.
+# declare -a CHAIN_OMEGAS=("0.90," "0.92," "0.94," "0.98," "0.93," "0.94,")
+# # Optional per-run lr-scheduler switch scale values (will be written to
+# # lr_scheduler.switch_scale in the generated config). Provide one entry per run.
+# declare -a CHAIN_SWITCH_SCALES=("2.0" "2.0" "2.0" "2.0" "0.5" "1.0")
+declare -a CHAIN_RANKS=(192)
+declare -a CHAIN_LRS=(0.008)
 declare -a CHAIN_RESUME_RUNS=( # THESE ARE THE EF WARMED UP RUNS!
-	"icml2026-125M-ddp-qhm-7acd4307-r24-lr0p016-rottrue-ss2p0-v0p94-qfalse-20260120-143840-idx0"
-	"icml2026-125M-ddp-qhm-7acd4307-r48-lr0p008-rottrue-ss2p0-v0p94-qfalse-20260120-143840-idx1"
-	"icml2026-125M-ddp-qhm-7acd4307-r96-lr0p008-rottrue-ss1p0-v0p91-qfalse-20260120-143840-idx2"
-	"icml2026-125M-ddp-qhm-7acd4307-r192-lr0p008-rottrue-ss1p0-v0p94-qfalse-20260120-143840-idx3"
-	"icml2026-125M-ddp-qhm-8731ca49-r384-lr0p016-rottrue-ss1p0-v0p92-qfalse-20260121-143919-idx0"
-	"icml2026-125M-ddp-qhm-7acd4307-r768-lr0p008-rottrue-ss1p0-v0p94-qfalse-20260120-143840-idx5"
+	"icml2026-125M-ddp-qhm-db10e848-r192-lr0p008-rottrue-ss1p0-v0p94-qfalse-20260124-173007-idx0"
 )
 
 # Optional per-run hyperparameter-switch omega values (will be written to
 # HP_SWITCH_NEW_VS for the per-run config). Provide one entry per run.
-declare -a CHAIN_OMEGAS=("0.90," "0.92," "0.94," "0.98," "0.93," "0.94,")
+declare -a CHAIN_OMEGAS=("0.98,")
 # Optional per-run lr-scheduler switch scale values (will be written to
 # lr_scheduler.switch_scale in the generated config). Provide one entry per run.
-declare -a CHAIN_SWITCH_SCALES=("2.0" "2.0" "2.0" "2.0" "0.5" "1.0")
+declare -a CHAIN_SWITCH_SCALES=("2.0")
 
 CHAIN_LENGTH=${#CHAIN_RANKS[@]}
 
@@ -471,7 +483,7 @@ for ((replica_id=0; replica_id<NGPU; replica_id++)); do
 		cd "${REPO_ROOT}"
 		export CUDA_VISIBLE_DEVICES="${gpu_id}"
 		export PYTORCH_ALLOC_CONF="expandable_segments:True"
-		rdzv_port=$((40000 + replica_id))
+		rdzv_port=$((30000 + replica_id))
 		uv run --no-sync torchrun \
 			--nproc_per_node=1 \
 			--rdzv_backend=c10d \
