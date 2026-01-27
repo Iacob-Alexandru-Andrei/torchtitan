@@ -194,6 +194,7 @@ class ParameterFragmentConfig:
     outer_optimizer_low_rank: bool = False
     low_rank_projector_error_feedback: bool = False
     low_rank_projector_source: Literal["pseudo_grad", "full_rank_grad"] = "pseudo_grad"
+    pseudo_grad_top_k: float | None = None
 
 
 @dataclass(frozen=True)
@@ -249,6 +250,7 @@ class DesLocControllerConfig:
     outer_optimizer_low_rank: bool = False
     low_rank_projector_error_feedback: bool = False
     low_rank_projector_source: Literal["pseudo_grad", "full_rank_grad"] = "pseudo_grad"
+    pseudo_grad_top_k: float | None = None
 
 
 @dataclass(frozen=True)
@@ -301,6 +303,40 @@ def _zero_optimizer_grads(optimizer: Optimizer | None) -> None:
         optimizer.zero_grad(set_to_none=True)
     except TypeError:  # pragma: no cover - optimizer signature variance
         optimizer.zero_grad()
+
+
+def _apply_topk_sparsity(tensor: torch.Tensor, topk: float | None) -> torch.Tensor:
+    """Apply fractional top-k masking (0 < topk < 1) to ``tensor`` in-place.
+
+    Any value outside ``(0, 1)`` leaves the tensor unchanged. Dtype/device are
+    preserved; mask is magnitude-based.
+    """
+
+    if topk is None:
+        return tensor
+
+    try:
+        k_value = float(topk)
+    except (TypeError, ValueError):  # pragma: no cover - defensive
+        return tensor
+
+    if not (0.0 < k_value < 1.0):
+        return tensor
+
+    numel = tensor.numel()
+    if numel == 0:
+        return tensor
+
+    k = max(1, min(numel, int(math.ceil(k_value * numel))))
+    if k >= numel:
+        return tensor
+
+    flat = tensor.view(-1)
+    _, topk_indices = torch.topk(flat.abs(), k, sorted=False)
+    mask = torch.zeros_like(flat)
+    mask.scatter_(0, topk_indices, 1)
+    flat.mul_(mask)
+    return tensor
 
 
 def _partition_named_parameters(
@@ -598,6 +634,7 @@ class _ParameterFragment(_BaseFragment):
         self._param_map = dict(self._model.named_parameters())
         self._original_parameters: dict[str, torch.Tensor] = {}
         self._averaged_parameters: list[tuple[str, torch.Tensor]] = []
+        self._pseudo_grad_top_k = config.pseudo_grad_top_k
 
         outer_spec = config.outer_optimizer
         self._outer_optimizer: Optimizer | None = None
@@ -697,6 +734,16 @@ class _ParameterFragment(_BaseFragment):
             self._pre_sync_parameters.clear()
             if self._low_rank_projector_source == "full_rank_grad":
                 self._averaged_gradients.clear()
+
+        # Determine if we should use sparse pseudo-gradient communication.
+        # This applies when sparsification is enabled and we're in averaging-only mode.
+        use_sparse_pseudo_grads = (
+            self._pseudo_grad_top_k is not None
+            and 0.0 < self._pseudo_grad_top_k < 1.0
+            and self._outer_optimizer is None
+        )
+        self._use_sparse_pseudo_grads = use_sparse_pseudo_grads
+
         for name, param in self._model.named_parameters():
             avg_param = _extract_local_tensor(param.data)
             if self._low_rank_enabled:
@@ -710,8 +757,19 @@ class _ParameterFragment(_BaseFragment):
                     )
                     self._averaged_gradients[name] = grad_tensor
                     work_items.append(self._manager.allreduce(grad_tensor))
-            work_items.append(self._manager.allreduce(avg_param))
-            self._averaged_parameters.append((name, avg_param))
+
+            if use_sparse_pseudo_grads:
+                # Compute pseudo-gradient and apply sparsity to it (not raw params).
+                reference = self._original_parameters[name].to(
+                    device=avg_param.device, dtype=avg_param.dtype
+                )
+                pseudo_grad = reference - avg_param
+                _apply_topk_sparsity(pseudo_grad, self._pseudo_grad_top_k)
+                work_items.append(self._manager.allreduce(pseudo_grad))
+                self._averaged_parameters.append((name, pseudo_grad))
+            else:
+                work_items.append(self._manager.allreduce(avg_param))
+                self._averaged_parameters.append((name, avg_param))
 
         if self._outer_optimizer is not None and not self._reference_synced:
             self._reference_pending.clear()
@@ -739,9 +797,20 @@ class _ParameterFragment(_BaseFragment):
 
         if self._outer_optimizer is None:
             with torch.no_grad():
-                for name, avg_param in self._averaged_parameters:
+                use_sparse = getattr(self, "_use_sparse_pseudo_grads", False)
+                for name, avg_tensor in self._averaged_parameters:
                     param = self._param_map[name]
-                    _copy_into_tensor(param.data, avg_param)
+                    if use_sparse:
+                        # avg_tensor is the averaged sparse pseudo-gradient.
+                        # Reconstruct: new_param = reference - averaged_sparse_pseudo_grad
+                        reference = self._original_parameters[name].to(
+                            device=avg_tensor.device, dtype=avg_tensor.dtype
+                        )
+                        new_param = reference - avg_tensor
+                        _copy_into_tensor(param.data, new_param)
+                    else:
+                        # avg_tensor is the averaged parameter directly.
+                        _copy_into_tensor(param.data, avg_tensor)
             if self._low_rank_enabled:
                 self._update_low_rank_projectors()
                 self._pre_sync_parameters.clear()
@@ -1010,7 +1079,17 @@ class _ParameterFragment(_BaseFragment):
                 continue
             if self._error_feedback_enabled:
                 active_feedback_names.add(name)
-            base_pseudo_grad = local_snapshot - avg_param
+
+            # When using sparse pseudo-gradients, avg_param IS the averaged sparse
+            # pseudo-gradient. Otherwise, compute the pseudo-gradient from params.
+            use_sparse = getattr(self, "_use_sparse_pseudo_grads", False)
+            if use_sparse:
+                # avg_param is already the averaged sparse pseudo-gradient.
+                base_pseudo_grad = avg_param
+            else:
+                # Compute pseudo-gradient: local_snapshot - averaged_params
+                base_pseudo_grad = local_snapshot - avg_param
+
             projector_signal = self._select_projector_signal(
                 name=name,
                 base_pseudo_grad=base_pseudo_grad,
@@ -1465,6 +1544,7 @@ class _StreamingParameterFragment:
         log_outer_metrics: bool,
         metrics_logger: Callable[[dict[str, float]], None] | None,
         checkpoint_outer_optimizer: bool,
+        pseudo_grad_top_k: float | None = None,
     ) -> None:
         self._manager = manager
         self._fragment_id = fragment_id
@@ -1484,6 +1564,7 @@ class _StreamingParameterFragment:
         self._averaging_only = outer_optimizer is None
         self._should_quantize = should_quantize
         self._checkpoint_outer_optimizer = checkpoint_outer_optimizer
+        self._pseudo_grad_top_k = pseudo_grad_top_k
         self._current_sync_step: int | None = None
 
         self._grads: dict[str, torch.Tensor] = {}
@@ -1636,15 +1717,35 @@ class _StreamingParameterFragment:
                     else param
                 )
                 pseudo = self.original_parameters[name].to(tensor.device) - tensor
+                # Apply top-k sparsity to pseudo-gradients before allreduce.
+                _apply_topk_sparsity(pseudo, self._pseudo_grad_top_k)
                 self._grads[name] = pseudo
 
     def _save_averaged_parameters(self) -> None:
         self._averaged_parameters.clear()
+        # Determine if we should use sparse pseudo-gradient communication.
+        use_sparse_pseudo_grads = (
+            self._pseudo_grad_top_k is not None
+            and 0.0 < self._pseudo_grad_top_k < 1.0
+        )
+        self._use_sparse_pseudo_grads = use_sparse_pseudo_grads
+
         with torch.no_grad():
             for name, param in self._named_parameters():
-                self._averaged_parameters.append(
-                    (name, _extract_local_tensor(param.data))
-                )
+                if use_sparse_pseudo_grads:
+                    # Compute pseudo-gradient and apply sparsity to it (not raw params).
+                    tensor = (
+                        param.to_local()
+                        if DTensor is not None and isinstance(param, DTensor)
+                        else param
+                    )
+                    reference = self.original_parameters[name].to(tensor.device)
+                    pseudo_grad = reference - tensor
+                    _apply_topk_sparsity(pseudo_grad, self._pseudo_grad_top_k)
+                    self._averaged_parameters.append((name, pseudo_grad))
+                else:
+                    avg_param = _extract_local_tensor(param.data)
+                    self._averaged_parameters.append((name, avg_param))
 
     def _set_grads(self) -> None:
         with torch.no_grad():
@@ -1665,9 +1766,23 @@ class _StreamingParameterFragment:
 
     def _apply_averaged_parameters(self) -> None:
         with torch.no_grad():
-            for name, averaged in self._averaged_parameters:
+            use_sparse = getattr(self, "_use_sparse_pseudo_grads", False)
+            for name, avg_tensor in self._averaged_parameters:
                 param = self._param_map[name]
-                _copy_into_tensor(param.data, averaged)
+                if use_sparse:
+                    # avg_tensor is the averaged sparse pseudo-gradient.
+                    # Reconstruct: new_param = reference - averaged_sparse_pseudo_grad
+                    tensor = (
+                        param.to_local()
+                        if DTensor is not None and isinstance(param, DTensor)
+                        else param
+                    )
+                    reference = self.original_parameters[name].to(tensor.device)
+                    new_param = reference - avg_tensor
+                    _copy_into_tensor(param.data, new_param)
+                else:
+                    # avg_tensor is the averaged parameter directly.
+                    _copy_into_tensor(param.data, avg_tensor)
         self._averaged_parameters.clear()
 
     def wait(self) -> None:
@@ -1918,6 +2033,7 @@ class DesLocController:
             outer_optimizer_low_rank=config.outer_optimizer_low_rank,
             low_rank_projector_error_feedback=config.low_rank_projector_error_feedback,
             low_rank_projector_source=config.low_rank_projector_source,
+            pseudo_grad_top_k=config.pseudo_grad_top_k,
         )
         fragment_cls = (
             _OuterOptimizingParameterFragment
@@ -2171,6 +2287,7 @@ class StreamingDesLocController:
         self._checkpoint_outer_optimizer = config.checkpoint_outer_optimizer
         self._streaming_cfg = streaming
         self._optimizer_state_sync_enabled = not config.disable_optimizer_state_sync
+        self._pseudo_grad_top_k = config.pseudo_grad_top_k
 
         fragment_strategy = getattr(streaming, "fragment_strategy", "strided")
         custom_fragments = getattr(streaming, "custom_fragments", None)
@@ -2255,6 +2372,7 @@ class StreamingDesLocController:
                 checkpoint_outer_optimizer=(
                     self._checkpoint_outer_optimizer and outer_checkpoint_flags[idx]
                 ),
+                pseudo_grad_top_k=self._pseudo_grad_top_k,
             )
             param_names = fragment.parameter_names
             logger.info(
@@ -2860,6 +2978,7 @@ class DesLocFTOptimizersContainer(FTOptimizersContainer):
                 outer_optimizer_low_rank=desloc_config.low_rank_outer_optimizer,
                 low_rank_projector_error_feedback=desloc_config.low_rank_projector_error_feedback,
                 low_rank_projector_source=desloc_config.low_rank_projector_source,
+                pseudo_grad_top_k=desloc_config.pseudo_grad_top_k,
             )
             if streaming_cfg is not None:
                 controller = StreamingDesLocController(controller_config, streaming_cfg)

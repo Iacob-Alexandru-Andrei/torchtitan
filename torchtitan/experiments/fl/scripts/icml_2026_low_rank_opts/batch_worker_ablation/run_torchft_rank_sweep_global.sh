@@ -17,14 +17,35 @@ RDZV_PORT_BASE=${RDZV_PORT_BASE:-41000}
 # PORT_OFFSET allows running multiple experiments simultaneously without port conflicts.
 # Set PORT_OFFSET=100 for a second experiment, PORT_OFFSET=200 for a third, etc.
 PORT_OFFSET=${PORT_OFFSET:-100}
+PORT_BLOCK_SIZE=${PORT_BLOCK_SIZE:-32}
 S3_ENDPOINT_URL=${S3_ENDPOINT_URL:-"http://taranaki.cl.cam.ac.uk:9000"}
 if [[ -z "${PYTHONPATH:-}" ]]; then
   PYTHONPATH="${REPO_ROOT}"
 else
   PYTHONPATH="${REPO_ROOT}:${PYTHONPATH}"
 fi
-RUN_PREFIX=${RUN_PREFIX:-"icml2026-exp5-global-vs-ddp"}
+RUN_PREFIX=${RUN_PREFIX:-"icml2026-batch-worker-ablation-global"}
 TIMESTAMP=$(date +"%Y%m%d-%H%M%S")
+
+# Worker sweep (workers -> local batch). Default: workers {1,2,4,8} with
+# local batches {16,16,16,8}. Global batch stays fixed unless overridden.
+WORKER_COUNTS_STR=${WORKER_COUNTS:-"1 2 4 8"}
+read -r -a WORKER_COUNTS <<< "${WORKER_COUNTS_STR}"
+LOCAL_BATCH_SIZES_STR=${LOCAL_BATCH_SIZES:-"16 16 16 8"}
+read -r -a LOCAL_BATCH_SIZES <<< "${LOCAL_BATCH_SIZES_STR}"
+GLOBAL_BATCH_SIZE=${GLOBAL_BATCH_SIZE:-64}
+if (( ${#WORKER_COUNTS[@]} == 0 )); then
+	echo "At least one worker count is required (received: '${WORKER_COUNTS_STR}')." >&2
+	exit 1
+fi
+if (( ${#LOCAL_BATCH_SIZES[@]} == 0 )); then
+	echo "At least one local batch size is required (received: '${LOCAL_BATCH_SIZES_STR}')." >&2
+	exit 1
+fi
+if (( ${#WORKER_COUNTS[@]} != ${#LOCAL_BATCH_SIZES[@]} )); then
+	echo "WORKER_COUNTS and LOCAL_BATCH_SIZES must have the same length." >&2
+	exit 1
+fi
 
 # Chain definition (rank, lr, resume path per run).
 # declare -a CHAIN_RANKS=(8 16 32 64 128 256)
@@ -49,17 +70,27 @@ TIMESTAMP=$(date +"%Y%m%d-%H%M%S")
 # )
 declare -a CHAIN_RANKS=(8)
 declare -a CHAIN_LRS=(0.016)
+# Per-rank per-worker checkpoint mapping. Each entry is a space-separated list
+# of checkpoint run strings, one per worker count in WORKER_COUNTS order.
+# Example: for 4 worker counts (1, 2, 4, 8) and 1 rank, provide 4 checkpoints.
 declare -a CHAIN_RESUME_RUNS=( # THESE ARE THE EF WARMED UP RUNS!
-	"icml2026-check-test-proj-savec-d99a5257-r8-lr0p016-rottrue-20251221-174207-idx0")
+	# Rank 0: checkpoints for workers 1, 2, 4, 8 (space-separated)
+	'icml2026-bxwablation-1worker-a468e350-r8-lr0p016-rottrue-ss1p0-v0p94-qfalse-20260127-005750-idx0 icml2026-bxwablation-2worker-a468e350-r8-lr0p016-rottrue-ss1p0-v0p94-qfalse-20260127-091248-idx0 icml2026-check-test-proj-savec-d99a5257-r8-lr0p016-rottrue-20251221-174207-idx0 icml2026-bxwablation-8worker-a468e350-r8-lr0p016-rottrue-ss1p0-v0p94-qfalse-20260127-005616-idx0'
+)
 declare -a CHAIN_OMEGAS=("0.99,")
 # Optional per-run lr-scheduler switch scale values (will be written to
 # lr_scheduler.switch_scale in the generated config). Provide one entry per run.
 # declare -a CHAIN_SWITCH_SCALES=("2.0")
 declare -a CHAIN_SWITCH_SCALES=("1.0")
 CHAIN_LENGTH=${#CHAIN_RANKS[@]}
+worker_spec_len=${#WORKER_COUNTS[@]}
 
 if (( CHAIN_LENGTH == 0 )); then
 	echo "No GaLoreGlobal runs specified." >&2
+	exit 1
+fi
+if (( worker_spec_len != ${#LOCAL_BATCH_SIZES[@]} )); then
+	echo "WORKER_COUNTS and LOCAL_BATCH_SIZES must have the same length (got ${worker_spec_len} vs ${#LOCAL_BATCH_SIZES[@]})." >&2
 	exit 1
 fi
 if (( ${#CHAIN_LRS[@]} != CHAIN_LENGTH || ${#CHAIN_RESUME_RUNS[@]} != CHAIN_LENGTH || ${#CHAIN_OMEGAS[@]} != CHAIN_LENGTH || ${#CHAIN_SWITCH_SCALES[@]} != CHAIN_LENGTH )); then
@@ -118,7 +149,7 @@ HP_SWITCH_STEPS=${HP_SWITCH_STEPS:-2048}
 HP_SWITCH_NEW_VS=${HP_SWITCH_NEW_VS:-"0.98,"}
 HP_SWITCH_NEW_BETAS=${HP_SWITCH_NEW_BETAS:-"0.999,0.999"}
 HP_SWITCH_RESET_MOMENTA=${HP_SWITCH_RESET_MOMENTA:-"exp_avg,exp_avg_sq"}
-SYNC_FREQUENCIES_DEFAULT="1 2 4 8 16"
+SYNC_FREQUENCIES_DEFAULT="32" # Sync Frequencies are changed here!
 SYNC_FREQUENCIES_STR=${SYNC_FREQUENCIES:-${SYNC_FREQUENCIES_DEFAULT}}
 read -r -a SYNC_FREQUENCIES <<< "${SYNC_FREQUENCIES_STR}"
 if (( ${#SYNC_FREQUENCIES[@]} == 0 )); then
@@ -142,12 +173,22 @@ normalize_bool() {
 
 TRAINING_ARGS=("$@")
 
+# Comma-separated quantization sweep; default covers baseline and float8.
+QUANT_MODES_STR=${QUANT_MODES:-"baseline"}
+IFS=',' read -r -a QUANT_MODES <<< "${QUANT_MODES_STR}"
+if (( ${#QUANT_MODES[@]} == 0 )); then
+	echo "At least one quantization mode is required (received: '${QUANT_MODES_STR}')." >&2
+	exit 1
+fi
+
 run_python_config() {
 	local base_cfg=$1
 	local output_cfg=$2
 	local rank=$3
 	local lr=$4
 	local resume_run=$5
+	local local_batch_size=$6
+	local global_batch_size=$7
 	local rotate_flag=$(normalize_bool "${ROTATE_MOMENTS}")
 	local low_rank_flag=$(normalize_bool "${LOW_RANK_SERVER_UPDATE}")
 	local error_feedback_flag=$(normalize_bool "${LOW_RANK_PROJECTOR_ERROR_FEEDBACK}")
@@ -168,6 +209,8 @@ run_python_config() {
 	TRAIN_STEPS="${TRAIN_STEPS}" \
 	RESUME_RUN="${resume_run}" \
 	RESUME_STEP="${RESUME_STEP}" \
+	TRAINING_LOCAL_BATCH_SIZE="${local_batch_size}" \
+	TRAINING_GLOBAL_BATCH_SIZE="${global_batch_size}" \
 	SWEEP_REGEX_PATTERN="${GALORE_REGEX_PATTERN}" \
 	ROTATE_MOMENTS="${rotate_flag}" \
 	DESLOC_LOW_RANK_UPDATE="${low_rank_flag}" \
@@ -175,6 +218,8 @@ run_python_config() {
 	GALORE_USE_ERROR_FEEDBACK="${galore_error_feedback_flag}" \
 	GALORE_QHM_OUTSIDE="${galore_qhm_outside_flag}" \
 	DESLOC_PROJECTOR_SOURCE="${low_rank_projector_source_val}" \
+	ENABLE_FLOAT8="${ENABLE_FLOAT8:-false}" \
+	FLOAT8_RECIPE_NAME="${FLOAT8_RECIPE_NAME:-}" \
 	HP_SWITCH_ENABLED="${hp_switch_enabled_flag}" \
 	HP_SWITCH_STEPS="${hp_switch_steps_val}" \
 	HP_SWITCH_NEW_VS="${hp_switch_new_vs_val}" \
@@ -205,6 +250,8 @@ low_rank_update = os.environ["DESLOC_LOW_RANK_UPDATE"].strip().lower() in {"true
 error_feedback = os.environ["DESLOC_PROJECTOR_ERROR_FEEDBACK"].strip().lower() in {"true", "1", "yes", "on"}
 galore_error_feedback = os.environ["GALORE_USE_ERROR_FEEDBACK"].strip().lower() in {"true", "1", "yes", "on"}
 full_rank_threshold = int(os.environ["FULL_RANK_THRESHOLD"])
+local_batch_env = os.environ.get("TRAINING_LOCAL_BATCH_SIZE", "").strip()
+global_batch_env = os.environ.get("TRAINING_GLOBAL_BATCH_SIZE", "").strip()
 # Read optional DES-LOC projector source override. Accepts e.g. "pseudo_grad" or "full_rank_grad".
 proj_source_env = os.environ.get("DESLOC_PROJECTOR_SOURCE", "").strip()
 if proj_source_env == "":
@@ -232,6 +279,8 @@ hp_new_vs_env = os.environ.get("HP_SWITCH_NEW_VS", "").strip()
 hp_new_betas_env = os.environ.get("HP_SWITCH_NEW_BETAS", "").strip()
 hp_reset_momenta_env = os.environ.get("HP_SWITCH_RESET_MOMENTA", "").strip()
 lr_sched_switch_scale_env = os.environ.get("LR_SCHED_SWITCH_SCALE", "").strip()
+enable_float8_env = os.environ.get("ENABLE_FLOAT8", "").strip()
+float8_recipe_env = os.environ.get("FLOAT8_RECIPE_NAME", "").strip()
 
 data = tomllib.loads(base.read_text(encoding="utf-8"))
 optimizer = data.setdefault("optimizer", {})
@@ -268,10 +317,10 @@ else:
 
 # Apply explicit projector source when requested (and only for low-rank mode).
 if not is_full_rank and low_rank_projector_source is not None:
-    desloc_cfg["low_rank_projector_source"] = low_rank_projector_source
+	desloc_cfg["low_rank_projector_source"] = low_rank_projector_source
 	# Only set/override galore_qhm_outside_projection when the env var was
-	# explicitly provided; otherwise preserve any value present in the base
-	# config (or default to False if not present).
+# explicitly provided; otherwise preserve any value present in the base
+# config (or default to False if not present).
 if galore_qhm_outside is None:
 	optimizer.setdefault("galore_qhm_outside_projection", False)
 else:
@@ -307,6 +356,23 @@ if hp_reset_momenta_env:
 				break
 	optimizer["galore_param_regexes"] = normalized
 
+# Optional float8 enablement sweep. Adds the converter and optional recipe override.
+enable_float8 = enable_float8_env.lower() in {"true", "1", "yes", "on", "fp8", "float8"}
+float8_recipe = float8_recipe_env if float8_recipe_env else None
+if enable_float8:
+	model_cfg = data.setdefault("model", {})
+	converters = model_cfg.get("converters", [])
+	if isinstance(converters, str):
+		converters = [entry.strip() for entry in converters.split(",") if entry.strip()]
+	if "quantize.linear.float8" not in converters:
+		converters.append("quantize.linear.float8")
+	model_cfg["converters"] = converters
+	float8_cfg = data.setdefault("quantize", {}).setdefault("linear", {}).setdefault("float8", {})
+	# On pre-SM89 hardware (e.g., A100), float8 must be emulated.
+	float8_cfg["emulate"] = True
+	if float8_recipe is not None:
+		float8_cfg["recipe_name"] = float8_recipe
+
 # Apply optional lr-scheduler switch scale override when provided.
 if lr_sched_switch_scale_env:
 	try:
@@ -316,7 +382,12 @@ if lr_sched_switch_scale_env:
 	if switch_scale_val is not None:
 		data.setdefault("lr_scheduler", {})["switch_scale"] = switch_scale_val
 
-data.setdefault("training", {})["steps"] = train_steps
+training_cfg = data.setdefault("training", {})
+training_cfg["steps"] = train_steps
+if local_batch_env:
+	training_cfg["local_batch_size"] = int(local_batch_env)
+if global_batch_env:
+	training_cfg["global_batch_size"] = int(global_batch_env)
 s3_cfg = data.setdefault("s3_checkpoint", {})
 if resume_run:
 		s3_cfg["resume_from_run_step"] = f"{resume_run}/step-{resume_step}"
@@ -345,6 +416,8 @@ write_args_file() {
 
 # Slurm submission defaults.
 SBATCH_CPUS_PER_TASK=${SBATCH_CPUS_PER_TASK:-8}
+# GPU count is set per-run from the worker sweep; keep the default for other
+# scripts but do not bake it into COMMON_SBATCH_ARGS here.
 SBATCH_GPUS_PER_TASK=${SBATCH_GPUS_PER_TASK:-4}
 SBATCH_TIME=${SBATCH_TIME:-11:59:00}
 SBATCH_NODE=${SBATCH_NODE:-"mauao"}
@@ -364,7 +437,6 @@ SLURM_SUBMIT_DIR="${SLURM_SUBMIT_DIR:-}"
 
 COMMON_SBATCH_ARGS=(
 	-c "${SBATCH_CPUS_PER_TASK}"
-	--gres="gpu:${SBATCH_GPUS_PER_TASK}"
 	--tasks-per-node=1
 	--time="${SBATCH_TIME}"
 )
@@ -377,9 +449,12 @@ COMMON_SBATCH_ARGS+=("${SBATCH_EXTRA_ARRAY[@]}")
 # Show port configuration for debugging concurrent runs
 effective_lighthouse_port=$((LIGHTHOUSE_PORT_BASE + PORT_OFFSET))
 effective_rdzv_base=$((RDZV_PORT_BASE + PORT_OFFSET))
-echo "Port configuration (PORT_OFFSET=${PORT_OFFSET}):"
-echo "  Lighthouse port: ${effective_lighthouse_port}"
-echo "  Rendezvous ports: ${effective_rdzv_base} - $((effective_rdzv_base + NGPU - 1))"
+echo "Port configuration (PORT_OFFSET=${PORT_OFFSET}, PORT_BLOCK_SIZE=${PORT_BLOCK_SIZE}):"
+echo "  First block Lighthouse port: ${effective_lighthouse_port}"
+echo "  First block Rendezvous ports: ${effective_rdzv_base} - $((effective_rdzv_base + WORKER_COUNTS[0] - 1))"
+echo "  Each run increments ports by PORT_BLOCK_SIZE to avoid conflicts."
+echo ""
+echo "Worker sweep per chain: ${WORKER_COUNTS_STR} (local batches: ${LOCAL_BATCH_SIZES_STR})"
 echo ""
 
 echo "Planned GaLoreGlobal chains (${CHAIN_LENGTH} runs split across ${CHAIN_COUNT} chain(s)):"
@@ -394,7 +469,13 @@ for ((chain_idx=0; chain_idx<CHAIN_COUNT; chain_idx++)); do
 	echo "  Chain ${chain_label} (${size} runs):"
 	for ((k=0; k<size; k++)); do
 		run_idx=$((offset + k))
-		printf '    [%d] rank=%-4d lr=%-6s resume=%s\n' "${run_idx}" "${CHAIN_RANKS[$run_idx]}" "${CHAIN_LRS[$run_idx]}" "${CHAIN_RESUME_RUNS[$run_idx]}"
+		printf '    [%d] rank=%-4d lr=%-6s\n' "${run_idx}" "${CHAIN_RANKS[$run_idx]}" "${CHAIN_LRS[$run_idx]}"
+		# Parse per-worker checkpoints for this rank
+		read -r -a rank_resume_runs <<< "${CHAIN_RESUME_RUNS[$run_idx]}"
+		for ((worker_idx=0; worker_idx<worker_spec_len; worker_idx++)); do
+			resume_run=${rank_resume_runs[$worker_idx]:-${rank_resume_runs[0]}}
+			printf '        worker sweep %2d: workers=%-2d local_bs=%-3d global_bs=%-4d resume=%s\n' "${worker_idx}" "${WORKER_COUNTS[$worker_idx]}" "${LOCAL_BATCH_SIZES[$worker_idx]}" "${GLOBAL_BATCH_SIZE}" "${resume_run}"
+		done
 	done
 	((offset+=size))
 done
@@ -404,61 +485,80 @@ declare -a PREVIOUS_JOB_IDS=()
 declare -a SUBMITTED_JOB_IDS=()
 declare -a SUBMITTED_JOB_IDS_PER_CHAIN=()
 
+run_seq=0
 for ((idx=0; idx<CHAIN_LENGTH; idx++)); do
 	chain_idx=${CHAIN_ASSIGNMENTS[$idx]}
 	chain_label=$((chain_idx + 1))
 	rank=${CHAIN_RANKS[$idx]}
 	lr=${CHAIN_LRS[$idx]}
-	resume_run=${CHAIN_RESUME_RUNS[$idx]}
 	lr_tag=${lr/./p}
- 	for sync_freq in "${SYNC_FREQUENCIES[@]}"; do
+	# Parse per-worker checkpoints for this rank
+	read -r -a rank_resume_runs <<< "${CHAIN_RESUME_RUNS[$idx]}"
+	for ((worker_idx=0; worker_idx<worker_spec_len; worker_idx++)); do
+		worker_count=${WORKER_COUNTS[$worker_idx]}
+		local_batch_size=${LOCAL_BATCH_SIZES[$worker_idx]}
+		global_batch_size=${GLOBAL_BATCH_SIZE}
+		# Select checkpoint for this worker count (fallback to first if not enough entries)
+		resume_run=${rank_resume_runs[$worker_idx]:-${rank_resume_runs[0]}}
+		run_ngpu=${worker_count}
+		run_min_replicas=${worker_count}
+		port_block_offset=$((PORT_OFFSET + run_seq * PORT_BLOCK_SIZE))
+		lighthouse_port=$((LIGHTHOUSE_PORT_BASE + port_block_offset))
+		rdzv_port_base=$((RDZV_PORT_BASE + port_block_offset))
+		for sync_freq in "${SYNC_FREQUENCIES[@]}"; do
 		freq_tag=$(printf "%04d" "${sync_freq}")
-		run_suffix=$(printf "chain%02d-idx%02d-r%d-lr%s-sync%s" "${chain_label}" $((idx + 1)) "${rank}" "${lr_tag}" "${freq_tag}")
-		run_uuid="${RUN_PREFIX}-${TIMESTAMP}-${run_suffix}"
-		config_path="${GENERATED_CONFIG_DIR}/${run_uuid}.toml"
-		args_file="${ARGS_DIR}/${run_uuid}.args"
-		log_dir="${LOG_ROOT}/${run_uuid}"
-		mkdir -p "${log_dir}"
+		for quant_mode in "${QUANT_MODES[@]}"; do
+			quant_tag=${quant_mode}
+			enable_fp8=false
+			if [[ "${quant_mode,,}" == "float8" || "${quant_mode,,}" == "fp8" ]]; then
+				enable_fp8=true
+			fi
+			run_suffix=$(printf "chain%02d-idx%02d-r%d-lr%s-sync%s-%s-w%d-lb%d-gb%d" "${chain_label}" $((idx + 1)) "${rank}" "${lr_tag}" "${freq_tag}" "${quant_tag}" "${worker_count}" "${local_batch_size}" "${global_batch_size}")
+			run_uuid="${RUN_PREFIX}-${TIMESTAMP}-${run_suffix}"
+			config_path="${GENERATED_CONFIG_DIR}/${run_uuid}.toml"
+			args_file="${ARGS_DIR}/${run_uuid}.args"
+			log_dir="${LOG_ROOT}/${run_uuid}"
+			mkdir -p "${log_dir}"
 
-		HP_SWITCH_ENABLED="true" \
-		HP_SWITCH_NEW_VS="${CHAIN_OMEGAS[$idx]:-}" \
-		LR_SCHED_SWITCH_SCALE="${CHAIN_SWITCH_SCALES[$idx]:-}" \
-		DESLOC_PROJECTOR_SOURCE="pseudo_grad" \
-		GALORE_QHM_OUTSIDE="true" \
-		PARAM_SYNC_EVERY="${sync_freq}" \
-		run_python_config "${CONFIG_FILE}" "${config_path}" "${rank}" "${lr}" "${resume_run}"
-		write_args_file "${args_file}" "${TRAINING_ARGS[@]}"
+			HP_SWITCH_ENABLED="true" \
+			HP_SWITCH_NEW_VS="${CHAIN_OMEGAS[$idx]:-}" \
+			LR_SCHED_SWITCH_SCALE="${CHAIN_SWITCH_SCALES[$idx]:-}" \
+			DESLOC_PROJECTOR_SOURCE="pseudo_grad" \
+			GALORE_QHM_OUTSIDE="true" \
+			PARAM_SYNC_EVERY="${sync_freq}" \
+			ENABLE_FLOAT8="${enable_fp8}" \
+			FLOAT8_RECIPE_NAME="${FLOAT8_RECIPE_NAME:-}" \
+			run_python_config "${CONFIG_FILE}" "${config_path}" "${rank}" "${lr}" "${resume_run}" "${local_batch_size}" "${global_batch_size}"
+			write_args_file "${args_file}" "${TRAINING_ARGS[@]}"
 
-		job_name="galore_global_chain${chain_label}_r${rank}_lr${lr_tag}_sync${freq_tag}"
-		sbatch_args=("${COMMON_SBATCH_ARGS[@]}" --job-name="${job_name}" --output="${SLURM_LOG_DIR}/slurm-${run_uuid}-%j.out")
-		previous_job_id="${PREVIOUS_JOB_IDS[$chain_idx]:-}"
-		if [[ -n "${previous_job_id}" ]]; then
-			sbatch_args+=(--dependency="afterok:${previous_job_id}")
-		fi
+			job_name="galore_global_chain${chain_label}_r${rank}_lr${lr_tag}_sync${freq_tag}_${quant_tag}_w${worker_count}"
+			sbatch_args=("${COMMON_SBATCH_ARGS[@]}" --gres="gpu:${run_ngpu}" --job-name="${job_name}" --output="${SLURM_LOG_DIR}/slurm-${run_uuid}-%j.out")
+			previous_job_id="${PREVIOUS_JOB_IDS[$chain_idx]:-}"
+			if [[ -n "${previous_job_id}" ]]; then
+				sbatch_args+=(--dependency="afterok:${previous_job_id}")
+			fi
 
-		lighthouse_port=$((LIGHTHOUSE_PORT_BASE + PORT_OFFSET))
-		rdzv_port_base=$((RDZV_PORT_BASE + PORT_OFFSET))
-		sbatch_export_arg="ALL"
-		for kv in \
-			"RUN_UUID=${run_uuid}" \
-			"CONFIG_PATH=${config_path}" \
-			"LOG_DIR=${log_dir}" \
-			"ARGS_FILE=${args_file}" \
-			"REPO_ROOT=${REPO_ROOT}" \
-			"TRAIN_MODULE=${TRAIN_MODULE}" \
-			"NGPU=${NGPU}" \
-			"MIN_REPLICAS=${MIN_REPLICAS}" \
-			"QUORUM_TICK_MS=${QUORUM_TICK_MS}" \
-			"LIGHTHOUSE_HOST=${LIGHTHOUSE_HOST}" \
-			"LIGHTHOUSE_PORT=${lighthouse_port}" \
-			"RDZV_PORT_BASE=${rdzv_port_base}" \
-			"S3_ENDPOINT_URL=${S3_ENDPOINT_URL}" \
-			"PYTHONPATH=${PYTHONPATH}"; do
-			sbatch_export_arg+="${kv:+,${kv}}"
-		done
-		sbatch_args+=("--export=${sbatch_export_arg}")
+			sbatch_export_arg="ALL"
+			for kv in \
+				"RUN_UUID=${run_uuid}" \
+				"CONFIG_PATH=${config_path}" \
+				"LOG_DIR=${log_dir}" \
+				"ARGS_FILE=${args_file}" \
+				"REPO_ROOT=${REPO_ROOT}" \
+				"TRAIN_MODULE=${TRAIN_MODULE}" \
+				"NGPU=${run_ngpu}" \
+				"MIN_REPLICAS=${run_min_replicas}" \
+				"QUORUM_TICK_MS=${QUORUM_TICK_MS}" \
+				"LIGHTHOUSE_HOST=${LIGHTHOUSE_HOST}" \
+				"LIGHTHOUSE_PORT=${lighthouse_port}" \
+				"RDZV_PORT_BASE=${rdzv_port_base}" \
+				"S3_ENDPOINT_URL=${S3_ENDPOINT_URL}" \
+				"PYTHONPATH=${PYTHONPATH}"; do
+				sbatch_export_arg+="${kv:+,${kv}}"
+			done
+			sbatch_args+=("--export=${sbatch_export_arg}")
 
-		sbatch_output=$(sbatch "${sbatch_args[@]}" <<'EOF'
+			sbatch_output=$(sbatch "${sbatch_args[@]}" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
 
@@ -595,8 +695,11 @@ EOF
 				echo "Failed to submit job for run ${run_uuid}" >&2
 				exit 1
 			fi
+			run_seq=$((run_seq + 1))
+			done
 		done
 	done
+done
 
 echo ""
 echo "Submitted jobs by chain:"

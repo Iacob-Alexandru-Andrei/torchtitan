@@ -5,11 +5,11 @@ set -euo pipefail
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 CONFIG_FILE=${CONFIG_FILE:-"${SCRIPT_DIR}/base.toml"}
 TRAIN_MODULE=${TRAIN_MODULE:-"torchtitan.experiments.fl.train"}
-RUN_PREFIX=${RUN_PREFIX:-"icml2026-ddp-qhm"}
+RUN_PREFIX=${RUN_PREFIX:-"icml2026-bxwablation-2worker"}
 LOG_RANK=${LOG_RANK:-0}
 
-PROJECTION_RANKS=${PROJECTION_RANKS:-"256"}
-LR_VALUES=${LR_VALUES:-"0.008"}
+PROJECTION_RANKS=${PROJECTION_RANKS:-"8"}
+LR_VALUES=${LR_VALUES:-"0.016"}
 ROTATE_MOMENTS_OPTIONS=${ROTATE_MOMENTS_OPTIONS:-"true"}
 SWITCH_SCALES=${SWITCH_SCALES:-"1.0"}
 
@@ -21,7 +21,7 @@ RUN_INDEX_OFFSET=${RUN_INDEX_OFFSET:-0}
 RUN_INDEX_RANGE=${RUN_INDEX_RANGE:-}
 DRY_RUN=${DRY_RUN:-false}
 SBATCH_CPUS_PER_TASK=${SBATCH_CPUS_PER_TASK:-8}
-SBATCH_GPUS_PER_TASK=${SBATCH_GPUS_PER_TASK:-4}
+SBATCH_GPUS_PER_TASK=${SBATCH_GPUS_PER_TASK:-2}
 SBATCH_MAX_CHAINS=${SBATCH_MAX_CHAINS:-1}
 SBATCH_MEM=${SBATCH_MEM:-}
 SBATCH_TIME=${SBATCH_TIME:-}
@@ -356,9 +356,9 @@ fi
 SWEEP_HASH=${SWEEP_HASH:0:8}
 
 RDZV_HOST=${RDZV_HOST:-"127.0.0.1"}
-RDZV_BASE_PORT=${RDZV_BASE_PORT:-45000}
+RDZV_BASE_PORT=${RDZV_BASE_PORT:-25000}
 LIGHTHOUSE_HOST=${LIGHTHOUSE_HOST:-"127.0.0.1"}
-LIGHTHOUSE_BASE_PORT=${LIGHTHOUSE_BASE_PORT:-46200}
+LIGHTHOUSE_BASE_PORT=${LIGHTHOUSE_BASE_PORT:-26200}
 PORT_STRIDE=${PORT_STRIDE:-4}
 LIGHTHOUSE_PROTOCOL=${LIGHTHOUSE_PROTOCOL:-"http"}
 GALORE_REGEX_PATTERN=${GALORE_REGEX_PATTERN:-"attention\\.w[qkv]|attention\\.wo|feed_forward\\.w[12]"}
@@ -644,7 +644,7 @@ export TORCHTITAN_FORCE_WANDB_WORKER_SUFFIX=\${TORCHTITAN_FORCE_WANDB_WORKER_SUF
 export S3_ENDPOINT_URL='http://taranaki.cl.cam.ac.uk:9000'
 
 uv run --no-sync torchrun \
-  --nproc_per_node=4 \
+  --nproc_per_node=2 \
   --rdzv_backend=c10d \
   --rdzv_endpoint="${rdzv_endpoint}" \
   --rdzv_id "${run_uuid}" \
@@ -658,7 +658,7 @@ uv run --no-sync torchrun \
   --optimizer.lr "${lr_value}" \
   --training.global_batch_size 64 \
   --training.local_batch_size 16 \
-  --training.steps 6144 \
+  --training.steps 2048 \
   ${TRAINING_ARGS_ESCAPED}
 echo "JOB FINISHED: \$(date)"
 EOF

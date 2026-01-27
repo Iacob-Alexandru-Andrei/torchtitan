@@ -1,3 +1,9 @@
+
+
+
+
+
+
 [job]
 dump_folder = "./outputs"
 description = "Llama 3 debug training with Mosaic streaming"
@@ -33,24 +39,23 @@ lr = 0.001
 eps = 1e-8
 weight_decay = 0.0
 betas = [0.9, 0.999]
-galore_update_proj_gap = 32 # make this the same to the number of param sync steps!
+galore_update_proj_gap = 32  # keep in lockstep with desloc param sync steps
 galore_scale = 1.0
 galore_dim = 2
 galore_vs = [0.0]
-galore_rotate_moments_on_refresh = false
-galore_use_error_feedback = true
-# Keep regex-based rank selection identical to the checkpoint.
+galore_rotate_moments_on_refresh = true
 galore_param_regexes = [
-  { param_str_match = "attention\\.w[qkv]|attention\\.wo|feed_forward\\.w[12]", rank = 32 },
+    { param_str_match = "attention\\.w[qkv]|attention\\.wo|feed_forward\\.w[12]", rank = 32 },
 ]
 implementation = "for-loop"
 
-# [optimizer.desloc]
-# enabled = false
-# param_sync_every = 32
-# optimizer_sync_every = [32,32]
-# backup_device = "cpu"
-# pin_memory = true
+
+[optimizer.desloc]
+enabled = true
+param_sync_every = 32
+optimizer_sync_every = [32,32,32]
+backup_device = "cpu"
+pin_memory = true
 
 [fl_metrics.optimizer_monitor]
 interval = 16
@@ -110,20 +115,21 @@ context_parallel_degree = 1
 enable = true
 keep_latest_k = 20
 folder = "checkpoints"
-interval = 2048
+interval = 999999
 last_save_model_only = false
 export_dtype = "float32"
 async_mode = "async_with_pinned_mem"  # ["disabled", "async", "async_with_pinned_mem"]
-exclude_from_loading = ["dataloader"]
 
 [s3_checkpoint]
 enable = true
 bucket = "checkpoints"
 prefix = ""  # Root of bucket
 download_on_start = true
+resume_from_run_step = ""
+# run_uuid and remote_checkpoint_folder will be set via RUN_UUID environment variable
 
 [activation_checkpoint]
-mode = "selective"  # ["none", "selective", "full"]
+mode = "selective"  # ["none", "se lective", "full"]
 selective_ac_option = '2'  # 'int' = ac every positive int layer or 'op', ac based on ops policy
 
 [compile]
@@ -136,7 +142,7 @@ precompute_float8_dynamic_scale_for_fsdp = false
 filter_fqns = ["output"]
 
 [fault_tolerance]
-enable = false
+enable = true
 process_group = "gloo"
 process_group_timeout_ms = 999999
 replica_id = 0

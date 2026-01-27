@@ -23,7 +23,7 @@ if [[ -z "${PYTHONPATH:-}" ]]; then
 else
   PYTHONPATH="${REPO_ROOT}:${PYTHONPATH}"
 fi
-RUN_PREFIX=${RUN_PREFIX:-"icml2026-exp5-global-vs-ddp"}
+RUN_PREFIX=${RUN_PREFIX:-"icml2026-sparsity-global"}
 TIMESTAMP=$(date +"%Y%m%d-%H%M%S")
 
 # Chain definition (rank, lr, resume path per run).
@@ -118,11 +118,21 @@ HP_SWITCH_STEPS=${HP_SWITCH_STEPS:-2048}
 HP_SWITCH_NEW_VS=${HP_SWITCH_NEW_VS:-"0.98,"}
 HP_SWITCH_NEW_BETAS=${HP_SWITCH_NEW_BETAS:-"0.999,0.999"}
 HP_SWITCH_RESET_MOMENTA=${HP_SWITCH_RESET_MOMENTA:-"exp_avg,exp_avg_sq"}
-SYNC_FREQUENCIES_DEFAULT="1 2 4 8 16"
+SYNC_FREQUENCIES_DEFAULT="32"
 SYNC_FREQUENCIES_STR=${SYNC_FREQUENCIES:-${SYNC_FREQUENCIES_DEFAULT}}
 read -r -a SYNC_FREQUENCIES <<< "${SYNC_FREQUENCIES_STR}"
 if (( ${#SYNC_FREQUENCIES[@]} == 0 )); then
 	echo "At least one sync frequency is required (received: '${SYNC_FREQUENCIES_STR}')." >&2
+	exit 1
+fi
+
+# Sparsity sweep values (0 = no sparsity, values up to 1 mean keep that fraction)
+# pseudo_grad_top_k in desloc config: 0 means disabled, 0.2 means keep top 20%, etc.
+SPARSITY_VALUES_DEFAULT="0 0.2 0.4 0.6 0.8"
+SPARSITY_VALUES_STR=${SPARSITY_VALUES:-${SPARSITY_VALUES_DEFAULT}}
+read -r -a SPARSITY_VALUES <<< "${SPARSITY_VALUES_STR}"
+if (( ${#SPARSITY_VALUES[@]} == 0 )); then
+	echo "At least one sparsity value is required (received: '${SPARSITY_VALUES_STR}')." >&2
 	exit 1
 fi
 GENERATED_CONFIG_DIR=${GENERATED_CONFIG_DIR:-"${SCRIPT_DIR}/generated_configs"}
@@ -233,6 +243,13 @@ hp_new_betas_env = os.environ.get("HP_SWITCH_NEW_BETAS", "").strip()
 hp_reset_momenta_env = os.environ.get("HP_SWITCH_RESET_MOMENTA", "").strip()
 lr_sched_switch_scale_env = os.environ.get("LR_SCHED_SWITCH_SCALE", "").strip()
 
+# Sparsity (pseudo_grad_top_k) override: 0 or empty means disabled
+pseudo_grad_top_k_env = os.environ.get("PSEUDO_GRAD_TOP_K", "").strip()
+if pseudo_grad_top_k_env and float(pseudo_grad_top_k_env) > 0:
+	pseudo_grad_top_k = float(pseudo_grad_top_k_env)
+else:
+	pseudo_grad_top_k = None
+
 data = tomllib.loads(base.read_text(encoding="utf-8"))
 optimizer = data.setdefault("optimizer", {})
 optimizer["lr"] = lr
@@ -269,9 +286,14 @@ else:
 # Apply explicit projector source when requested (and only for low-rank mode).
 if not is_full_rank and low_rank_projector_source is not None:
     desloc_cfg["low_rank_projector_source"] = low_rank_projector_source
-	# Only set/override galore_qhm_outside_projection when the env var was
-	# explicitly provided; otherwise preserve any value present in the base
-	# config (or default to False if not present).
+# Apply sparsity (pseudo_grad_top_k) if specified
+if pseudo_grad_top_k is not None:
+    desloc_cfg["pseudo_grad_top_k"] = pseudo_grad_top_k
+else:
+    desloc_cfg.pop("pseudo_grad_top_k", None)
+# Only set/override galore_qhm_outside_projection when the env var was
+# explicitly provided; otherwise preserve any value present in the base
+# config (or default to False if not present).
 if galore_qhm_outside is None:
 	optimizer.setdefault("galore_qhm_outside_projection", False)
 else:
@@ -382,7 +404,7 @@ echo "  Lighthouse port: ${effective_lighthouse_port}"
 echo "  Rendezvous ports: ${effective_rdzv_base} - $((effective_rdzv_base + NGPU - 1))"
 echo ""
 
-echo "Planned GaLoreGlobal chains (${CHAIN_LENGTH} runs split across ${CHAIN_COUNT} chain(s)):"
+echo "Planned GaLoreGlobal chains (${CHAIN_LENGTH} runs split across ${CHAIN_COUNT} chain(s), sweeping sparsity values ${SPARSITY_VALUES_STR}):"
 offset=0
 for ((chain_idx=0; chain_idx<CHAIN_COUNT; chain_idx++)); do
 	size=${CHAIN_SIZES[chain_idx]}
@@ -412,8 +434,11 @@ for ((idx=0; idx<CHAIN_LENGTH; idx++)); do
 	resume_run=${CHAIN_RESUME_RUNS[$idx]}
 	lr_tag=${lr/./p}
  	for sync_freq in "${SYNC_FREQUENCIES[@]}"; do
+ 	  for sparsity_val in "${SPARSITY_VALUES[@]}"; do
 		freq_tag=$(printf "%04d" "${sync_freq}")
-		run_suffix=$(printf "chain%02d-idx%02d-r%d-lr%s-sync%s" "${chain_label}" $((idx + 1)) "${rank}" "${lr_tag}" "${freq_tag}")
+		# Create sparsity tag: replace '.' with 'p' for filename safety
+		sparsity_tag="sp${sparsity_val/./p}"
+		run_suffix=$(printf "chain%02d-idx%02d-r%d-lr%s-sync%s-%s" "${chain_label}" $((idx + 1)) "${rank}" "${lr_tag}" "${freq_tag}" "${sparsity_tag}")
 		run_uuid="${RUN_PREFIX}-${TIMESTAMP}-${run_suffix}"
 		config_path="${GENERATED_CONFIG_DIR}/${run_uuid}.toml"
 		args_file="${ARGS_DIR}/${run_uuid}.args"
@@ -426,10 +451,11 @@ for ((idx=0; idx<CHAIN_LENGTH; idx++)); do
 		DESLOC_PROJECTOR_SOURCE="pseudo_grad" \
 		GALORE_QHM_OUTSIDE="true" \
 		PARAM_SYNC_EVERY="${sync_freq}" \
+		PSEUDO_GRAD_TOP_K="${sparsity_val}" \
 		run_python_config "${CONFIG_FILE}" "${config_path}" "${rank}" "${lr}" "${resume_run}"
 		write_args_file "${args_file}" "${TRAINING_ARGS[@]}"
 
-		job_name="galore_global_chain${chain_label}_r${rank}_lr${lr_tag}_sync${freq_tag}"
+		job_name="galore_global_chain${chain_label}_r${rank}_lr${lr_tag}_sync${freq_tag}_${sparsity_tag}"
 		sbatch_args=("${COMMON_SBATCH_ARGS[@]}" --job-name="${job_name}" --output="${SLURM_LOG_DIR}/slurm-${run_uuid}-%j.out")
 		previous_job_id="${PREVIOUS_JOB_IDS[$chain_idx]:-}"
 		if [[ -n "${previous_job_id}" ]]; then
@@ -595,6 +621,7 @@ EOF
 				echo "Failed to submit job for run ${run_uuid}" >&2
 				exit 1
 			fi
+		  done
 		done
 	done
 

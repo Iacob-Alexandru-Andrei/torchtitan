@@ -12,15 +12,35 @@ NGPU=${NGPU:-4}
 MIN_REPLICAS=${MIN_REPLICAS:-${NGPU}}
 QUORUM_TICK_MS=${QUORUM_TICK_MS:-100}
 LIGHTHOUSE_HOST=${LIGHTHOUSE_HOST:-"localhost"}
-LIGHTHOUSE_PORT=${LIGHTHOUSE_PORT:-29610}
+LIGHTHOUSE_PORT=${LIGHTHOUSE_PORT:-39610}
 S3_ENDPOINT_URL=${S3_ENDPOINT_URL:-"http://taranaki.cl.cam.ac.uk:9000"}
 if [[ -z "${PYTHONPATH:-}" ]]; then
   PYTHONPATH="${REPO_ROOT}"
 else
   PYTHONPATH="${REPO_ROOT}:${PYTHONPATH}"
 fi
-RUN_PREFIX=${RUN_PREFIX:-"icml2026-exp5-global-vs-ddp"}
+RUN_PREFIX=${RUN_PREFIX:-"icml2026-batch-worker-ablation-local"}
 TIMESTAMP=$(date +"%Y%m%d-%H%M%S")
+
+# Worker sweep configuration (number of workers and corresponding local batch sizes).
+# Each entry in WORKER_COUNTS corresponds to an entry in LOCAL_BATCH_SIZES.
+WORKER_COUNTS_STR=${WORKER_COUNTS:-"1 2 4 8"}
+LOCAL_BATCH_SIZES_STR=${LOCAL_BATCH_SIZES:-"16 16 16 8"}
+read -r -a WORKER_COUNTS <<< "${WORKER_COUNTS_STR}"
+read -r -a LOCAL_BATCH_SIZES <<< "${LOCAL_BATCH_SIZES_STR}"
+worker_spec_len=${#WORKER_COUNTS[@]}
+if (( worker_spec_len == 0 )); then
+	echo "At least one worker count is required." >&2
+	exit 1
+fi
+if (( ${#LOCAL_BATCH_SIZES[@]} != worker_spec_len )); then
+	echo "WORKER_COUNTS and LOCAL_BATCH_SIZES must have the same length." >&2
+	exit 1
+fi
+
+# Port management for parallel runs across different worker counts.
+PORT_OFFSET=${PORT_OFFSET:-0}
+PORT_BLOCK_SIZE=${PORT_BLOCK_SIZE:-100}
 
 # Chain definition (rank, lr, resume path per run).
 # declare -a CHAIN_RANKS=(8 16 32 64 128 256)
@@ -45,8 +65,12 @@ TIMESTAMP=$(date +"%Y%m%d-%H%M%S")
 # )
 declare -a CHAIN_RANKS=(8)
 declare -a CHAIN_LRS=(0.016)
+# Per-rank per-worker checkpoint mapping. Each entry is a space-separated list
+# of checkpoint run strings, one per worker count in WORKER_COUNTS order.
+# Example: for 4 worker counts (1, 2, 4, 8) and 1 rank, provide 4 checkpoints.
 declare -a CHAIN_RESUME_RUNS=( # THESE ARE THE EF WARMED UP RUNS!
-	'icml2026-check-test-proj-savec-d99a5257-r8-lr0p016-rottrue-20251221-174207-idx0'
+	# Rank 0: checkpoints for workers 1, 2, 4, 8 (space-separated)
+	'icml2026-bxwablation-1worker-a468e350-r8-lr0p016-rottrue-ss1p0-v0p94-qfalse-20260127-005750-idx0 icml2026-bxwablation-2worker-a468e350-r8-lr0p016-rottrue-ss1p0-v0p94-qfalse-20260127-091248-idx0 icml2026-check-test-proj-savec-d99a5257-r8-lr0p016-rottrue-20251221-174207-idx0 icml2026-bxwablation-8worker-a468e350-r8-lr0p016-rottrue-ss1p0-v0p94-qfalse-20260127-005616-idx0'
 )
 # Optional per-run hyperparameter-switch omega values (will be written to
 # HP_SWITCH_NEW_VS for the per-run config). Provide one entry per run.
@@ -83,11 +107,19 @@ HP_SWITCH_NEW_BETAS=${HP_SWITCH_NEW_BETAS:-"0.999,0.999"}
 HP_SWITCH_RESET_MOMENTA=${HP_SWITCH_RESET_MOMENTA:-"exp_avg,exp_avg_sq"}
 LOCAL_DESLOC_PROJECTOR_SOURCE=${LOCAL_DESLOC_PROJECTOR_SOURCE:-"pseudo_grad"}
 
-SYNC_FREQUENCIES_DEFAULT="1 2 4 8 16"
+SYNC_FREQUENCIES_DEFAULT="32"
 SYNC_FREQUENCIES_STR=${SYNC_FREQUENCIES:-${SYNC_FREQUENCIES_DEFAULT}}
 read -r -a SYNC_FREQUENCIES <<< "${SYNC_FREQUENCIES_STR}"
 if (( ${#SYNC_FREQUENCIES[@]} == 0 )); then
 	echo "At least one sync frequency is required (received: '${SYNC_FREQUENCIES_STR}')." >&2
+	exit 1
+fi
+
+# Comma-separated quantization sweep; default covers baseline and float8.
+QUANT_MODES_STR=${QUANT_MODES:-"baseline"}
+IFS=',' read -r -a QUANT_MODES <<< "${QUANT_MODES_STR}"
+if (( ${#QUANT_MODES[@]} == 0 )); then
+	echo "At least one quantization mode is required (received: '${QUANT_MODES_STR}')." >&2
 	exit 1
 fi
 
@@ -134,6 +166,8 @@ run_python_config() {
 	HP_SWITCH_NEW_VS="${HP_SWITCH_NEW_VS}" \
 	HP_SWITCH_NEW_BETAS="${HP_SWITCH_NEW_BETAS}" \
 	HP_SWITCH_RESET_MOMENTA="${HP_SWITCH_RESET_MOMENTA}" \
+	ENABLE_FLOAT8="${ENABLE_FLOAT8:-false}" \
+	FLOAT8_RECIPE_NAME="${FLOAT8_RECIPE_NAME:-}" \
 	uv run --no-sync python3 <<'PY'
 import os
 from pathlib import Path
@@ -187,6 +221,8 @@ hp_reset_momenta_env = os.environ.get("HP_SWITCH_RESET_MOMENTA", "").strip()
 lr_sched_switch_scale_env = os.environ.get("LR_SCHED_SWITCH_SCALE", "").strip()
 param_sync_override_env = os.environ.get("PARAM_SYNC_EVERY", "").strip()
 param_sync_override = int(param_sync_override_env) if param_sync_override_env else None
+enable_float8_env = os.environ.get("ENABLE_FLOAT8", "").strip()
+float8_recipe_env = os.environ.get("FLOAT8_RECIPE_NAME", "").strip()
 
 data = tomllib.loads(base.read_text(encoding="utf-8"))
 optimizer = data.setdefault("optimizer", {})
@@ -265,6 +301,23 @@ if hp_new_betas_env:
 if hp_reset_momenta_env:
 	hp["reset_momenta"] = [s.strip() for s in hp_reset_momenta_env.split(",") if s.strip()]
 
+# Optional float8 enablement sweep. Adds the converter and optional recipe override.
+enable_float8 = enable_float8_env.lower() in {"true", "1", "yes", "on", "fp8", "float8"}
+float8_recipe = float8_recipe_env if float8_recipe_env else None
+if enable_float8:
+	model_cfg = data.setdefault("model", {})
+	converters = model_cfg.get("converters", [])
+	if isinstance(converters, str):
+		converters = [entry.strip() for entry in converters.split(",") if entry.strip()]
+	if "quantize.linear.float8" not in converters:
+		converters.append("quantize.linear.float8")
+	model_cfg["converters"] = converters
+	float8_cfg = data.setdefault("quantize", {}).setdefault("linear", {}).setdefault("float8", {})
+	# On pre-SM89 hardware (e.g., A100), float8 must be emulated.
+	float8_cfg["emulate"] = True
+	if float8_recipe is not None:
+		float8_cfg["recipe_name"] = float8_recipe
+
 data.setdefault("training", {})["steps"] = train_steps
 s3_cfg = data.setdefault("s3_checkpoint", {})
 if resume_run:
@@ -332,15 +385,24 @@ COMMON_SBATCH_ARGS=(
 [[ -n "${SBATCH_QOS}" ]] && COMMON_SBATCH_ARGS+=(--qos="${SBATCH_QOS}")
 COMMON_SBATCH_ARGS+=("${SBATCH_EXTRA_ARRAY[@]}")
 
-total_planned=$(( CHAIN_LENGTH * ${#SYNC_FREQUENCIES[@]} ))
-echo "Planned GaLore chain (${total_planned} runs sweeping sync frequencies ${SYNC_FREQUENCIES_STR} with HP-switch/QHM-out enforced):"
+total_planned=$(( CHAIN_LENGTH * worker_spec_len * ${#SYNC_FREQUENCIES[@]} * ${#QUANT_MODES[@]} ))
+echo "Planned GaLore chain (${total_planned} runs sweeping workers ${WORKER_COUNTS_STR}, sync frequencies ${SYNC_FREQUENCIES_STR} and quant modes ${QUANT_MODES_STR} with HP-switch/QHM-out enforced):"
 for ((idx=0; idx<CHAIN_LENGTH; idx++)); do
 	rank=${CHAIN_RANKS[$idx]}
 	lr=${CHAIN_LRS[$idx]}
-	resume_run=${CHAIN_RESUME_RUNS[$idx]}
-	printf '  [%d] rank=%-4d lr=%-6s resume=%s\n' "${idx}" "${rank}" "${lr}" "${resume_run}"
-	for sync_freq in "${SYNC_FREQUENCIES[@]}"; do
-		printf '    - sync_every=%4d hp_switch=true qhm_outside=true\n' "${sync_freq}"
+	# Parse per-worker checkpoints for this rank
+	read -r -a rank_resume_runs <<< "${CHAIN_RESUME_RUNS[$idx]}"
+	printf '  [%d] rank=%-4d lr=%-6s\n' "${idx}" "${rank}" "${lr}"
+	for ((worker_idx=0; worker_idx<worker_spec_len; worker_idx++)); do
+		worker_count=${WORKER_COUNTS[$worker_idx]}
+		local_batch=${LOCAL_BATCH_SIZES[$worker_idx]}
+		resume_run=${rank_resume_runs[$worker_idx]:-${rank_resume_runs[0]}}
+		printf '    workers=%-2d batch=%-3d resume=%s\n' "${worker_count}" "${local_batch}" "${resume_run}"
+		for sync_freq in "${SYNC_FREQUENCIES[@]}"; do
+			for quant_mode in "${QUANT_MODES[@]}"; do
+				printf '      - sync_every=%4d quant=%s hp_switch=true qhm_outside=true\n' "${sync_freq}" "${quant_mode}"
+			done
+		done
 	done
 done
 echo ""
@@ -351,63 +413,81 @@ declare -a SUBMITTED_JOB_IDS=()
 for ((idx=0; idx<CHAIN_LENGTH; idx++)); do
 	rank=${CHAIN_RANKS[$idx]}
 	lr=${CHAIN_LRS[$idx]}
-	resume_run=${CHAIN_RESUME_RUNS[$idx]}
 	lr_tag=${lr/./p}
+	# Parse per-worker checkpoints for this rank
+	read -r -a rank_resume_runs <<< "${CHAIN_RESUME_RUNS[$idx]}"
 
-	for sync_freq in "${SYNC_FREQUENCIES[@]}"; do
-		freq_tag=$(printf "%04d" "${sync_freq}")
-		run_suffix=$(printf "idx%02d-r%d-lr%s-sync%s" $((idx + 1)) "${rank}" "${lr_tag}" "${freq_tag}")
-		run_uuid="${RUN_PREFIX}-${TIMESTAMP}-${run_suffix}"
-		config_path="${GENERATED_CONFIG_DIR}/${run_uuid}.toml"
-		args_file="${ARGS_DIR}/${run_uuid}.args"
-		log_dir="${LOG_ROOT}/${run_uuid}"
-		mkdir -p "${log_dir}"
+	for ((worker_idx=0; worker_idx<worker_spec_len; worker_idx++)); do
+		worker_count=${WORKER_COUNTS[$worker_idx]}
+		local_batch=${LOCAL_BATCH_SIZES[$worker_idx]}
+		# Select checkpoint for this worker count (fallback to first if not enough entries)
+		resume_run=${rank_resume_runs[$worker_idx]:-${rank_resume_runs[0]}}
+		# Compute per-worker-count port offset to avoid collisions when running in parallel
+		worker_port_offset=$(( PORT_OFFSET + worker_idx * PORT_BLOCK_SIZE ))
+		lighthouse_port=$(( LIGHTHOUSE_PORT + worker_port_offset ))
 
-		HP_SWITCH_ENABLED="true" \
-		HP_SWITCH_NEW_VS="${CHAIN_OMEGAS[$idx]:-}" \
-		LR_SCHED_SWITCH_SCALE="${CHAIN_SWITCH_SCALES[$idx]:-}" \
-		GALORE_QHM_OUTSIDE="false" \
-		DESLOC_PROJECTOR_SOURCE="${LOCAL_DESLOC_PROJECTOR_SOURCE}" \
-		PARAM_SYNC_EVERY="${sync_freq}" \
-		run_python_config "${CONFIG_FILE}" "${config_path}" "${rank}" "${lr}" "${resume_run}"
-		write_args_file "${args_file}" "${TRAINING_ARGS[@]}"
+		for sync_freq in "${SYNC_FREQUENCIES[@]}"; do
+			freq_tag=$(printf "%04d" "${sync_freq}")
+			for quant_mode in "${QUANT_MODES[@]}"; do
+				quant_tag=${quant_mode}
+				enable_fp8=false
+				if [[ "${quant_mode,,}" == "float8" || "${quant_mode,,}" == "fp8" ]]; then
+					enable_fp8=true
+				fi
+				run_suffix=$(printf "idx%02d-r%d-lr%s-w%d-b%d-sync%s-%s" $((idx + 1)) "${rank}" "${lr_tag}" "${worker_count}" "${local_batch}" "${freq_tag}" "${quant_tag}")
+				run_uuid="${RUN_PREFIX}-${TIMESTAMP}-${run_suffix}"
+				config_path="${GENERATED_CONFIG_DIR}/${run_uuid}.toml"
+				args_file="${ARGS_DIR}/${run_uuid}.args"
+				log_dir="${LOG_ROOT}/${run_uuid}"
+				mkdir -p "${log_dir}"
 
-		job_name="galore_chain_r${rank}_lr${lr_tag}_sync${freq_tag}"
-		sbatch_args=("${COMMON_SBATCH_ARGS[@]}" --job-name="${job_name}" --output="${SLURM_LOG_DIR}/slurm-${run_uuid}-%j.out")
-		if [[ -n "${previous_job_id}" ]]; then
-			sbatch_args+=(--dependency="afterok:${previous_job_id}")
-		fi
+				HP_SWITCH_ENABLED="true" \
+				HP_SWITCH_NEW_VS="${CHAIN_OMEGAS[$idx]:-}" \
+				LR_SCHED_SWITCH_SCALE="${CHAIN_SWITCH_SCALES[$idx]:-}" \
+				GALORE_QHM_OUTSIDE="false" \
+				DESLOC_PROJECTOR_SOURCE="${LOCAL_DESLOC_PROJECTOR_SOURCE}" \
+				PARAM_SYNC_EVERY="${sync_freq}" \
+				ENABLE_FLOAT8="${enable_fp8}" \
+				FLOAT8_RECIPE_NAME="${FLOAT8_RECIPE_NAME:-}" \
+				run_python_config "${CONFIG_FILE}" "${config_path}" "${rank}" "${lr}" "${resume_run}"
+				write_args_file "${args_file}" "${TRAINING_ARGS[@]}"
 
-			# Export run-specific values directly to the sbatch job so we can use a
-			# single-quoted heredoc without triggering premature shell expansion.
-			sbatch_export_arg="ALL"
-			for kv in \
-				"RUN_UUID=${run_uuid}" \
-				"CONFIG_PATH=${config_path}" \
-				"LOG_DIR=${log_dir}" \
-				"ARGS_FILE=${args_file}" \
-				"REPO_ROOT=${REPO_ROOT}" \
-				"TRAIN_MODULE=${TRAIN_MODULE}" \
-				"NGPU=${NGPU}" \
-				"MIN_REPLICAS=${MIN_REPLICAS}" \
-				"QUORUM_TICK_MS=${QUORUM_TICK_MS}" \
-				"LIGHTHOUSE_HOST=${LIGHTHOUSE_HOST}" \
-				"LIGHTHOUSE_PORT=${LIGHTHOUSE_PORT}" \
-				"S3_ENDPOINT_URL=${S3_ENDPOINT_URL}" \
-				"PYTHONPATH=${PYTHONPATH}"; do
-				sbatch_export_arg+="${kv:+,${kv}}"
-			done
-			sbatch_args+=("--export=${sbatch_export_arg}")
+				job_name="galore_chain_r${rank}_lr${lr_tag}_w${worker_count}_b${local_batch}_sync${freq_tag}_${quant_tag}"
+				sbatch_args=("${COMMON_SBATCH_ARGS[@]}" --job-name="${job_name}" --output="${SLURM_LOG_DIR}/slurm-${run_uuid}-%j.out")
+				if [[ -n "${previous_job_id}" ]]; then
+					sbatch_args+=(--dependency="afterok:${previous_job_id}")
+				fi
 
-			sbatch_output=$(sbatch "${sbatch_args[@]}" <<'EOF'
+				# Export run-specific values directly to the sbatch job so we can use a
+				# single-quoted heredoc without triggering premature shell expansion.
+				sbatch_export_arg="ALL"
+				for kv in \
+					"RUN_UUID=${run_uuid}" \
+					"CONFIG_PATH=${config_path}" \
+					"LOG_DIR=${log_dir}" \
+					"ARGS_FILE=${args_file}" \
+					"REPO_ROOT=${REPO_ROOT}" \
+					"TRAIN_MODULE=${TRAIN_MODULE}" \
+					"NGPU=${worker_count}" \
+					"MIN_REPLICAS=${worker_count}" \
+					"QUORUM_TICK_MS=${QUORUM_TICK_MS}" \
+					"LIGHTHOUSE_HOST=${LIGHTHOUSE_HOST}" \
+					"LIGHTHOUSE_PORT=${lighthouse_port}" \
+					"S3_ENDPOINT_URL=${S3_ENDPOINT_URL}" \
+					"PYTHONPATH=${PYTHONPATH}"; do
+					sbatch_export_arg+="${kv:+,${kv}}"
+				done
+				sbatch_args+=("--export=${sbatch_export_arg}")
+
+				sbatch_output=$(sbatch "${sbatch_args[@]}" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
 
-	LOG_DIR="${LOG_DIR:-}"
-	if [[ -z "${LOG_DIR}" ]]; then
-		echo "LOG_DIR environment variable is not set" >&2
-		exit 1
-	fi
+LOG_DIR="${LOG_DIR:-}"
+if [[ -z "${LOG_DIR}" ]]; then
+	echo "LOG_DIR environment variable is not set" >&2
+	exit 1
+fi
 
 export REPO_ROOT
 export S3_ENDPOINT_URL
@@ -522,16 +602,18 @@ exit ${replica_status}
 EOF
 )
 
-		if [[ "${sbatch_output}" =~ Submitted\ batch\ job\ ([0-9]+) ]]; then
-			job_id=${BASH_REMATCH[1]}
-			previous_job_id=${job_id}
-			SUBMITTED_JOB_IDS+=(${job_id})
-			echo "Submitted job ${job_id} (${job_name})"
-		else
-			echo "Failed to submit job for run ${run_uuid}" >&2
-			exit 1
-		fi
+				if [[ "${sbatch_output}" =~ Submitted\ batch\ job\ ([0-9]+) ]]; then
+					job_id=${BASH_REMATCH[1]}
+					previous_job_id=${job_id}
+					SUBMITTED_JOB_IDS+=(${job_id})
+					echo "Submitted job ${job_id} (${job_name})"
+				else
+					echo "Failed to submit job for run ${run_uuid}" >&2
+					exit 1
+				fi
+			done
 		done
+	done
 done
 
 echo ""

@@ -120,6 +120,14 @@ class DesLocConfig:
     low_rank_projector_source: Literal["pseudo_grad", "full_rank_grad"] = "pseudo_grad"
     """Select which tensor to aggregate for DES-LOC GaLore projector refreshes."""
 
+    pseudo_grad_top_k: float | None = None
+    """Fraction (0 < value < 1) of parameters to retain via top-k sparsity before averaging.
+
+    When set, each worker masks its model parameters to the top-k largest magnitudes
+    before the allreduce. This simulates worker-side sparsity. When ``None`` or outside
+    the valid range, no sparsity is applied.
+    """
+
     streaming: Suppress[DesLocStreamingConfig | dict[str, Any] | None] = None
     """Optional configuration for streaming DES-LOC."""
 
